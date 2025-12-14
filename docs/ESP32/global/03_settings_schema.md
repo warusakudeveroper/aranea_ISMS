@@ -1,0 +1,2 @@
+# Settings Schema (SettingManager)
+(TODO)
