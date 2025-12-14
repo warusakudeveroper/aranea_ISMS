@@ -16,8 +16,8 @@
 | 項目 | 値 |
 |------|-----|
 | productType | "001" |
-| productCode | "0001" |
-| lacisId例 | 3001AABBCCDDEEFF0001 |
+| productCode | "0096" |
+| lacisId例 | 3001AABBCCDDEEFF0096 |
 | ファームウェアバージョン | 1.0.0 |
 | パーティション | min_spiffs |
 | DeepSleep間隔 | 4分（240秒） |
