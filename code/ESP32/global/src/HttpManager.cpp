@@ -27,6 +27,8 @@ bool HttpManager::begin(SettingManager* settings, int port) {
   server_->on("/wifi", HTTP_POST, [this]() { handleWifiPost(); });
   server_->on("/tenant", HTTP_GET, [this]() { handleTenant(); });
   server_->on("/tenant", HTTP_POST, [this]() { handleTenantPost(); });
+  server_->on("/is05", HTTP_GET, [this]() { handleIs05(); });
+  server_->on("/is05", HTTP_POST, [this]() { handleIs05Post(); });
   server_->on("/reboot", HTTP_POST, [this]() { handleReboot(); });
   server_->on("/factory-reset", HTTP_POST, [this]() { handleFactoryReset(); });
   server_->onNotFound([this]() { handleNotFound(); });
@@ -106,6 +108,9 @@ void HttpManager::handleSettingsPost() {
   }
   if (server_->hasArg("relay_sec")) {
     settings_->setString("relay_sec", server_->arg("relay_sec"));
+  }
+  if (server_->hasArg("cloud_url")) {
+    settings_->setString("cloud_url", server_->arg("cloud_url"));
   }
   if (server_->hasArg("reboot_hour")) {
     settings_->setInt("reboot_hour", server_->arg("reboot_hour").toInt());
@@ -190,6 +195,54 @@ void HttpManager::handleTenantPost() {
   }
 
   server_->sendHeader("Location", "/tenant?saved=1");
+  server_->send(302, "text/plain", "OK");
+}
+
+void HttpManager::handleIs05() {
+  if (!checkAuth()) {
+    server_->sendHeader("Location", "/");
+    server_->send(302, "text/plain", "Unauthorized");
+    return;
+  }
+  server_->send(200, "text/html", generateIs05Page());
+}
+
+void HttpManager::handleIs05Post() {
+  if (!checkAuth()) {
+    server_->send(401, "text/plain", "Unauthorized");
+    return;
+  }
+
+  // is05チャンネル設定を保存（ch1〜ch8）
+  for (int i = 1; i <= 8; i++) {
+    String pinKey = "is05_ch" + String(i) + "_pin";
+    String nameKey = "is05_ch" + String(i) + "_name";
+    String meaningKey = "is05_ch" + String(i) + "_meaning";
+    String didKey = "is05_ch" + String(i) + "_did";
+
+    if (server_->hasArg(pinKey)) {
+      settings_->setInt(pinKey, server_->arg(pinKey).toInt());
+    }
+    if (server_->hasArg(nameKey)) {
+      settings_->setString(nameKey, server_->arg(nameKey));
+    }
+    if (server_->hasArg(meaningKey)) {
+      settings_->setString(meaningKey, server_->arg(meaningKey));
+    }
+    if (server_->hasArg(didKey)) {
+      // 8桁ゼロ埋め
+      String did = server_->arg(didKey);
+      while (did.length() < 8) {
+        did = "0" + did;
+      }
+      if (did.length() > 8) {
+        did = did.substring(did.length() - 8);
+      }
+      settings_->setString(didKey, did);
+    }
+  }
+
+  server_->sendHeader("Location", "/is05?saved=1");
   server_->send(302, "text/plain", "OK");
 }
 
@@ -335,6 +388,7 @@ button:hover{background:#ff6b6b}
 <a href='/settings'>Settings</a>
 <a href='/wifi'>WiFi</a>
 <a href='/tenant'>Tenant</a>
+<a href='/is05'>is05</a>
 <a href='/status'>API</a>
 </div>
 <div class='card' style='text-align:center'>
@@ -350,6 +404,7 @@ button:hover{background:#ff6b6b}
 String HttpManager::generateSettingsPage() {
   String relayPri = settings_->getString("relay_pri", "");
   String relaySec = settings_->getString("relay_sec", "");
+  String cloudUrl = settings_->getString("cloud_url", "");
   int rebootHour = settings_->getInt("reboot_hour", -1);
   int wifiRetryLimit = settings_->getInt("wifi_retry_limit", 30);
   String saved = server_->arg("saved") == "1" ? "<p style='color:#4caf50'>Settings saved!</p>" : "";
@@ -393,6 +448,11 @@ a{color:#e94560}
 <input type='text' name='relay_sec' value=')";
   html += relaySec;
   html += R"('>
+<label>Cloud URL (optional)</label>
+<input type='text' name='cloud_url' value=')";
+  html += cloudUrl;
+  html += R"('>
+<p class='hint'>Send to cloud endpoint in addition to local relays</p>
 </div>
 <div class='card'>
 <h3>Scheduled Reboot</h3>
@@ -601,6 +661,91 @@ a{color:#e94560}
 <a href='/'>Home</a>
 <a href='/settings'>Settings</a>
 <a href='/wifi'>WiFi</a>
+</div>
+</div>
+</body></html>)";
+  return html;
+}
+
+String HttpManager::generateIs05Page() {
+  String saved = server_->arg("saved") == "1" ? "<p style='color:#4caf50'>is05 settings saved!</p>" : "";
+
+  String html = R"(<!DOCTYPE html>
+<html><head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>is05 Channel Settings</title>
+<style>
+body{font-family:sans-serif;background:#1a1a2e;color:#fff;margin:0;padding:20px}
+.container{max-width:800px;margin:0 auto}
+.card{background:#16213e;padding:20px;border-radius:10px;margin:10px 0}
+h1,h3{color:#e94560}
+h1{text-align:center}
+table{width:100%;border-collapse:collapse;margin:15px 0}
+th,td{padding:10px;text-align:left;border-bottom:1px solid #333}
+th{color:#888;font-weight:normal}
+input,select{padding:8px;border:none;border-radius:5px;font-size:14px;background:#fff;color:#000}
+input[type='number']{width:60px}
+input[type='text']{width:100px}
+select{width:80px}
+button{padding:10px 30px;background:#e94560;color:#fff;border:none;border-radius:5px;cursor:pointer;margin-top:20px}
+button:hover{background:#ff6b6b}
+a{color:#e94560}
+.nav{text-align:center;margin:20px 0}
+.nav a{margin:0 10px}
+.hint{font-size:12px;color:#666;margin-top:5px}
+</style>
+</head><body>
+<div class='container'>
+<h1>is05 Channel Settings</h1>
+)";
+  html += saved;
+  html += R"(
+<form method='POST' action='/is05'>
+<div class='card'>
+<h3>8ch Reed Switch Configuration</h3>
+<p class='hint'>Configure GPIO pins, names, meaning (open/close when active), and device IDs for each channel.</p>
+<table>
+<tr><th>CH</th><th>GPIO</th><th>Name</th><th>Meaning</th><th>DID (8 digits)</th></tr>
+)";
+
+  // チャンネル設定フォーム（ch1〜ch8）
+  for (int i = 1; i <= 8; i++) {
+    String pinKey = "is05_ch" + String(i) + "_pin";
+    String nameKey = "is05_ch" + String(i) + "_name";
+    String meaningKey = "is05_ch" + String(i) + "_meaning";
+    String didKey = "is05_ch" + String(i) + "_did";
+
+    int pin = settings_->getInt(pinKey, 0);
+    String name = settings_->getString(nameKey, "ch" + String(i));
+    String meaning = settings_->getString(meaningKey, "open");
+    String did = settings_->getString(didKey, "00000000");
+
+    html += "<tr>";
+    html += "<td><strong>" + String(i) + "</strong></td>";
+    html += "<td><input type='number' name='" + pinKey + "' value='" + String(pin) + "' min='0' max='39'></td>";
+    html += "<td><input type='text' name='" + nameKey + "' value='" + name + "' maxlength='16'></td>";
+    html += "<td><select name='" + meaningKey + "'>";
+    html += "<option value='open'" + String(meaning == "open" ? " selected" : "") + ">open</option>";
+    html += "<option value='close'" + String(meaning == "close" ? " selected" : "") + ">close</option>";
+    html += "</select></td>";
+    html += "<td><input type='text' name='" + didKey + "' value='" + did + "' maxlength='8' pattern='[0-9]{1,8}'></td>";
+    html += "</tr>";
+  }
+
+  html += R"(
+</table>
+</div>
+<div style='text-align:center'>
+<button type='submit'>Save Channel Settings</button>
+</div>
+</form>
+
+<div class='nav'>
+<a href='/'>Home</a>
+<a href='/settings'>Settings</a>
+<a href='/wifi'>WiFi</a>
+<a href='/tenant'>Tenant</a>
 </div>
 </div>
 </body></html>)";

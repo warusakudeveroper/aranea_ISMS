@@ -3,10 +3,8 @@
 bool DisplayManager::begin() {
   if (initialized_) return true;
 
-  // GPIO5をHIGHに設定（I2Cレベルシフタ/イネーブル制御用）
-  pinMode(5, OUTPUT);
-  digitalWrite(5, HIGH);
-  delay(10);
+  // 注意: GPIO5のI2C電源制御はis01/is02で個別に行う
+  // is05ではGPIO5をリードスイッチ入力に使用するため、ここでは設定しない
 
   // I2C初期化（デフォルトピン: SDA=21, SCL=22）
   Wire.begin();

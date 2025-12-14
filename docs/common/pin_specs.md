@@ -132,46 +132,67 @@ GPIO12 はブートストラップピンのため、起動時に HIGH になっ�
 
 ## 5. is05 ピンアサイン（8ch開閉センサー）
 
-### 5.1 ピン配置
+### 5.1 リードスイッチ入力ピン（固定）
+
+| チャンネル | GPIO | 機能 | 方向 | 備考 |
+|-----------|------|------|------|------|
+| ch1 | GPIO19 | REED_CH1 | INPUT_PULLUP | ReedSW-1 |
+| ch2 | GPIO18 | REED_CH2 | INPUT_PULLUP | ReedSW-2 |
+| ch3 | GPIO5 | REED_CH3 | INPUT_PULLUP | ReedSW-3 (※ブートストラップ注意) |
+| ch4 | GPIO17 | REED_CH4 | INPUT_PULLUP | ReedSW-4 |
+| ch5 | GPIO16 | REED_CH5 | INPUT_PULLUP | ReedSW-5 |
+| ch6 | GPIO4 | REED_CH6 | INPUT_PULLUP | ReedSW-6 (※ブートストラップ注意) |
+| ch7 | GPIO2 | REED_CH7 | INPUT_PULLUP | ReedSW-7 (※ブートストラップ注意) |
+| ch8 | GPIO15 | REED_CH8 | INPUT_PULLUP | ReedSW-8 (※ブートストラップ注意) |
+
+### 5.2 その他のピン
 
 | GPIO | 機能 | 方向 | 備考 |
 |------|------|------|------|
-| GPIO13 | REED_CH0 | INPUT | リードスイッチ0 |
-| GPIO14 | REED_CH1 | INPUT | リードスイッチ1 |
-| GPIO15 | REED_CH2 | INPUT | リードスイッチ2 (※ブートストラップ注意) |
-| GPIO16 | REED_CH3 | INPUT | リードスイッチ3 |
-| GPIO17 | REED_CH4 | INPUT | リードスイッチ4 |
-| GPIO18 | REED_CH5 | INPUT | リードスイッチ5 |
-| GPIO19 | REED_CH6 | INPUT | リードスイッチ6 |
-| GPIO23 | REED_CH7 | INPUT | リードスイッチ7 |
+| GPIO25 | SW_WIFI | INPUT_PULLUP | WiFi再接続ボタン（3秒長押し） |
+| GPIO26 | SW_RESET | INPUT_PULLUP | ファクトリーリセットボタン（3秒長押し） |
 | GPIO21 | I2C SDA | I/O | OLED |
 | GPIO22 | I2C SCL | OUTPUT | OLED |
+| GPIO5 | MOSFET_EN | OUTPUT | I2C電源制御（ch3と共用注意） |
 
-### 5.2 入力設定
+### 5.3 ブートストラップピンの注意
+
+GPIO2/4/5/15 はブートストラップに関わるため、以下に注意:
+- **GPIO2**: 起動時にLOWだとダウンロードモード。プルダウンで使用可能。
+- **GPIO4**: 比較的自由に使用可能。
+- **GPIO5**: 起動時にHIGHでSPI Flash起動。MOSFET制御と共用。
+- **GPIO15**: 起動時にLOWだとサイレントブート。プルアップ推奨。
+
+入力としてはオープンコレクタのオプトカプラ出力を想定（INPUT_PULLUP）。
+起動後にピンモードを設定するため、基本的に問題なし。
+
+### 5.4 入力設定（activeLow）
 
 ```cpp
-// プルアップ/プルダウンは配線に合わせて統一
-#define INPUT_MODE INPUT_PULLUP  // または INPUT_PULLDOWN
+// オプトカプラのオープンコレクタ出力を想定
+// LOW = アクティブ（ON）、HIGH = 非アクティブ（OFF）
+
+static const int chPins[8] = {19, 18, 5, 17, 16, 4, 2, 15};
 
 void setup() {
   for (int i = 0; i < 8; i++) {
-    pinMode(reedPins[i], INPUT_MODE);
+    pinMode(chPins[i], INPUT_PULLUP);
   }
 }
 ```
 
-### 5.3 チャタリング対策
+### 5.5 チャタリング対策
 
 ```cpp
 // サンプル周期: 20ms
-// 安定判定: 3連続一致
+// 安定判定: 3連続一致で確定
 
-#define DEBOUNCE_COUNT 3
+#define STABLE_COUNT 3
 #define SAMPLE_INTERVAL_MS 20
 
-uint8_t stableCount[8] = {0};
-uint8_t lastState[8] = {0};
-uint8_t currentState[8] = {0};
+int rawState[8];       // 生の読み取り値
+int stableState[8];    // 確定状態
+int stableCount_[8];   // 安定カウンタ
 ```
 
 ---

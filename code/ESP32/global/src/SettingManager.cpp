@@ -17,6 +17,13 @@ static const char* DEFAULT_TENANT_EMAIL = "info+ichiyama@neki.tech";
 static const char* DEFAULT_TENANT_CIC = "263238";
 static const char* DEFAULT_TENANT_PASS = "dJBU^TpG%j$5";
 
+// デフォルト値 - is05チャンネル設定
+// GPIO: ch1=19, ch2=18, ch3=5, ch4=17, ch5=16, ch6=4, ch7=2, ch8=15
+static const int DEFAULT_IS05_PINS[8] = {19, 18, 5, 17, 16, 4, 2, 15};
+static const char* DEFAULT_IS05_NAMES[8] = {"ch1", "ch2", "ch3", "ch4", "ch5", "ch6", "ch7", "ch8"};
+static const char* DEFAULT_IS05_MEANING = "open";
+static const char* DEFAULT_IS05_DID = "00000000";
+
 bool SettingManager::begin() {
   if (initialized_) return true;
 
@@ -70,6 +77,27 @@ void SettingManager::initDefaults() {
   if (!hasKey("tenant_pass")) {
     setString("tenant_pass", DEFAULT_TENANT_PASS);
     Serial.println("[SETTING] Set default tenant_pass");
+  }
+
+  // is05チャンネル設定（ch1〜ch8）
+  for (int i = 1; i <= 8; i++) {
+    String pinKey = "is05_ch" + String(i) + "_pin";
+    String nameKey = "is05_ch" + String(i) + "_name";
+    String meaningKey = "is05_ch" + String(i) + "_meaning";
+    String didKey = "is05_ch" + String(i) + "_did";
+
+    if (!hasKey(pinKey)) {
+      setInt(pinKey, DEFAULT_IS05_PINS[i - 1]);
+    }
+    if (!hasKey(nameKey)) {
+      setString(nameKey, DEFAULT_IS05_NAMES[i - 1]);
+    }
+    if (!hasKey(meaningKey)) {
+      setString(meaningKey, DEFAULT_IS05_MEANING);
+    }
+    if (!hasKey(didKey)) {
+      setString(didKey, DEFAULT_IS05_DID);
+    }
   }
 }
 

@@ -82,6 +82,8 @@ private:
   void handleWifiPost();
   void handleTenant();
   void handleTenantPost();
+  void handleIs05();
+  void handleIs05Post();
   void handleReboot();
   void handleFactoryReset();
   void handleNotFound();
@@ -95,5 +97,6 @@ private:
   String generateSettingsPage();
   String generateWifiPage();
   String generateTenantPage();
+  String generateIs05Page();
   String generateStatusJson();
 };
