@@ -56,6 +56,29 @@ public:
    */
   void display();
 
+  /**
+   * is02メイン画面表示
+   * @param line1 1行目（IP or 接続状態）- 小さいフォント
+   * @param cic CICコード（大きいフォントで2行使用）
+   * @param sensorLine センサー情報（温度/湿度 or エラー）
+   * @param showLink 送信中リンクマーク表示
+   */
+  void showIs02Main(const String& line1, const String& cic,
+                    const String& sensorLine, bool showLink = false);
+
+  /**
+   * 接続中ティッカー表示
+   * @param ssid 接続試行中のSSID
+   * @param frame アニメーションフレーム（0-3）
+   */
+  void showConnecting(const String& ssid, int frame);
+
+  /**
+   * 登録処理中表示
+   * @param status ステータスメッセージ
+   */
+  void showRegistering(const String& status);
+
 private:
   Adafruit_SSD1306* oled_ = nullptr;
   bool initialized_ = false;

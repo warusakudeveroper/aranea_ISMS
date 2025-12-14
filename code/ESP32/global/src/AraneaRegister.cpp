@@ -64,6 +64,7 @@ AraneaRegisterResult AraneaRegister::registerDevice(
 
   Serial.println("[ARANEA] Registering device...");
   Serial.printf("[ARANEA] URL: %s\n", gateUrl_.c_str());
+  Serial.printf("[ARANEA] Payload: %s\n", jsonPayload.c_str());
 
   // HTTP POST
   HTTPClient http;
@@ -84,6 +85,7 @@ AraneaRegisterResult AraneaRegister::registerDevice(
   http.end();
 
   Serial.printf("[ARANEA] Response code: %d\n", httpCode);
+  Serial.printf("[ARANEA] Response body: %s\n", response.c_str());
 
   // レスポンス解析
   StaticJsonDocument<1024> resDoc;

@@ -2,12 +2,15 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+class SettingManager;  // 前方宣言
+
 /**
  * WiFiManager
  *
  * cluster1〜cluster6 に順次接続試行
  * - 各SSIDにタイムアウト付きで接続試行
  * - 全滅したら最初から繰り返す
+ * - リトライ上限で自動再起動
  */
 class WiFiManager {
 public:
@@ -16,6 +19,13 @@ public:
    * @return 接続成功時true
    */
   bool connectDefault();
+
+  /**
+   * NVS設定からWiFi情報を読み取って接続試行
+   * @param settings 設定マネージャ参照
+   * @return 接続成功時true
+   */
+  bool connectWithSettings(SettingManager* settings);
 
   /**
    * 指定のSSID/PASSに接続試行
@@ -49,8 +59,16 @@ public:
    */
   bool isConnected();
 
+  /**
+   * 失敗カウントを取得
+   */
+  int getFailCount() const { return failCount_; }
+
 private:
   static const int SSID_COUNT = 6;
   static const char* SSID_LIST[SSID_COUNT];
   static const char* WIFI_PASS;
+
+  int failCount_ = 0;
+  int retryLimit_ = 30;  // デフォルト30回で再起動
 };

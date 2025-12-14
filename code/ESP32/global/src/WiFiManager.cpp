@@ -1,4 +1,5 @@
 #include "WiFiManager.h"
+#include "SettingManager.h"
 
 // デフォルトSSIDリスト
 const char* WiFiManager::SSID_LIST[SSID_COUNT] = {
@@ -25,6 +26,69 @@ bool WiFiManager::connectDefault() {
       }
 
       Serial.printf("[WIFI] Failed to connect to %s\n", SSID_LIST[i]);
+    }
+
+    Serial.println("[WIFI] All SSIDs failed, retrying...");
+    delay(1000);
+  }
+
+  return false;  // ここには来ない
+}
+
+bool WiFiManager::connectWithSettings(SettingManager* settings) {
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+
+  // 設定からリトライ上限を取得
+  retryLimit_ = settings ? settings->getInt("wifi_retry_limit", 30) : 30;
+  failCount_ = 0;
+
+  // NVSからカスタムSSID/パスワードを読み取る配列
+  String ssidList[SSID_COUNT];
+  String passList[SSID_COUNT];
+
+  for (int i = 0; i < SSID_COUNT; i++) {
+    String ssidKey = "wifi_ssid" + String(i + 1);
+    String passKey = "wifi_pass" + String(i + 1);
+
+    if (settings) {
+      // NVSに設定があればそれを使用、なければデフォルト
+      ssidList[i] = settings->getString(ssidKey.c_str(), SSID_LIST[i]);
+      passList[i] = settings->getString(passKey.c_str(), WIFI_PASS);
+    } else {
+      ssidList[i] = SSID_LIST[i];
+      passList[i] = WIFI_PASS;
+    }
+  }
+
+  Serial.printf("[WIFI] Retry limit: %d\n", retryLimit_);
+
+  // 接続試行ループ
+  while (true) {
+    for (int i = 0; i < SSID_COUNT; i++) {
+      // 空のSSIDはスキップ
+      if (ssidList[i].length() == 0) continue;
+
+      Serial.printf("[WIFI] Trying %s... (fail count: %d/%d)\n",
+                    ssidList[i].c_str(), failCount_, retryLimit_);
+
+      if (connect(ssidList[i].c_str(), passList[i].c_str(), 15000)) {
+        Serial.printf("[WIFI] Connected to %s\n", ssidList[i].c_str());
+        Serial.printf("[WIFI] IP: %s\n", getIP().c_str());
+        failCount_ = 0;  // 接続成功でリセット
+        return true;
+      }
+
+      failCount_++;
+      Serial.printf("[WIFI] Failed to connect to %s (fail count: %d)\n",
+                    ssidList[i].c_str(), failCount_);
+
+      // リトライ上限チェック
+      if (failCount_ >= retryLimit_) {
+        Serial.printf("[WIFI] Retry limit reached (%d). Rebooting...\n", retryLimit_);
+        delay(1000);
+        ESP.restart();
+      }
     }
 
     Serial.println("[WIFI] All SSIDs failed, retrying...");
