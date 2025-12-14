@@ -22,6 +22,19 @@
 static const char* PRODUCT_TYPE = "002";
 static const char* PRODUCT_CODE = "0096";
 
+// テナント情報（市山水産株式会社）
+static const char* TID = "T2025120608261484221";
+static const char* DEVICE_TYPE = "ISMS_ar-is02";
+
+// テナントPrimary認証情報
+static const char* TENANT_PRIMARY_LACISID = "12767487939173857894";
+static const char* TENANT_PRIMARY_EMAIL = "info+ichiyama@neki.tech";
+static const char* TENANT_PRIMARY_CIC = "263238";
+static const char* TENANT_PRIMARY_PASS = "dJBU^TpG%j$5";
+
+// araneaDeviceGate URL（本番環境）
+static const char* ARANEA_GATE_URL = "https://asia-northeast1-mones-new.cloudfunctions.net/araneaDeviceGate";
+
 // 送信レート制限（同一センサーに対して最短間隔）
 static const unsigned long SEND_INTERVAL_MS = 3000;
 
@@ -55,6 +68,7 @@ DisplayManager display;
 WiFiManager wifi;
 NtpManager ntp;
 LacisIDGenerator lacisGen;
+AraneaRegister araneaReg;
 HttpRelayClient* httpClient = nullptr;
 
 // 自機情報
@@ -265,14 +279,37 @@ void setup() {
   myLacisId = lacisGen.generate(PRODUCT_TYPE, PRODUCT_CODE);
   Serial.printf("[LACIS] My lacisId: %s\n", myLacisId.c_str());
 
-  // 6. HttpRelayClient
+  // 6. AraneaRegister（クラウド登録）
+  display.showBoot("Cloud reg...");
+  araneaReg.begin(ARANEA_GATE_URL);
+  TenantPrimaryAuth tenantAuth;
+  tenantAuth.lacisId = TENANT_PRIMARY_LACISID;
+  tenantAuth.userId = TENANT_PRIMARY_EMAIL;
+  tenantAuth.pass = TENANT_PRIMARY_PASS;
+  tenantAuth.cic = TENANT_PRIMARY_CIC;
+  araneaReg.setTenantPrimary(tenantAuth);
+
+  // MACアドレス取得（lacisIdから抽出: 位置4-16）
+  String macAddress = myLacisId.substring(4, 16);
+
+  AraneaRegisterResult regResult = araneaReg.registerDevice(
+    TID, DEVICE_TYPE, myLacisId, macAddress, PRODUCT_TYPE, PRODUCT_CODE
+  );
+
+  if (regResult.ok) {
+    Serial.printf("[ARANEA] CIC: %s\n", regResult.cic_code.c_str());
+  } else {
+    Serial.printf("[ARANEA] Registration failed: %s (continuing anyway)\n", regResult.error.c_str());
+  }
+
+  // 7. HttpRelayClient
   String primaryUrl = settings.getString("relay_pri", "http://192.168.96.201:8080/api/ingest");
   String secondaryUrl = settings.getString("relay_sec", "http://192.168.96.202:8080/api/ingest");
   httpClient = new HttpRelayClient(primaryUrl, secondaryUrl);
   Serial.printf("[HTTP] Primary: %s\n", primaryUrl.c_str());
   Serial.printf("[HTTP] Secondary: %s\n", secondaryUrl.c_str());
 
-  // 7. BLEスキャン開始 (NimBLE 2.x API)
+  // 8. BLEスキャン開始 (NimBLE 2.x API)
   display.showBoot("BLE init...");
   NimBLEDevice::init("is02");
   pBLEScan = NimBLEDevice::getScan();

@@ -17,12 +17,14 @@
 #include "BleIsmsParser.h"
 #include "HttpRelayClient.h"
 
+// クラウド連携モジュール
+#include "AraneaRegister.h"
+
 // 将来の拡張用（現在は未実装）
 // #include "Operator.h"
 // #include "OtaManager.h"
 // #include "SPIFFSManager.h"
 // #include "HttpManager.h"
-// #include "AraneaRegister.h"
 
 namespace aranea {
   // バージョン情報
