@@ -20,15 +20,16 @@
 // クラウド連携モジュール
 #include "AraneaRegister.h"
 
-// 将来の拡張用（現在は未実装）
-// #include "Operator.h"
-// #include "OtaManager.h"
-// #include "SPIFFSManager.h"
-// #include "HttpManager.h"
+// 管理モジュール
+#include "Operator.h"
+#include "OtaManager.h"
+#include "SPIFFSManager.h"
+#include "HttpManager.h"
+#include "RebootScheduler.h"
 
 namespace aranea {
   // バージョン情報
-  constexpr const char* VERSION = "0.1.0";
+  constexpr const char* VERSION = "1.0.0";
 
   // productCode（固定）
   constexpr const char* PRODUCT_CODE = "0096";

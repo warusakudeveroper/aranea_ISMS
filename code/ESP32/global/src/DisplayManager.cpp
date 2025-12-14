@@ -127,3 +127,72 @@ void DisplayManager::display() {
   if (!initialized_) return;
   oled_->display();
 }
+
+void DisplayManager::showIs02Main(const String& line1, const String& cic,
+                                   const String& sensorLine, bool showLink) {
+  if (!initialized_) return;
+
+  oled_->clearDisplay();
+
+  // Line 1: IP + RSSI (小さいフォント, Y=0)
+  oled_->setTextSize(1);
+  oled_->setCursor(0, 0);
+  oled_->print(line1);
+
+  // リンクマーク（送信中）右上に表示
+  if (showLink) {
+    oled_->setCursor(116, 0);
+    oled_->print(">>");
+  }
+
+  // Line 2-3: CIC (大きいフォント size=3, 中央寄せ, Y=12)
+  oled_->setTextSize(3);
+  // CICを中央に配置（6文字 * 18px = 108px, 余白 = (128-108)/2 = 10）
+  int cicWidth = cic.length() * 18;
+  int cicX = (SCREEN_WIDTH - cicWidth) / 2;
+  if (cicX < 0) cicX = 0;
+  oled_->setCursor(cicX, 14);
+  oled_->print(cic);
+
+  // Line 4: Sensor info (大きめフォント size=2, Y=44)
+  oled_->setTextSize(2);
+  oled_->setCursor(0, 48);
+  oled_->print(sensorLine);
+
+  oled_->display();
+}
+
+void DisplayManager::showConnecting(const String& ssid, int frame) {
+  if (!initialized_) return;
+
+  oled_->clearDisplay();
+
+  // アニメーションドット
+  String dots = "";
+  for (int i = 0; i <= (frame % 4); i++) dots += ".";
+
+  oled_->setTextSize(1);
+  oled_->setCursor(0, 0);
+  oled_->print("connecting");
+  oled_->print(dots);
+
+  oled_->setCursor(0, 12);
+  oled_->print(ssid);
+
+  oled_->display();
+}
+
+void DisplayManager::showRegistering(const String& status) {
+  if (!initialized_) return;
+
+  oled_->clearDisplay();
+
+  oled_->setTextSize(1);
+  oled_->setCursor(0, 0);
+  oled_->println("Registering...");
+
+  oled_->setCursor(0, 16);
+  oled_->println(status);
+
+  oled_->display();
+}
