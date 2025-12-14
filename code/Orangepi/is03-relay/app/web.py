@@ -63,21 +63,30 @@ async def get_events(limit: int = 200):
     return events
 
 async def handle_is02_post(payload: dict):
+    # Extract observedAt from either top-level or meta.observedAt
+    observed_at = payload.get('observedAt') or (payload.get('meta', {}).get('observedAt') if payload.get('meta') else None) or datetime.utcnow().isoformat() + 'Z'
+
+    sensor = payload.get('sensor', {})
+    state = payload.get('state', {})
+    raw = payload.get('raw', {})
+    gateway = payload.get('gateway', {})
+
     event = {
-        'seenAt': payload.get('observedAt', datetime.utcnow().isoformat() + 'Z'),
+        'seenAt': observed_at,
         'src': 'is02',
-        'mac': payload.get('sensor', {}).get('mac') if payload.get('sensor') else None,
+        'mac': sensor.get('mac'),
         'rssi': None,
         'adv_hex': None,
-        'manufacturer_hex': payload.get('raw', {}).get('mfgHex') if payload.get('raw') else None,
-        'lacisId': payload.get('sensor', {}).get('lacisId') if payload.get('sensor') else None,
-        'productType': payload.get('sensor', {}).get('productType') if payload.get('sensor') else None,
-        'productCode': payload.get('sensor', {}).get('productCode') if payload.get('sensor') else None,
-        'gatewayLacisId': payload.get('gateway', {}).get('lacisId') if payload.get('gateway') else None,
-        'gatewayIp': payload.get('gateway', {}).get('ip') if payload.get('gateway') else None,
-        'temperatureC': payload.get('state', {}).get('temperatureC') if payload.get('state') else None,
-        'humidityPct': payload.get('state', {}).get('humidityPct') if payload.get('state') else None,
-        'batteryPct': payload.get('state', {}).get('batteryPct') if payload.get('state') else None
+        'manufacturer_hex': raw.get('mfgHex'),
+        'lacisId': sensor.get('lacisId'),
+        'productType': sensor.get('productType'),
+        'productCode': sensor.get('productCode'),
+        'gatewayLacisId': gateway.get('lacisId'),
+        'gatewayIp': gateway.get('ip'),
+        # Support both naming conventions: temperatureC/temperature, humidityPct/humidity, batteryPct/battery
+        'temperatureC': state.get('temperatureC') or state.get('temperature'),
+        'humidityPct': state.get('humidityPct') or state.get('humidity'),
+        'batteryPct': state.get('batteryPct') or state.get('battery')
     }
     db.enqueue_event(event)
     await ws_manager.broadcast(event)
