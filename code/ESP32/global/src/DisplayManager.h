@@ -79,6 +79,15 @@ public:
    */
   void showRegistering(const String& status);
 
+  /**
+   * is01メイン画面表示（電池式センサー用）
+   * @param cic CICコード（大きいフォント）
+   * @param sensorLine センサー情報（温度/湿度）
+   * @param infoLine 追加情報（ブート回数等）
+   */
+  void showIs01Main(const String& cic, const String& sensorLine,
+                    const String& infoLine);
+
 private:
   Adafruit_SSD1306* oled_ = nullptr;
   bool initialized_ = false;
