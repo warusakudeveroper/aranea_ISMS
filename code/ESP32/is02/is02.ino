@@ -164,10 +164,10 @@ String buildJson(const SensorEvent& evt) {
 }
 
 // ========================================
-// BLEスキャンコールバック
+// BLEスキャンコールバック (NimBLE 2.x API)
 // ========================================
-class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
-  void onResult(NimBLEAdvertisedDevice* advertisedDevice) override {
+class ScanCallbacks : public NimBLEScanCallbacks {
+  void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
     // Manufacturer Data 取得
     if (!advertisedDevice->haveManufacturerData()) return;
 
@@ -272,15 +272,15 @@ void setup() {
   Serial.printf("[HTTP] Primary: %s\n", primaryUrl.c_str());
   Serial.printf("[HTTP] Secondary: %s\n", secondaryUrl.c_str());
 
-  // 7. BLEスキャン開始
+  // 7. BLEスキャン開始 (NimBLE 2.x API)
   display.showBoot("BLE init...");
   NimBLEDevice::init("is02");
   pBLEScan = NimBLEDevice::getScan();
-  pBLEScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), false);
+  pBLEScan->setScanCallbacks(new ScanCallbacks(), false);
   pBLEScan->setActiveScan(true);
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);
-  pBLEScan->start(0, nullptr, false);  // 継続スキャン
+  pBLEScan->start(0, true);  // 継続スキャン (duration=0, isContinue=true)
   Serial.println("[BLE] Scan started");
 
   // 初期表示

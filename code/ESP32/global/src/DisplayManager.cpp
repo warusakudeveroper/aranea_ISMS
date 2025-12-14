@@ -3,13 +3,45 @@
 bool DisplayManager::begin() {
   if (initialized_) return true;
 
+  // GPIO5をHIGHに設定（I2Cレベルシフタ/イネーブル制御用）
+  pinMode(5, OUTPUT);
+  digitalWrite(5, HIGH);
+  delay(10);
+
   // I2C初期化（デフォルトピン: SDA=21, SCL=22）
   Wire.begin();
+  Wire.setClock(100000);  // 100kHz（標準モード）
+
+  // I2Cデバイス存在確認（複数アドレス試行 + 読み取りテスト）
+  bool found = false;
+  uint8_t addrs[] = {0x3C, 0x3D};
+  uint8_t foundAddr = 0;
+
+  for (uint8_t addr : addrs) {
+    Wire.beginTransmission(addr);
+    uint8_t error = Wire.endTransmission();
+    if (error == 0) {
+      // さらに1バイト読み取りテスト（偽ACK防止）
+      uint8_t bytesRead = Wire.requestFrom(addr, (uint8_t)1);
+      if (bytesRead == 1) {
+        found = true;
+        foundAddr = addr;
+        Serial.printf("[DISPLAY] Found OLED at 0x%02X\n", addr);
+        break;
+      }
+    }
+  }
+
+  if (!found) {
+    Serial.println("[DISPLAY] No OLED found, display disabled");
+    Wire.end();  // I2Cを終了してリソース解放
+    return false;
+  }
 
   // OLED初期化
   oled_ = new Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-  if (!oled_->begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+  if (!oled_->begin(SSD1306_SWITCHCAPVCC, foundAddr)) {
     Serial.println("[DISPLAY] SSD1306 init failed");
     delete oled_;
     oled_ = nullptr;

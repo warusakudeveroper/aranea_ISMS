@@ -1,5 +1,5 @@
 #include "LacisIDGenerator.h"
-#include <esp_wifi.h>
+#include <esp_mac.h>
 
 String LacisIDGenerator::generate(const String& productType, const String& productCode) {
   String mac12hex = getStaMac12Hex();
