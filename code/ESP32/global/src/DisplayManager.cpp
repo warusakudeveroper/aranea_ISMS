@@ -196,3 +196,30 @@ void DisplayManager::showRegistering(const String& status) {
 
   oled_->display();
 }
+
+void DisplayManager::showIs01Main(const String& cic, const String& sensorLine,
+                                   const String& infoLine) {
+  if (!initialized_) return;
+
+  oled_->clearDisplay();
+
+  // Line 1: CIC (大きいフォント size=3, 中央寄せ, Y=0)
+  oled_->setTextSize(3);
+  int cicWidth = cic.length() * 18;
+  int cicX = (SCREEN_WIDTH - cicWidth) / 2;
+  if (cicX < 0) cicX = 0;
+  oled_->setCursor(cicX, 0);
+  oled_->print(cic);
+
+  // Line 2: Sensor info (大きめフォント size=2, Y=28)
+  oled_->setTextSize(2);
+  oled_->setCursor(0, 30);
+  oled_->print(sensorLine);
+
+  // Line 3: Info line (小さいフォント size=1, Y=52)
+  oled_->setTextSize(1);
+  oled_->setCursor(0, 54);
+  oled_->print(infoLine);
+
+  oled_->display();
+}
