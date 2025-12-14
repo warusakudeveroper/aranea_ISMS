@@ -668,7 +668,7 @@ a{color:#e94560}
 }
 
 String HttpManager::generateIs05Page() {
-  String saved = server_->arg("saved") == "1" ? "<p style='color:#4caf50'>is05 settings saved!</p>" : "";
+  String saved = server_->arg("saved") == "1" ? "<p style='color:#4caf50'>Settings saved! <strong>Restart device</strong> to apply changes.</p>" : "";
 
   String html = R"(<!DOCTYPE html>
 <html><head>

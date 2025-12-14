@@ -10,7 +10,8 @@ bool DisplayManager::begin() {
   Wire.begin();
   Wire.setClock(100000);  // 100kHz（標準モード）
 
-  // I2Cデバイス存在確認（複数アドレス試行 + 読み取りテスト）
+  // I2Cデバイス存在確認（ACKのみで判定、読み取りテストは行わない）
+  // 注意: SSD1306は書き込み専用に近く、requestFromが失敗する個体がある
   bool found = false;
   uint8_t addrs[] = {0x3C, 0x3D};
   uint8_t foundAddr = 0;
@@ -19,14 +20,11 @@ bool DisplayManager::begin() {
     Wire.beginTransmission(addr);
     uint8_t error = Wire.endTransmission();
     if (error == 0) {
-      // さらに1バイト読み取りテスト（偽ACK防止）
-      uint8_t bytesRead = Wire.requestFrom(addr, (uint8_t)1);
-      if (bytesRead == 1) {
-        found = true;
-        foundAddr = addr;
-        Serial.printf("[DISPLAY] Found OLED at 0x%02X\n", addr);
-        break;
-      }
+      // ACK応答があればOLED存在と判定
+      found = true;
+      foundAddr = addr;
+      Serial.printf("[DISPLAY] Found OLED at 0x%02X\n", addr);
+      break;
     }
   }
 

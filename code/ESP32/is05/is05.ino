@@ -199,14 +199,13 @@ String buildEventJson() {
   json += "\"productCode\":\"" + String(PRODUCT_CODE) + "\"";
   json += "},";
 
-  // state
+  // state（mobes2.0 stateSchema準拠: ch1-8 + lastUpdatedAt + rssi/ipaddr/SSID）
+  // 注意: name/did/meaningはconfigとしてNVSに保持、stateには含めない
   json += "\"state\":{";
   for (int i = 0; i < NUM_CHANNELS; i++) {
     String chKey = "ch" + String(i + 1);
     json += "\"" + chKey + "\":\"" + getStateString(i) + "\",";
     json += "\"" + chKey + "_lastUpdatedAt\":\"" + lastUpdatedAt[i] + "\",";
-    json += "\"" + chKey + "_did\":\"" + chDids[i] + "\",";
-    json += "\"" + chKey + "_name\":\"" + chNames[i] + "\",";
   }
   json += "\"rssi\":\"" + String(rssi) + "\",";
   json += "\"ipaddr\":\"" + ip + "\",";
