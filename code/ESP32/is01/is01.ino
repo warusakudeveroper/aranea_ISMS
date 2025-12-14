@@ -25,6 +25,7 @@
 #include <esp_sleep.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_mac.h>
 
 // AraneaGlobal共通モジュール
 #include "SettingManager.h"
@@ -37,7 +38,7 @@
 // 定数
 // ========================================
 static const char* PRODUCT_TYPE = "001";
-static const char* PRODUCT_CODE = "0001";
+static const char* PRODUCT_CODE = "0096";
 static const char* DEVICE_TYPE = "ISMS_ar-is01";
 static const char* FIRMWARE_VERSION = "1.0.0";
 
@@ -162,10 +163,12 @@ void sendBleAdvertise() {
   payload[3] = atoi(PRODUCT_TYPE);  // productType
   payload[4] = 0x0F;  // flags: HAS_TEMP | HAS_HUM | HAS_BATT | HAS_BOOTCOUNT
 
-  // STA MAC（6バイト）
+  // STA MAC（6バイト）- efuseから直接読み取り（WiFi初期化不要）
   uint8_t mac[6];
-  WiFi.macAddress(mac);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   memcpy(&payload[5], mac, 6);
+  Serial.printf("[BLE] STA MAC: %02X%02X%02X%02X%02X%02X\n",
+    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
   // bootCount（4バイト、little endian）
   payload[11] = bootCount & 0xFF;
