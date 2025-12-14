@@ -24,6 +24,12 @@ static const char* DEFAULT_IS05_NAMES[8] = {"ch1", "ch2", "ch3", "ch4", "ch5", "
 static const char* DEFAULT_IS05_MEANING = "open";
 static const char* DEFAULT_IS05_DID = "00000000";
 
+// デフォルト値 - is04設定
+static const char* DEFAULT_IS04_DIDS = "00001234,00005678";
+static const int DEFAULT_IS04_INVERT = 0;
+static const int DEFAULT_IS04_PULSE_MS = 3000;
+static const int DEFAULT_IS04_INTERLOCK_MS = 200;
+
 bool SettingManager::begin() {
   if (initialized_) return true;
 
@@ -98,6 +104,24 @@ void SettingManager::initDefaults() {
     if (!hasKey(didKey)) {
       setString(didKey, DEFAULT_IS05_DID);
     }
+  }
+
+  // is04設定
+  if (!hasKey("is04_dids")) {
+    setString("is04_dids", DEFAULT_IS04_DIDS);
+    Serial.println("[SETTING] Set default is04_dids");
+  }
+  if (!hasKey("is04_invert")) {
+    setInt("is04_invert", DEFAULT_IS04_INVERT);
+    Serial.println("[SETTING] Set default is04_invert");
+  }
+  if (!hasKey("is04_pulse_ms")) {
+    setInt("is04_pulse_ms", DEFAULT_IS04_PULSE_MS);
+    Serial.println("[SETTING] Set default is04_pulse_ms");
+  }
+  if (!hasKey("is04_interlock_ms")) {
+    setInt("is04_interlock_ms", DEFAULT_IS04_INTERLOCK_MS);
+    Serial.println("[SETTING] Set default is04_interlock_ms");
   }
 }
 

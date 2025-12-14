@@ -29,6 +29,8 @@ bool HttpManager::begin(SettingManager* settings, int port) {
   server_->on("/tenant", HTTP_POST, [this]() { handleTenantPost(); });
   server_->on("/is05", HTTP_GET, [this]() { handleIs05(); });
   server_->on("/is05", HTTP_POST, [this]() { handleIs05Post(); });
+  server_->on("/is04", HTTP_GET, [this]() { handleIs04(); });
+  server_->on("/is04", HTTP_POST, [this]() { handleIs04Post(); });
   server_->on("/reboot", HTTP_POST, [this]() { handleReboot(); });
   server_->on("/factory-reset", HTTP_POST, [this]() { handleFactoryReset(); });
   server_->onNotFound([this]() { handleNotFound(); });
@@ -246,6 +248,52 @@ void HttpManager::handleIs05Post() {
   server_->send(302, "text/plain", "OK");
 }
 
+void HttpManager::handleIs04() {
+  if (!checkAuth()) {
+    server_->sendHeader("Location", "/");
+    server_->send(302, "text/plain", "Unauthorized");
+    return;
+  }
+  server_->send(200, "text/html", generateIs04Page());
+}
+
+void HttpManager::handleIs04Post() {
+  if (!checkAuth()) {
+    server_->send(401, "text/plain", "Unauthorized");
+    return;
+  }
+
+  // is04設定を保存
+  if (server_->hasArg("is04_dids")) {
+    settings_->setString("is04_dids", server_->arg("is04_dids"));
+  }
+  if (server_->hasArg("is04_invert")) {
+    settings_->setInt("is04_invert", 1);
+  } else {
+    settings_->setInt("is04_invert", 0);
+  }
+  if (server_->hasArg("is04_pulse_ms")) {
+    int pulseMs = server_->arg("is04_pulse_ms").toInt();
+    // クランプ: 10〜10000
+    if (pulseMs < 10) pulseMs = 10;
+    if (pulseMs > 10000) pulseMs = 10000;
+    settings_->setInt("is04_pulse_ms", pulseMs);
+  }
+  if (server_->hasArg("is04_interlock_ms")) {
+    int interlockMs = server_->arg("is04_interlock_ms").toInt();
+    // クランプ: 0〜2000
+    if (interlockMs < 0) interlockMs = 0;
+    if (interlockMs > 2000) interlockMs = 2000;
+    settings_->setInt("is04_interlock_ms", interlockMs);
+  }
+  if (server_->hasArg("mqtt_ws_url")) {
+    settings_->setString("mqtt_ws_url", server_->arg("mqtt_ws_url"));
+  }
+
+  server_->sendHeader("Location", "/is04?saved=1");
+  server_->send(302, "text/plain", "OK");
+}
+
 void HttpManager::handleReboot() {
   if (!checkAuth()) {
     server_->send(401, "text/plain", "Unauthorized");
@@ -388,6 +436,7 @@ button:hover{background:#ff6b6b}
 <a href='/settings'>Settings</a>
 <a href='/wifi'>WiFi</a>
 <a href='/tenant'>Tenant</a>
+<a href='/is04'>is04</a>
 <a href='/is05'>is05</a>
 <a href='/status'>API</a>
 </div>
@@ -738,6 +787,113 @@ a{color:#e94560}
 </div>
 <div style='text-align:center'>
 <button type='submit'>Save Channel Settings</button>
+</div>
+</form>
+
+<div class='nav'>
+<a href='/'>Home</a>
+<a href='/settings'>Settings</a>
+<a href='/wifi'>WiFi</a>
+<a href='/tenant'>Tenant</a>
+</div>
+</div>
+</body></html>)";
+  return html;
+}
+
+String HttpManager::generateIs04Page() {
+  String dids = settings_->getString("is04_dids", "00001234,00005678");
+  int invert = settings_->getInt("is04_invert", 0);
+  int pulseMs = settings_->getInt("is04_pulse_ms", 3000);
+  int interlockMs = settings_->getInt("is04_interlock_ms", 200);
+  String mqttWsUrl = settings_->getString("mqtt_ws_url", "");
+  String saved = server_->arg("saved") == "1" ? "<p style='color:#4caf50'>Settings saved! <strong>Restart device</strong> to apply changes.</p>" : "";
+
+  String html = R"(<!DOCTYPE html>
+<html><head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>is04 Controller Settings</title>
+<style>
+body{font-family:sans-serif;background:#1a1a2e;color:#fff;margin:0;padding:20px}
+.container{max-width:600px;margin:0 auto}
+.card{background:#16213e;padding:20px;border-radius:10px;margin:10px 0}
+h1,h3{color:#e94560}
+h1{text-align:center}
+label{display:block;margin:15px 0 5px;color:#888}
+input,select{width:100%;padding:10px;border:none;border-radius:5px;box-sizing:border-box;font-size:14px}
+input[type='checkbox']{width:auto;margin-right:10px}
+button{padding:10px 30px;background:#e94560;color:#fff;border:none;border-radius:5px;cursor:pointer;margin-top:20px}
+button:hover{background:#ff6b6b}
+a{color:#e94560}
+.nav{text-align:center;margin:20px 0}
+.nav a{margin:0 10px}
+.hint{font-size:12px;color:#666;margin-top:5px}
+.pin-info{background:#0f3460;padding:15px;border-radius:5px;margin:15px 0}
+.pin-info div{margin:5px 0}
+</style>
+</head><body>
+<div class='container'>
+<h1>is04 Controller Settings</h1>
+)";
+  html += saved;
+  html += R"(
+<form method='POST' action='/is04'>
+<div class='card'>
+<h3>Pin Configuration (Fixed)</h3>
+<div class='pin-info'>
+<div><strong>Physical Input 1:</strong> GPIO8</div>
+<div><strong>Physical Input 2:</strong> GPIO18</div>
+<div><strong>Trigger Output 1:</strong> GPIO12</div>
+<div><strong>Trigger Output 2:</strong> GPIO14</div>
+</div>
+<p class='hint'>GPIO8 → GPIO12, GPIO18 → GPIO14 (default)</p>
+<p class='hint'>When inverted: GPIO8 → GPIO14, GPIO18 → GPIO12</p>
+</div>
+
+<div class='card'>
+<h3>Device Settings</h3>
+<label>Device IDs (CSV, 8-digit zero-padded)</label>
+<input type='text' name='is04_dids' value=')";
+  html += dids;
+  html += R"(' placeholder='00001234,00005678'>
+<p class='hint'>Comma-separated list of 8-digit device IDs</p>
+
+<label style='display:flex;align-items:center'>
+<input type='checkbox' name='is04_invert' value='1')";
+  if (invert) html += " checked";
+  html += R"(>
+Invert Input/Output Mapping
+</label>
+<p class='hint'>When checked: open→GPIO14, close→GPIO12</p>
+</div>
+
+<div class='card'>
+<h3>Pulse Settings</h3>
+<label>Pulse Duration (ms)</label>
+<input type='number' name='is04_pulse_ms' value=')";
+  html += String(pulseMs);
+  html += R"(' min='10' max='10000'>
+<p class='hint'>Range: 10-10000ms (default: 3000ms)</p>
+
+<label>Interlock Time (ms)</label>
+<input type='number' name='is04_interlock_ms' value=')";
+  html += String(interlockMs);
+  html += R"(' min='0' max='2000'>
+<p class='hint'>Minimum time between pulses (default: 200ms)</p>
+</div>
+
+<div class='card'>
+<h3>MQTT WebSocket</h3>
+<label>MQTT WebSocket URL</label>
+<input type='text' name='mqtt_ws_url' value=')";
+  html += mqttWsUrl;
+  html += R"(' placeholder='wss://mqtt-bridge-xxx.run.app/'>
+<p class='hint'>Cloud Run MQTT bridge URL for remote control</p>
+</div>
+
+<div style='text-align:center'>
+<button type='submit'>Save Settings</button>
 </div>
 </form>
 
