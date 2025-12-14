@@ -842,13 +842,13 @@ a{color:#e94560}
 <div class='card'>
 <h3>Pin Configuration (Fixed)</h3>
 <div class='pin-info'>
-<div><strong>Physical Input 1:</strong> GPIO8</div>
+<div><strong>Physical Input 1:</strong> GPIO5</div>
 <div><strong>Physical Input 2:</strong> GPIO18</div>
 <div><strong>Trigger Output 1:</strong> GPIO12</div>
 <div><strong>Trigger Output 2:</strong> GPIO14</div>
 </div>
-<p class='hint'>GPIO8 → GPIO12, GPIO18 → GPIO14 (default)</p>
-<p class='hint'>When inverted: GPIO8 → GPIO14, GPIO18 → GPIO12</p>
+<p class='hint'>GPIO5 → GPIO12, GPIO18 → GPIO14 (default)</p>
+<p class='hint'>When inverted: GPIO5 → GPIO14, GPIO18 → GPIO12</p>
 </div>
 
 <div class='card'>

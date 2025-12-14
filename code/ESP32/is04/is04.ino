@@ -44,7 +44,7 @@ static const char* FIRMWARE_VERSION = "1.0.0";
 // ピン定義（正本）
 // ========================================
 // 物理入力（手動アンラッチ）
-static const int PHYS_IN1 = 8;   // GPIO8
+static const int PHYS_IN1 = 5;   // GPIO5
 static const int PHYS_IN2 = 18;  // GPIO18
 
 // トリガー出力（接点出力）
