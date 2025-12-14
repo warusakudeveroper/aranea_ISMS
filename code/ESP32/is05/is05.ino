@@ -78,6 +78,7 @@ String cloudUrl;
 String myLacisId;
 String myMac;
 String myCic;
+String myTid;  // テナントID（クラウド送信用）
 
 // チャンネル設定
 int chPins[NUM_CHANNELS];
@@ -230,6 +231,41 @@ String buildEventJson() {
 }
 
 // ========================================
+// クラウド送信用JSON生成（deviceStateReport用）
+// ========================================
+String buildCloudJson() {
+  String observedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
+
+  String json = "{";
+
+  // auth（認証情報）
+  json += "\"auth\":{";
+  json += "\"tid\":\"" + myTid + "\",";
+  json += "\"lacisId\":\"" + myLacisId + "\",";
+  json += "\"cic\":\"" + myCic + "\"";
+  json += "},";
+
+  // report
+  json += "\"report\":{";
+  json += "\"lacisId\":\"" + myLacisId + "\",";
+  json += "\"type\":\"" + String(DEVICE_TYPE) + "\",";
+  json += "\"observedAt\":\"" + observedAt + "\",";
+
+  // state
+  json += "\"state\":{";
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    String chKey = "ch" + String(i + 1);
+    json += "\"" + chKey + "\":\"" + getStateString(i) + "\"";
+    if (i < NUM_CHANNELS - 1) json += ",";
+  }
+  json += "}";  // state終わり
+
+  json += "}";  // report終わり
+  json += "}";
+  return json;
+}
+
+// ========================================
 // HTTP POST送信（単一URL）
 // ========================================
 bool postToUrl(const String& url, const String& json) {
@@ -264,24 +300,27 @@ void sendToRelay() {
   }
   lastSendTime = now;
 
-  String json = buildEventJson();
   Serial.println("[SEND] Sending to all endpoints...");
 
   int successCount = 0;
 
+  // ローカル送信用JSON
+  String localJson = buildEventJson();
+
   // ローカルリレー Primary（常に送信）
   if (relayPriUrl.length() > 0) {
-    if (postToUrl(relayPriUrl, json)) successCount++;
+    if (postToUrl(relayPriUrl, localJson)) successCount++;
   }
 
   // ローカルリレー Secondary（冗長性のため常に送信）
   if (relaySecUrl.length() > 0) {
-    if (postToUrl(relaySecUrl, json)) successCount++;
+    if (postToUrl(relaySecUrl, localJson)) successCount++;
   }
 
-  // クラウド送信
-  if (cloudUrl.length() > 0) {
-    if (postToUrl(cloudUrl, json)) successCount++;
+  // クラウド送信（別フォーマット: auth + report構造）
+  if (cloudUrl.length() > 0 && myTid.length() > 0 && myCic.length() > 0) {
+    String cloudJson = buildCloudJson();
+    if (postToUrl(cloudUrl, cloudJson)) successCount++;
   }
 
   // 結果表示
@@ -455,6 +494,16 @@ void updateDisplay() {
 void setup() {
   Serial.begin(115200);
   delay(100);
+
+  // ストラッピングピン安定化（GPIO2, GPIO15はブート時にHIGHだと問題を起こす）
+  // 一時的にLOW出力にして安定させてから、後でINPUT_PULLUPに変更する
+  pinMode(2, OUTPUT);
+  digitalWrite(2, LOW);
+  pinMode(15, OUTPUT);
+  digitalWrite(15, LOW);
+  delay(10);
+  Serial.println("[BOOT] Strapping pins stabilized (GPIO2, GPIO15 -> LOW)");
+
   Serial.println("\n[BOOT] is05 starting...");
 
   // 0. Operator初期化
@@ -505,9 +554,9 @@ void setup() {
   tenantAuth.cic = settings.getString("tenant_cic", "");
   araneaReg.setTenantPrimary(tenantAuth);
 
-  String tid = settings.getString("tid", "");
+  myTid = settings.getString("tid", "");
   AraneaRegisterResult regResult = araneaReg.registerDevice(
-    tid, DEVICE_TYPE, myLacisId, myMac, PRODUCT_TYPE, PRODUCT_CODE
+    myTid, DEVICE_TYPE, myLacisId, myMac, PRODUCT_TYPE, PRODUCT_CODE
   );
 
   if (regResult.ok) {
