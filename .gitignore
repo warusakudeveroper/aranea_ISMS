@@ -1,0 +1,17 @@
+# Arduino/ESP32 build artifacts
+.build/
+build/
+builds/
+
+# macOS
+.DS_Store
+*.swp
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
+Temp/
