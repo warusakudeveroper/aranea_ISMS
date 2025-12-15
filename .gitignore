@@ -1,0 +1,15 @@
+# Arduino/ESP32 build cache (not binary artifacts)
+.build/
+
+# macOS
+.DS_Store
+*.swp
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
+Temp/

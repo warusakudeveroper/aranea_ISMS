@@ -115,8 +115,10 @@ void setup() {
 
 | GPIO | 機能 | 方向 | 備考 |
 |------|------|------|------|
-| GPIO12 | RELAY_CH1 | OUTPUT | リレー1制御 (※ブートストラップ注意) |
-| GPIO14 | RELAY_CH2 | OUTPUT | リレー2制御 |
+| GPIO5 | PHYS_IN1 | INPUT_PULLDOWN | 物理入力1 (Trigger1_Physical) |
+| GPIO18 | PHYS_IN2 | INPUT_PULLDOWN | 物理入力2 (Trigger2_Physical) |
+| GPIO12 | TRG_OUT1 | OUTPUT | トリガー出力1 (※ブートストラップ注意) |
+| GPIO14 | TRG_OUT2 | OUTPUT | トリガー出力2 |
 | GPIO21 | I2C SDA | I/O | OLED |
 | GPIO22 | I2C SCL | OUTPUT | OLED |
 | GPIO25 | SW1 | INPUT_PULLUP | WiFi再接続ボタン |
