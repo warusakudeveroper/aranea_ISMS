@@ -12,6 +12,7 @@ struct AraneaRegisterResult {
   bool ok = false;
   String cic_code;       // 6桁CIC
   String stateEndpoint;  // deviceStateReport URL
+  String mqttEndpoint;   // MQTT WebSocket URL (双方向デバイスのみ)
   String error;
 };
 
@@ -69,6 +70,17 @@ public:
    */
   String getSavedStateEndpoint();
 
+  /**
+   * 保存されたmqttEndpointを取得（双方向デバイスのみ）
+   */
+  String getSavedMqttEndpoint();
+
+  /**
+   * 登録データをクリア（再登録を強制）
+   * NVSから cic, stateEndpoint, mqttEndpoint, registered フラグを削除
+   */
+  void clearRegistration();
+
 private:
   String gateUrl_;
   TenantPrimaryAuth tenantAuth_;
@@ -77,5 +89,6 @@ private:
   static const char* NVS_NAMESPACE;
   static const char* KEY_CIC;
   static const char* KEY_STATE_ENDPOINT;
+  static const char* KEY_MQTT_ENDPOINT;
   static const char* KEY_REGISTERED;
 };

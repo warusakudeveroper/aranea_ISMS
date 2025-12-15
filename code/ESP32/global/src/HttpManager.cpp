@@ -267,11 +267,26 @@ void HttpManager::handleIs04Post() {
   if (server_->hasArg("is04_dids")) {
     settings_->setString("is04_dids", server_->arg("is04_dids"));
   }
-  if (server_->hasArg("is04_invert")) {
-    settings_->setInt("is04_invert", 1);
-  } else {
-    settings_->setInt("is04_invert", 0);
+
+  // Output Mapping: OPEN出力ピン (12 or 14)
+  if (server_->hasArg("is04_open_pin")) {
+    int openPin = server_->arg("is04_open_pin").toInt();
+    if (openPin != 12 && openPin != 14) openPin = 12;  // デフォルト
+    settings_->setInt("is04_open_pin", openPin);
   }
+
+  // Physical Input Mapping: 各物理入力のアクション
+  if (server_->hasArg("is04_phys1_action")) {
+    String action = server_->arg("is04_phys1_action");
+    if (action != "open" && action != "close") action = "open";  // デフォルト
+    settings_->setString("is04_phys1_action", action);
+  }
+  if (server_->hasArg("is04_phys2_action")) {
+    String action = server_->arg("is04_phys2_action");
+    if (action != "open" && action != "close") action = "close";  // デフォルト
+    settings_->setString("is04_phys2_action", action);
+  }
+
   if (server_->hasArg("is04_pulse_ms")) {
     int pulseMs = server_->arg("is04_pulse_ms").toInt();
     // クランプ: 10〜10000
@@ -803,7 +818,9 @@ a{color:#e94560}
 
 String HttpManager::generateIs04Page() {
   String dids = settings_->getString("is04_dids", "00001234,00005678");
-  int invert = settings_->getInt("is04_invert", 0);
+  int openPin = settings_->getInt("is04_open_pin", 12);  // 12 or 14
+  String phys1Action = settings_->getString("is04_phys1_action", "open");  // "open" or "close"
+  String phys2Action = settings_->getString("is04_phys2_action", "close"); // "open" or "close"
   int pulseMs = settings_->getInt("is04_pulse_ms", 3000);
   int interlockMs = settings_->getInt("is04_interlock_ms", 200);
   String mqttWsUrl = settings_->getString("mqtt_ws_url", "");
@@ -822,7 +839,6 @@ h1,h3{color:#e94560}
 h1{text-align:center}
 label{display:block;margin:15px 0 5px;color:#888}
 input,select{width:100%;padding:10px;border:none;border-radius:5px;box-sizing:border-box;font-size:14px}
-input[type='checkbox']{width:auto;margin-right:10px}
 button{padding:10px 30px;background:#e94560;color:#fff;border:none;border-radius:5px;cursor:pointer;margin-top:20px}
 button:hover{background:#ff6b6b}
 a{color:#e94560}
@@ -831,6 +847,8 @@ a{color:#e94560}
 .hint{font-size:12px;color:#666;margin-top:5px}
 .pin-info{background:#0f3460;padding:15px;border-radius:5px;margin:15px 0}
 .pin-info div{margin:5px 0}
+.mapping-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:center;margin:10px 0}
+.mapping-label{color:#888;font-size:14px}
 </style>
 </head><body>
 <div class='container'>
@@ -840,15 +858,62 @@ a{color:#e94560}
   html += R"(
 <form method='POST' action='/is04'>
 <div class='card'>
-<h3>Pin Configuration (Fixed)</h3>
+<h3>Hardware Pins (Fixed)</h3>
 <div class='pin-info'>
 <div><strong>Physical Input 1:</strong> GPIO5</div>
 <div><strong>Physical Input 2:</strong> GPIO18</div>
 <div><strong>Trigger Output 1:</strong> GPIO12</div>
 <div><strong>Trigger Output 2:</strong> GPIO14</div>
 </div>
-<p class='hint'>GPIO5 → GPIO12, GPIO18 → GPIO14 (default)</p>
-<p class='hint'>When inverted: GPIO5 → GPIO14, GPIO18 → GPIO12</p>
+</div>
+
+<div class='card'>
+<h3>Output Mapping</h3>
+<p class='hint'>Configure which output pin triggers OPEN and CLOSE</p>
+<div class='mapping-row'>
+<span class='mapping-label'>OPEN output pin:</span>
+<select name='is04_open_pin'>
+<option value='12')";
+  if (openPin == 12) html += " selected";
+  html += R"(>GPIO12</option>
+<option value='14')";
+  if (openPin == 14) html += " selected";
+  html += R"(>GPIO14</option>
+</select>
+</div>
+<div class='mapping-row'>
+<span class='mapping-label'>CLOSE output pin:</span>
+<span style='padding:10px;background:#0f3460;border-radius:5px'>)";
+  html += (openPin == 12) ? "GPIO14" : "GPIO12";
+  html += R"( (auto)</span>
+</div>
+</div>
+
+<div class='card'>
+<h3>Physical Input Mapping</h3>
+<p class='hint'>Configure what action each physical input triggers</p>
+<div class='mapping-row'>
+<span class='mapping-label'>Physical Input 1 (GPIO5):</span>
+<select name='is04_phys1_action'>
+<option value='open')";
+  if (phys1Action == "open") html += " selected";
+  html += R"(>OPEN</option>
+<option value='close')";
+  if (phys1Action == "close") html += " selected";
+  html += R"(>CLOSE</option>
+</select>
+</div>
+<div class='mapping-row'>
+<span class='mapping-label'>Physical Input 2 (GPIO18):</span>
+<select name='is04_phys2_action'>
+<option value='open')";
+  if (phys2Action == "open") html += " selected";
+  html += R"(>OPEN</option>
+<option value='close')";
+  if (phys2Action == "close") html += " selected";
+  html += R"(>CLOSE</option>
+</select>
+</div>
 </div>
 
 <div class='card'>
@@ -858,14 +923,6 @@ a{color:#e94560}
   html += dids;
   html += R"(' placeholder='00001234,00005678'>
 <p class='hint'>Comma-separated list of 8-digit device IDs</p>
-
-<label style='display:flex;align-items:center'>
-<input type='checkbox' name='is04_invert' value='1')";
-  if (invert) html += " checked";
-  html += R"(>
-Invert Input/Output Mapping
-</label>
-<p class='hint'>When checked: open→GPIO14, close→GPIO12</p>
 </div>
 
 <div class='card'>

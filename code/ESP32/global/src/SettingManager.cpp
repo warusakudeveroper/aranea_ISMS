@@ -26,7 +26,9 @@ static const char* DEFAULT_IS05_DID = "00000000";
 
 // デフォルト値 - is04設定
 static const char* DEFAULT_IS04_DIDS = "00001234,00005678";
-static const int DEFAULT_IS04_INVERT = 0;
+static const int DEFAULT_IS04_OPEN_PIN = 12;           // OPEN出力ピン (12 or 14)
+static const char* DEFAULT_IS04_PHYS1_ACTION = "open"; // 物理入力1のアクション
+static const char* DEFAULT_IS04_PHYS2_ACTION = "close";// 物理入力2のアクション
 static const int DEFAULT_IS04_PULSE_MS = 3000;
 static const int DEFAULT_IS04_INTERLOCK_MS = 200;
 
@@ -111,9 +113,17 @@ void SettingManager::initDefaults() {
     setString("is04_dids", DEFAULT_IS04_DIDS);
     Serial.println("[SETTING] Set default is04_dids");
   }
-  if (!hasKey("is04_invert")) {
-    setInt("is04_invert", DEFAULT_IS04_INVERT);
-    Serial.println("[SETTING] Set default is04_invert");
+  if (!hasKey("is04_open_pin")) {
+    setInt("is04_open_pin", DEFAULT_IS04_OPEN_PIN);
+    Serial.println("[SETTING] Set default is04_open_pin");
+  }
+  if (!hasKey("is04_phys1_action")) {
+    setString("is04_phys1_action", DEFAULT_IS04_PHYS1_ACTION);
+    Serial.println("[SETTING] Set default is04_phys1_action");
+  }
+  if (!hasKey("is04_phys2_action")) {
+    setString("is04_phys2_action", DEFAULT_IS04_PHYS2_ACTION);
+    Serial.println("[SETTING] Set default is04_phys2_action");
   }
   if (!hasKey("is04_pulse_ms")) {
     setInt("is04_pulse_ms", DEFAULT_IS04_PULSE_MS);

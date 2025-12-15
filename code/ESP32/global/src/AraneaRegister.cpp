@@ -6,6 +6,7 @@
 const char* AraneaRegister::NVS_NAMESPACE = "aranea";
 const char* AraneaRegister::KEY_CIC = "cic";
 const char* AraneaRegister::KEY_STATE_ENDPOINT = "stateEp";
+const char* AraneaRegister::KEY_MQTT_ENDPOINT = "mqttEp";
 const char* AraneaRegister::KEY_REGISTERED = "registered";
 
 void AraneaRegister::begin(const String& gateUrl) {
@@ -31,6 +32,7 @@ AraneaRegisterResult AraneaRegister::registerDevice(
     result.ok = true;
     result.cic_code = getSavedCic();
     result.stateEndpoint = getSavedStateEndpoint();
+    result.mqttEndpoint = getSavedMqttEndpoint();
     Serial.println("[ARANEA] Already registered, using saved CIC");
     return result;
   }
@@ -104,16 +106,27 @@ AraneaRegisterResult AraneaRegister::registerDevice(
       result.cic_code = resDoc["userObject"]["cic_code"].as<String>();
       result.stateEndpoint = resDoc["stateEndpoint"].as<String>();
 
+      // mqttEndpoint（双方向デバイスのみ）
+      if (resDoc.containsKey("mqttEndpoint")) {
+        result.mqttEndpoint = resDoc["mqttEndpoint"].as<String>();
+      }
+
       // NVSに保存
       Preferences prefs;
       prefs.begin(NVS_NAMESPACE, false);
       prefs.putString(KEY_CIC, result.cic_code);
       prefs.putString(KEY_STATE_ENDPOINT, result.stateEndpoint);
+      if (result.mqttEndpoint.length() > 0) {
+        prefs.putString(KEY_MQTT_ENDPOINT, result.mqttEndpoint);
+      }
       prefs.putBool(KEY_REGISTERED, true);
       prefs.end();
 
       Serial.printf("[ARANEA] Registered! CIC: %s\n", result.cic_code.c_str());
       Serial.printf("[ARANEA] State endpoint: %s\n", result.stateEndpoint.c_str());
+      if (result.mqttEndpoint.length() > 0) {
+        Serial.printf("[ARANEA] MQTT endpoint: %s\n", result.mqttEndpoint.c_str());
+      }
     } else {
       result.error = resDoc["error"].as<String>();
       Serial.printf("[ARANEA] Registration failed: %s\n", result.error.c_str());
@@ -152,4 +165,23 @@ String AraneaRegister::getSavedStateEndpoint() {
   String endpoint = prefs.getString(KEY_STATE_ENDPOINT, "");
   prefs.end();
   return endpoint;
+}
+
+String AraneaRegister::getSavedMqttEndpoint() {
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, true);
+  String endpoint = prefs.getString(KEY_MQTT_ENDPOINT, "");
+  prefs.end();
+  return endpoint;
+}
+
+void AraneaRegister::clearRegistration() {
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.remove(KEY_CIC);
+  prefs.remove(KEY_STATE_ENDPOINT);
+  prefs.remove(KEY_MQTT_ENDPOINT);
+  prefs.remove(KEY_REGISTERED);
+  prefs.end();
+  Serial.println("[ARANEA] Registration cleared");
 }

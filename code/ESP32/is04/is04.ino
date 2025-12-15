@@ -19,6 +19,7 @@
 #include <HTTPClient.h>
 #include <esp_mac.h>
 #include <mqtt_client.h>
+#include <esp_crt_bundle.h>
 #include <ArduinoJson.h>
 
 // AraneaGlobal共通モジュール
@@ -106,7 +107,9 @@ unsigned long lastMqttReconnect = 0;
 
 // is04設定（NVS）
 String is04Dids;
-bool is04Invert = false;
+int is04OpenPin = TRG_OUT1;        // OPENに割り当てるピン (12 or 14)
+String is04Phys1Action = "open";   // 物理入力1のアクション ("open" or "close")
+String is04Phys2Action = "close";  // 物理入力2のアクション ("open" or "close")
 int is04PulseMs = PULSE_MS_DEFAULT;
 int is04InterlockMs = INTERLOCK_MS_DEFAULT;
 
@@ -143,6 +146,17 @@ bool manualRejected = false;
 unsigned long manualRejectedTime = 0;
 static const unsigned long MANUAL_REJECTED_DISPLAY_MS = 1500;  // 1.5秒間表示
 
+// アクション表示ロック（manual→open等を確実に表示）
+bool displayActionLock = false;
+unsigned long displayActionStart = 0;
+PulseSource displayActionSource = SOURCE_NONE;
+bool displayActionIsOpen = true;
+int displayActionPhase = 0;  // 0=source, 1=action
+unsigned long lastDisplayActionPhaseTime = 0;
+static const unsigned long DISPLAY_ACTION_PHASE_MS = 600;      // 各フェーズ600ms
+static const unsigned long DISPLAY_ACTION_TOTAL_MS = 5500;     // HTTP待機(~3s) + 表示(2.4s) = 5.5秒
+static const unsigned long DISPLAY_UPDATE_ACTION_MS = 100;     // アクション中は100ms更新
+
 // タイミング
 unsigned long lastSampleTime = 0;
 unsigned long lastHeartbeatTime = 0;
@@ -177,22 +191,14 @@ int clampPulseMs(int ms) {
 }
 
 // ========================================
-// 出力ピン決定（invert対応）
+// 出力ピン決定（設定ベース）
 // ========================================
 int getOpenPin() {
-  return is04Invert ? TRG_OUT2 : TRG_OUT1;
+  return is04OpenPin;
 }
 
 int getClosePin() {
-  return is04Invert ? TRG_OUT1 : TRG_OUT2;
-}
-
-int getPhysIn1TargetPin() {
-  return is04Invert ? TRG_OUT2 : TRG_OUT1;
-}
-
-int getPhysIn2TargetPin() {
-  return is04Invert ? TRG_OUT1 : TRG_OUT2;
+  return (is04OpenPin == TRG_OUT1) ? TRG_OUT2 : TRG_OUT1;
 }
 
 // ========================================
@@ -200,12 +206,23 @@ int getPhysIn2TargetPin() {
 // ========================================
 void loadIs04Config() {
   is04Dids = settings.getString("is04_dids", "00001234,00005678");
-  is04Invert = settings.getInt("is04_invert", 0) == 1;
+
+  // Output Mapping: OPENピン (12 or 14)
+  int openPinSetting = settings.getInt("is04_open_pin", 12);
+  is04OpenPin = (openPinSetting == 14) ? TRG_OUT2 : TRG_OUT1;
+
+  // Physical Input Mapping: 各物理入力のアクション
+  is04Phys1Action = settings.getString("is04_phys1_action", "open");
+  is04Phys2Action = settings.getString("is04_phys2_action", "close");
+
   is04PulseMs = clampPulseMs(settings.getInt("is04_pulse_ms", PULSE_MS_DEFAULT));
   is04InterlockMs = settings.getInt("is04_interlock_ms", INTERLOCK_MS_DEFAULT);
 
   Serial.printf("[CONFIG] is04_dids: %s\n", is04Dids.c_str());
-  Serial.printf("[CONFIG] is04_invert: %d\n", is04Invert ? 1 : 0);
+  Serial.printf("[CONFIG] is04_open_pin: GPIO%d\n", is04OpenPin);
+  Serial.printf("[CONFIG] is04_close_pin: GPIO%d (auto)\n", getClosePin());
+  Serial.printf("[CONFIG] is04_phys1_action: %s\n", is04Phys1Action.c_str());
+  Serial.printf("[CONFIG] is04_phys2_action: %s\n", is04Phys2Action.c_str());
   Serial.printf("[CONFIG] is04_pulse_ms: %d\n", is04PulseMs);
   Serial.printf("[CONFIG] is04_interlock_ms: %d\n", is04InterlockMs);
 }
@@ -280,6 +297,9 @@ void connectMqtt() {
   mqttCfg.credentials.authentication.password = myCic.c_str();
   mqttCfg.network.timeout_ms = 10000;
   mqttCfg.session.keepalive = 30;
+
+  // SSL/TLS設定（ESP-IDF証明書バンドル使用）
+  mqttCfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
 
   mqttClient = esp_mqtt_client_init(&mqttCfg);
   if (!mqttClient) {
@@ -462,13 +482,31 @@ void publishAck(const String& cmdId, const String& status, int mappedOut, int pu
   result["ok"] = (status == "executed" || status == "success" || status == "completed" || status == "done");
   result["mappedOut"] = mappedOut;
   result["pulseMs"] = pulseMs;
-  result["invert"] = is04Invert;
+  result["openPin"] = is04OpenPin;
 
   char ackJson[256];
   serializeJson(ackDoc, ackJson, sizeof(ackJson));
 
   esp_mqtt_client_publish(mqttClient, ackTopic.c_str(), ackJson, 0, 1, 0);
   Serial.printf("[ACK] %s -> %s\n", ackTopic.c_str(), ackJson);
+}
+
+// ========================================
+// 表示アクションロック開始
+// ========================================
+void startDisplayActionLock(PulseSource source, bool isOpen) {
+  displayActionLock = true;
+  displayActionStart = millis();
+  displayActionSource = source;
+  displayActionIsOpen = isOpen;
+  displayActionPhase = 0;  // source表示から開始
+  lastDisplayActionPhaseTime = millis();
+  Serial.printf("[DISP] Action lock start: source=%s, action=%s\n",
+    source == SOURCE_CLOUD ? "CLOUD" : "MANUAL",
+    isOpen ? "OPEN" : "CLOSE");
+
+  // 即座にディスプレイを更新（HTTP送信前に表示を確定）
+  updateDisplay();
 }
 
 // ========================================
@@ -486,6 +524,9 @@ void startPulseWithSource(int outPin, int durationMs, PulseSource source, bool i
   pulseDurationMs = durationMs;
   pulseSource = source;
   pulseIsOpen = isOpen;
+
+  // 表示アクションロック開始
+  startDisplayActionLock(source, isOpen);
 
   digitalWrite(outPin, HIGH);
   Serial.printf("[PULSE] Start GPIO%d for %dms (source=%s, action=%s)\n",
@@ -569,14 +610,13 @@ void samplePhysicalInputs() {
 // 物理入力エッジ検出→パルス生成
 // ========================================
 void handlePhysicalInputEdges() {
-  // PHYS_IN1: 立ち上がりエッジ検出 (GPIO5 → Trigger1_Physical)
-  // invert=false: GPIO5 → GPIO12 (OPEN)
-  // invert=true:  GPIO5 → GPIO14 (CLOSE)
+  // PHYS_IN1: 立ち上がりエッジ検出 (GPIO5)
+  // is04Phys1Action で OPEN/CLOSE を決定
   if (physIn1Stable == HIGH && physIn1LastStable == LOW) {
     Serial.println("[PHYS] IN1 rising edge detected");
     if (!pulseActive) {
-      int targetPin = getPhysIn1TargetPin();
-      bool isOpen = !is04Invert;  // invert=false: OPEN, invert=true: CLOSE
+      bool isOpen = (is04Phys1Action == "open");
+      int targetPin = isOpen ? getOpenPin() : getClosePin();
       startPulseWithSource(targetPin, is04PulseMs, SOURCE_MANUAL, isOpen);
       needSendState = true;
     } else {
@@ -587,14 +627,13 @@ void handlePhysicalInputEdges() {
   }
   physIn1LastStable = physIn1Stable;
 
-  // PHYS_IN2: 立ち上がりエッジ検出 (GPIO18 → Trigger2_Physical)
-  // invert=false: GPIO18 → GPIO14 (CLOSE)
-  // invert=true:  GPIO18 → GPIO12 (OPEN)
+  // PHYS_IN2: 立ち上がりエッジ検出 (GPIO18)
+  // is04Phys2Action で OPEN/CLOSE を決定
   if (physIn2Stable == HIGH && physIn2LastStable == LOW) {
     Serial.println("[PHYS] IN2 rising edge detected");
     if (!pulseActive) {
-      int targetPin = getPhysIn2TargetPin();
-      bool isOpen = is04Invert;  // invert=false: CLOSE, invert=true: OPEN
+      bool isOpen = (is04Phys2Action == "open");
+      int targetPin = isOpen ? getOpenPin() : getClosePin();
       startPulseWithSource(targetPin, is04PulseMs, SOURCE_MANUAL, isOpen);
       needSendState = true;
     } else {
@@ -730,6 +769,7 @@ void handleButtons() {
       Serial.println("[BTN] Factory reset requested");
       display.showError("Factory Reset!");
       delay(1000);
+      araneaReg.clearRegistration();  // AraneaGateway登録もクリア
       settings.clear();
       ESP.restart();
     }
@@ -768,7 +808,7 @@ String getSignalIndicator() {
 void updateDisplay() {
   unsigned long now = millis();
 
-  // 点滅状態更新（250ms間隔）
+  // 点滅状態更新（250ms間隔）- フォールバック用
   if (now - lastBlinkTime >= BLINK_INTERVAL_MS) {
     displayBlinkState = !displayBlinkState;
     lastBlinkTime = now;
@@ -779,6 +819,19 @@ void updateDisplay() {
     manualRejected = false;
   }
 
+  // アクション表示ロックのタイムアウトチェック
+  if (displayActionLock && (now - displayActionStart >= DISPLAY_ACTION_TOTAL_MS)) {
+    displayActionLock = false;
+    Serial.println("[DISP] Action lock end");
+  }
+
+  // アクション表示フェーズ計算（時間ベースでsource⇔action切替）
+  // HTTP待機後も正しいフェーズを表示するため、経過時間から直接計算
+  if (displayActionLock) {
+    unsigned long elapsed = now - displayActionStart;
+    displayActionPhase = (elapsed / DISPLAY_ACTION_PHASE_MS) % 2;  // 0→1→0→1...
+  }
+
   // Line1: IP + RSSI
   String line1 = wifi.getIP() + " " + String(WiFi.RSSI()) + "dBm";
 
@@ -787,43 +840,43 @@ void updateDisplay() {
 
   // sensorLine: 状態表示
   String sensorLine = "";
-  String actionStr = pulseIsOpen ? "OPEN!!" : "CLOSE!!";
 
-  // 優先順位: マニュアル拒否 > パルス動作中 > 待機
+  // 優先順位: マニュアル拒否 > アクション表示ロック > 待機
   if (manualRejected) {
     // 動作中にマニュアル操作 → //In operation//
     sensorLine = "//In operation//";
-  } else if (pulseActive) {
-    // パルス動作中 → 点滅表示
-    if (pulseSource == SOURCE_CLOUD) {
-      // クラウドからの命令: CLOUD->> / -->>OPEN!! (or CLOSE!!)
-      if (displayBlinkState) {
+  } else if (displayActionLock) {
+    // アクション表示ロック中 → フェーズに応じて表示（source/action交互）
+    String actionStr = displayActionIsOpen ? "OPEN!!" : "CLOSE!!";
+
+    if (displayActionSource == SOURCE_CLOUD) {
+      // クラウドからの命令: CLOUD->> (phase 0) / -->>OPEN!! (phase 1)
+      if (displayActionPhase == 0) {
         sensorLine = "CLOUD->>";
       } else {
         sensorLine = "-->>" + actionStr;
       }
-    } else if (pulseSource == SOURCE_MANUAL) {
-      // マニュアル（アンラッチスイッチ）: <<MANUAL>> / <<OPEN!!>> (or <<CLOSE!!>>)
-      if (displayBlinkState) {
+    } else if (displayActionSource == SOURCE_MANUAL) {
+      // マニュアル: <<MANUAL>> (phase 0) / <<OPEN!!>> (phase 1)
+      if (displayActionPhase == 0) {
         sensorLine = "<<MANUAL>>";
       } else {
         sensorLine = "<<" + actionStr + ">>";
       }
     } else {
-      // 不明なソース（フォールバック）
       sensorLine = "PULSE...";
     }
   } else {
     // 待機状態 → 電波レベル表示
     sensorLine = getSignalIndicator();
+
+    // MQTT接続状態（待機時のみ表示）
+    if (mqttConnected) {
+      sensorLine += " [M]";
+    }
   }
 
-  // MQTT接続状態（待機時のみ表示）
-  if (!pulseActive && !manualRejected && mqttConnected) {
-    sensorLine += " [M]";
-  }
-
-  display.showIs02Main(line1, cicStr, sensorLine, pulseActive || manualRejected);
+  display.showIs02Main(line1, cicStr, sensorLine, displayActionLock || manualRejected);
 }
 
 // ========================================
@@ -894,14 +947,24 @@ void setup() {
     myCic = regResult.cic_code;
     settings.setString("cic", myCic);
     Serial.printf("[REG] CIC: %s\n", myCic.c_str());
+
+    // MQTT URLをAraneaRegisterから取得（双方向デバイス用）
+    if (regResult.mqttEndpoint.length() > 0) {
+      mqttWsUrl = regResult.mqttEndpoint;
+    }
   } else {
     myCic = settings.getString("cic", "");
     Serial.printf("[REG] Failed, using saved CIC: %s\n", myCic.c_str());
+    // フォールバック: NVSから保存済みMQTT URLを取得
+    mqttWsUrl = araneaReg.getSavedMqttEndpoint();
   }
 
   // 7. 送信先URL読み込み
   cloudUrl = settings.getString("cloud_url", "https://asia-northeast1-mobesorder.cloudfunctions.net/deviceStateReport");
-  mqttWsUrl = settings.getString("mqtt_ws_url", "");
+  // mqttWsUrlはAraneaRegisterから取得済み、フォールバックとしてsettingsも確認
+  if (mqttWsUrl.length() == 0) {
+    mqttWsUrl = settings.getString("mqtt_ws_url", "");
+  }
   Serial.printf("[CONFIG] Cloud: %s\n", cloudUrl.c_str());
   Serial.printf("[CONFIG] MQTT: %s\n", mqttWsUrl.length() > 0 ? mqttWsUrl.c_str() : "(none)");
 
@@ -986,8 +1049,9 @@ void loop() {
     lastHeartbeatTime = now;
   }
 
-  // ディスプレイ更新（1秒間隔）
-  if (now - lastDisplayUpdate >= DISPLAY_UPDATE_MS) {
+  // ディスプレイ更新（アクション中は100ms、待機時は1秒間隔）
+  unsigned long displayInterval = (displayActionLock || manualRejected) ? DISPLAY_UPDATE_ACTION_MS : DISPLAY_UPDATE_MS;
+  if (now - lastDisplayUpdate >= displayInterval) {
     updateDisplay();
     lastDisplayUpdate = now;
   }
