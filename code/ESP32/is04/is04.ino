@@ -128,6 +128,21 @@ int pulseOutPin = 0;
 unsigned long pulseStartMs = 0;
 unsigned long pulseDurationMs = 0;
 
+// パルスソース追跡（表示用）
+enum PulseSource { SOURCE_NONE, SOURCE_CLOUD, SOURCE_MANUAL };
+PulseSource pulseSource = SOURCE_NONE;
+bool pulseIsOpen = true;  // true=OPEN, false=CLOSE
+
+// 表示用状態
+bool displayBlinkState = false;
+unsigned long lastBlinkTime = 0;
+static const unsigned long BLINK_INTERVAL_MS = 250;  // 点滅間隔
+
+// マニュアル拒否表示
+bool manualRejected = false;
+unsigned long manualRejectedTime = 0;
+static const unsigned long MANUAL_REJECTED_DISPLAY_MS = 1500;  // 1.5秒間表示
+
 // タイミング
 unsigned long lastSampleTime = 0;
 unsigned long lastHeartbeatTime = 0;
@@ -374,21 +389,26 @@ void handleMqttMessage(const char* topic, const char* data, int dataLen) {
   int pulseMs = params["pulseMs"] | is04PulseMs;
   pulseMs = clampPulseMs(pulseMs);
 
-  // Determine output pin based on command type
+  // Determine output pin and action based on command type
   int targetPin = 0;
   bool validCmd = false;
+  bool isOpen = true;  // default to open
 
   if (cmdType == "is04_open") {
     targetPin = getOpenPin();
+    isOpen = true;
     validCmd = true;
   } else if (cmdType == "is04_close") {
     targetPin = getClosePin();
+    isOpen = false;
     validCmd = true;
   } else if (cmdType == "is04_pulse1") {
     targetPin = TRG_OUT1;
+    isOpen = (targetPin == getOpenPin());  // determine based on pin mapping
     validCmd = true;
   } else if (cmdType == "is04_pulse2") {
     targetPin = TRG_OUT2;
+    isOpen = (targetPin == getOpenPin());
     validCmd = true;
   }
 
@@ -404,9 +424,9 @@ void handleMqttMessage(const char* topic, const char* data, int dataLen) {
     return;
   }
 
-  // Start pulse
+  // Start pulse with cloud source
   unsigned long tPulseStart = millis();
-  startPulse(targetPin, pulseMs);
+  startPulseWithSource(targetPin, pulseMs, SOURCE_CLOUD, isOpen);
 
   // Send ACK immediately after pulse start (speed priority)
   unsigned long tAckPub = millis();
@@ -454,7 +474,7 @@ void publishAck(const String& cmdId, const String& status, int mappedOut, int pu
 // ========================================
 // パルス開始（非ブロッキング）
 // ========================================
-void startPulse(int outPin, int durationMs) {
+void startPulseWithSource(int outPin, int durationMs, PulseSource source, bool isOpen) {
   if (pulseActive) {
     Serial.println("[PULSE] Already active, ignoring");
     return;
@@ -464,9 +484,19 @@ void startPulse(int outPin, int durationMs) {
   pulseOutPin = outPin;
   pulseStartMs = millis();
   pulseDurationMs = durationMs;
+  pulseSource = source;
+  pulseIsOpen = isOpen;
 
   digitalWrite(outPin, HIGH);
-  Serial.printf("[PULSE] Start GPIO%d for %dms\n", outPin, durationMs);
+  Serial.printf("[PULSE] Start GPIO%d for %dms (source=%s, action=%s)\n",
+    outPin, durationMs,
+    source == SOURCE_CLOUD ? "CLOUD" : "MANUAL",
+    isOpen ? "OPEN" : "CLOSE");
+}
+
+// 旧API互換（デフォルトはcloud, open）
+void startPulse(int outPin, int durationMs) {
+  startPulseWithSource(outPin, durationMs, SOURCE_CLOUD, true);
 }
 
 // ========================================
@@ -482,6 +512,7 @@ void endPulse() {
   pulseOutPin = 0;
   pulseStartMs = 0;
   pulseDurationMs = 0;
+  pulseSource = SOURCE_NONE;
 
   // Trigger state report after pulse ends
   needSendState = true;
@@ -538,28 +569,38 @@ void samplePhysicalInputs() {
 // 物理入力エッジ検出→パルス生成
 // ========================================
 void handlePhysicalInputEdges() {
-  // PHYS_IN1: 立ち上がりエッジ検出
+  // PHYS_IN1: 立ち上がりエッジ検出 (GPIO5 → Trigger1_Physical)
+  // invert=false: GPIO5 → GPIO12 (OPEN)
+  // invert=true:  GPIO5 → GPIO14 (CLOSE)
   if (physIn1Stable == HIGH && physIn1LastStable == LOW) {
     Serial.println("[PHYS] IN1 rising edge detected");
     if (!pulseActive) {
       int targetPin = getPhysIn1TargetPin();
-      startPulse(targetPin, is04PulseMs);
+      bool isOpen = !is04Invert;  // invert=false: OPEN, invert=true: CLOSE
+      startPulseWithSource(targetPin, is04PulseMs, SOURCE_MANUAL, isOpen);
       needSendState = true;
     } else {
-      Serial.println("[PHYS] Pulse already active, ignoring");
+      Serial.println("[PHYS] Pulse already active, showing rejection");
+      manualRejected = true;
+      manualRejectedTime = millis();
     }
   }
   physIn1LastStable = physIn1Stable;
 
-  // PHYS_IN2: 立ち上がりエッジ検出
+  // PHYS_IN2: 立ち上がりエッジ検出 (GPIO18 → Trigger2_Physical)
+  // invert=false: GPIO18 → GPIO14 (CLOSE)
+  // invert=true:  GPIO18 → GPIO12 (OPEN)
   if (physIn2Stable == HIGH && physIn2LastStable == LOW) {
     Serial.println("[PHYS] IN2 rising edge detected");
     if (!pulseActive) {
       int targetPin = getPhysIn2TargetPin();
-      startPulse(targetPin, is04PulseMs);
+      bool isOpen = is04Invert;  // invert=false: CLOSE, invert=true: OPEN
+      startPulseWithSource(targetPin, is04PulseMs, SOURCE_MANUAL, isOpen);
       needSendState = true;
     } else {
-      Serial.println("[PHYS] Pulse already active, ignoring");
+      Serial.println("[PHYS] Pulse already active, showing rejection");
+      manualRejected = true;
+      manualRejectedTime = millis();
     }
   }
   physIn2LastStable = physIn2Stable;
@@ -698,29 +739,91 @@ void handleButtons() {
 }
 
 // ========================================
-// ディスプレイ更新（is02パターン）
+// 電波レベルインジケータ生成（is05同様）
+// ========================================
+String getSignalIndicator() {
+  int rssi = WiFi.RSSI();
+  String indicator = "@ ";  // アンテナマーク
+
+  // RSSIに応じたバー表示
+  if (rssi > -50) {
+    indicator += "[||||]";      // 強い
+  } else if (rssi > -60) {
+    indicator += "[||| ]";      // 良好
+  } else if (rssi > -70) {
+    indicator += "[||  ]";      // 中程度
+  } else if (rssi > -80) {
+    indicator += "[|   ]";      // 弱い
+  } else {
+    indicator += "[    ]";      // 非常に弱い
+  }
+
+  indicator += " " + String(rssi) + "dBm";
+  return indicator;
+}
+
+// ========================================
+// ディスプレイ更新（is04専用表示）
 // ========================================
 void updateDisplay() {
+  unsigned long now = millis();
+
+  // 点滅状態更新（250ms間隔）
+  if (now - lastBlinkTime >= BLINK_INTERVAL_MS) {
+    displayBlinkState = !displayBlinkState;
+    lastBlinkTime = now;
+  }
+
+  // マニュアル拒否表示のタイムアウトチェック
+  if (manualRejected && (now - manualRejectedTime >= MANUAL_REJECTED_DISPLAY_MS)) {
+    manualRejected = false;
+  }
+
   // Line1: IP + RSSI
   String line1 = wifi.getIP() + " " + String(WiFi.RSSI()) + "dBm";
 
   // CIC
   String cicStr = myCic.length() > 0 ? myCic : "------";
 
-  // sensorLine: 出力状態表示
+  // sensorLine: 状態表示
   String sensorLine = "";
-  if (pulseActive) {
-    sensorLine = "OUT" + String(pulseOutPin == TRG_OUT1 ? "1" : "2") + " PULSE";
+  String actionStr = pulseIsOpen ? "OPEN!!" : "CLOSE!!";
+
+  // 優先順位: マニュアル拒否 > パルス動作中 > 待機
+  if (manualRejected) {
+    // 動作中にマニュアル操作 → //In operation//
+    sensorLine = "//In operation//";
+  } else if (pulseActive) {
+    // パルス動作中 → 点滅表示
+    if (pulseSource == SOURCE_CLOUD) {
+      // クラウドからの命令: CLOUD->> / -->>OPEN!! (or CLOSE!!)
+      if (displayBlinkState) {
+        sensorLine = "CLOUD->>";
+      } else {
+        sensorLine = "-->>" + actionStr;
+      }
+    } else if (pulseSource == SOURCE_MANUAL) {
+      // マニュアル（アンラッチスイッチ）: <<MANUAL>> / <<OPEN!!>> (or <<CLOSE!!>>)
+      if (displayBlinkState) {
+        sensorLine = "<<MANUAL>>";
+      } else {
+        sensorLine = "<<" + actionStr + ">>";
+      }
+    } else {
+      // 不明なソース（フォールバック）
+      sensorLine = "PULSE...";
+    }
   } else {
-    sensorLine = "READY";
+    // 待機状態 → 電波レベル表示
+    sensorLine = getSignalIndicator();
   }
 
-  // MQTT接続状態
-  if (mqttConnected) {
+  // MQTT接続状態（待機時のみ表示）
+  if (!pulseActive && !manualRejected && mqttConnected) {
     sensorLine += " [M]";
   }
 
-  display.showIs02Main(line1, cicStr, sensorLine, pulseActive);
+  display.showIs02Main(line1, cicStr, sensorLine, pulseActive || manualRejected);
 }
 
 // ========================================
