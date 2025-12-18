@@ -1,10 +1,11 @@
 /**
  * AraneaSettings.cpp
  *
- * 汎用araneaDevice設定クラス実装
+ * IS10専用araneaDevice設定クラス実装
  */
 
 #include "AraneaSettings.h"
+#include "SettingManager.h"
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 
@@ -63,6 +64,71 @@ void AraneaSettings::resetToDefaults() {
   _relayPort = ARANEA_DEFAULT_RELAY_PORT;
 
   Serial.println("[AraneaSettings] Reset to defaults");
+}
+
+void AraneaSettings::initDefaults(SettingManager& settings) {
+  // IS10固有のNVS設定デフォルト値を投入
+  // 未設定のキーのみデフォルト値を設定
+
+  // relay.primary（フルURL形式）
+  if (!settings.hasKey("relay_pri")) {
+    String url = "http://" + String(ARANEA_DEFAULT_RELAY_PRIMARY) + ":8080/api/events";
+    settings.setString("relay_pri", url);
+    Serial.println("[AraneaSettings] Set default relay_pri");
+  }
+
+  // relay.secondary
+  if (!settings.hasKey("relay_sec")) {
+    String url = "http://" + String(ARANEA_DEFAULT_RELAY_SECONDARY) + ":8080/api/events";
+    settings.setString("relay_sec", url);
+    Serial.println("[AraneaSettings] Set default relay_sec");
+  }
+
+  // araneaDeviceGate URL
+  if (!settings.hasKey("gate_url")) {
+    settings.setString("gate_url", ARANEA_DEFAULT_GATE_URL);
+    Serial.println("[AraneaSettings] Set default gate_url");
+  }
+
+  // cloud URL
+  if (!settings.hasKey("cloud_url")) {
+    settings.setString("cloud_url", ARANEA_DEFAULT_CLOUD_URL);
+    Serial.println("[AraneaSettings] Set default cloud_url");
+  }
+
+  // テナント情報
+  if (!settings.hasKey("tid")) {
+    settings.setString("tid", ARANEA_DEFAULT_TID);
+    Serial.println("[AraneaSettings] Set default tid");
+  }
+  if (!settings.hasKey("tenant_lacisid")) {
+    settings.setString("tenant_lacisid", ARANEA_DEFAULT_TENANT_LACISID);
+    Serial.println("[AraneaSettings] Set default tenant_lacisid");
+  }
+  if (!settings.hasKey("tenant_email")) {
+    settings.setString("tenant_email", ARANEA_DEFAULT_TENANT_EMAIL);
+    Serial.println("[AraneaSettings] Set default tenant_email");
+  }
+  if (!settings.hasKey("tenant_cic")) {
+    settings.setString("tenant_cic", ARANEA_DEFAULT_TENANT_CIC);
+    Serial.println("[AraneaSettings] Set default tenant_cic");
+  }
+
+  // IS10固有設定（ルーター監視用）
+  if (!settings.hasKey("ssh_timeout")) {
+    settings.setULong("ssh_timeout", 30000);  // 30秒
+    Serial.println("[AraneaSettings] Set default ssh_timeout");
+  }
+  if (!settings.hasKey("poll_interval")) {
+    settings.setULong("poll_interval", 60000);  // 1分
+    Serial.println("[AraneaSettings] Set default poll_interval");
+  }
+  if (!settings.hasKey("retry_count")) {
+    settings.setInt("retry_count", 3);
+    Serial.println("[AraneaSettings] Set default retry_count");
+  }
+
+  Serial.println("[AraneaSettings] NVS defaults initialized");
 }
 
 bool AraneaSettings::loadFromSPIFFS() {

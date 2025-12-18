@@ -6,12 +6,19 @@
  *
  * 【大量生産モード】このファイルを施設用に編集してビルド
  * 【汎用モード】APモードのWeb UIから設定
+ *
+ * モジュール構成:
+ * - SettingManager (global/src) = 汎用NVS CRUD操作
+ * - AraneaSettings (device-specific) = デバイス固有のデフォルト設定
  */
 
 #ifndef ARANEA_SETTINGS_H
 #define ARANEA_SETTINGS_H
 
 #include <Arduino.h>
+
+// Forward declaration
+class SettingManager;
 
 // ========================================
 // IS10専用デフォルト設定
@@ -65,14 +72,23 @@ struct WiFiConfig {
  * AraneaSettings - 静的設定クラス
  *
  * 使用例:
- *   AraneaSettings::init();  // デフォルト設定で初期化
+ *   SettingManager settings;
+ *   settings.begin("isms");
+ *   AraneaSettings::init();                    // SPIFFS設定初期化
+ *   AraneaSettings::initDefaults(settings);   // NVSデフォルト設定
  *   String tid = AraneaSettings::getTid();
- *   AraneaSettings::setTid("T12345...");  // 変更
  */
 class AraneaSettings {
 public:
-  // 初期化（デフォルト設定をロード）
+  // 初期化（SPIFFS設定をロード）
   static void init();
+
+  /**
+   * NVS（SettingManager）にデバイス固有のデフォルト値を設定
+   * 未設定のキーのみデフォルト値を投入
+   * @param settings SettingManagerインスタンス
+   */
+  static void initDefaults(SettingManager& settings);
 
   // SPIFFSから設定を読み込み（既存設定があれば上書き）
   static bool loadFromSPIFFS();

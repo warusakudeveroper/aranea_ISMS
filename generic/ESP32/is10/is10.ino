@@ -646,14 +646,17 @@ void setup() {
     Serial.println("[ERROR] SPIFFS init failed");
   }
 
-  // AraneaSettings初期化（デフォルト設定ロード）
+  // AraneaSettings初期化（SPIFFS設定ロード）
   AraneaSettings::init();
 
-  // SettingManager初期化
-  if (!settings.begin()) {
+  // SettingManager初期化（NVS）
+  if (!settings.begin("isms")) {
     Serial.println("[ERROR] Settings init failed");
     return;
   }
+
+  // デバイス固有のデフォルト設定を投入
+  AraneaSettings::initDefaults(settings);
 
   // DisplayManager初期化
   if (!display.begin()) {
