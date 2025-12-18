@@ -202,8 +202,8 @@ void loadIs10Config() {
   globalConfig.routerProductCode = settings.getString("is10_router_pcode", "");
 
   // ルーター設定をSPIFFSから読み込み
-  if (SPIFFS.exists("/is10_routers.json")) {
-    File file = SPIFFS.open("/is10_routers.json", "r");
+  if (SPIFFS.exists("/routers.json")) {
+    File file = SPIFFS.open("/routers.json", "r");
     if (file) {
       String json = file.readString();
       file.close();
@@ -263,7 +263,7 @@ void saveIs10Config() {
     obj["enabled"] = routers[i].enabled;
   }
 
-  File file = SPIFFS.open("/is10_routers.json", "w");
+  File file = SPIFFS.open("/routers.json", "w");
   if (file) {
     serializeJson(doc, file);
     file.close();
@@ -599,7 +599,7 @@ void handleButtons() {
       delay(1000);
       araneaReg.clearRegistration();
       settings.clear();
-      SPIFFS.remove("/is10_routers.json");
+      SPIFFS.remove("/routers.json");
       SPIFFS.remove("/aranea_settings.json");
       ESP.restart();
     }

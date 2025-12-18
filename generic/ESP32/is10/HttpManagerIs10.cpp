@@ -144,24 +144,29 @@ void HttpManagerIs10::handleGetConfig() {
   // グローバル設定
   JsonObject global = doc.createNestedObject("global");
   global["endpoint"] = settings_->getString("is10_endpoint", "");
-  global["timeout"] = settings_->getInt("is10_timeout", 30000);
-  global["retryCount"] = settings_->getInt("is10_retry", 2);
-  global["interval"] = settings_->getInt("is10_interval", 30000);
+  global["sshTimeout"] = settings_->getInt("is10_ssh_timeout", 30000);
+  global["retryCount"] = settings_->getInt("is10_retry_count", 2);
+  global["routerInterval"] = settings_->getInt("is10_router_interval", 30000);
+  global["gateUrl"] = settings_->getString("gate_url", "");
+  global["cloudUrl"] = settings_->getString("cloud_url", "");
+  global["relayPrimary"] = settings_->getString("relay_pri", "");
+  global["relaySecondary"] = settings_->getString("relay_sec", "");
 
-  // LacisID生成設定
+  // LacisID生成設定（ルーター用）
   JsonObject lacisGen = doc.createNestedObject("lacisGen");
-  lacisGen["prefix"] = settings_->getString("lacis_prefix", "4");
-  lacisGen["productType"] = settings_->getString("lacis_ptype", "");
-  lacisGen["productCode"] = settings_->getString("lacis_pcode", "");
-  lacisGen["generator"] = settings_->getString("lacis_gen", "DeviceWithMac");
+  lacisGen["prefix"] = settings_->getString("is10_lacis_prefix", "4");
+  lacisGen["productType"] = settings_->getString("is10_router_ptype", "");
+  lacisGen["productCode"] = settings_->getString("is10_router_pcode", "");
+  lacisGen["generator"] = settings_->getString("is10_lacis_gen", "DeviceWithMac");
 
   // テナント設定
   JsonObject tenant = doc.createNestedObject("tenant");
   tenant["tid"] = settings_->getString("tid", "");
+  tenant["fid"] = settings_->getString("fid", "0150");
   tenant["lacisId"] = settings_->getString("tenant_lacisid", "");
   tenant["email"] = settings_->getString("tenant_email", "");
   tenant["cic"] = settings_->getString("tenant_cic", "");
-  // パスワードは表示しない
+  // 注: パスワード認証は廃止（lacisId + userId + cicの3要素認証）
 
   // WiFi設定（6ペア形式）
   JsonArray wifiArr = doc.createNestedArray("wifi");
@@ -205,9 +210,13 @@ void HttpManagerIs10::handleSaveGlobal() {
   }
 
   if (doc.containsKey("endpoint")) settings_->setString("is10_endpoint", doc["endpoint"]);
-  if (doc.containsKey("timeout")) settings_->setInt("is10_timeout", doc["timeout"]);
-  if (doc.containsKey("retryCount")) settings_->setInt("is10_retry", doc["retryCount"]);
-  if (doc.containsKey("interval")) settings_->setInt("is10_interval", doc["interval"]);
+  if (doc.containsKey("sshTimeout")) settings_->setInt("is10_ssh_timeout", doc["sshTimeout"]);
+  if (doc.containsKey("retryCount")) settings_->setInt("is10_retry_count", doc["retryCount"]);
+  if (doc.containsKey("routerInterval")) settings_->setInt("is10_router_interval", doc["routerInterval"]);
+  if (doc.containsKey("gateUrl")) settings_->setString("gate_url", doc["gateUrl"]);
+  if (doc.containsKey("cloudUrl")) settings_->setString("cloud_url", doc["cloudUrl"]);
+  if (doc.containsKey("relayPrimary")) settings_->setString("relay_pri", doc["relayPrimary"]);
+  if (doc.containsKey("relaySecondary")) settings_->setString("relay_sec", doc["relaySecondary"]);
 
   if (settingsChangedCallback_) settingsChangedCallback_();
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -226,10 +235,10 @@ void HttpManagerIs10::handleSaveLacisGen() {
     return;
   }
 
-  if (doc.containsKey("prefix")) settings_->setString("lacis_prefix", doc["prefix"]);
-  if (doc.containsKey("productType")) settings_->setString("lacis_ptype", doc["productType"]);
-  if (doc.containsKey("productCode")) settings_->setString("lacis_pcode", doc["productCode"]);
-  if (doc.containsKey("generator")) settings_->setString("lacis_gen", doc["generator"]);
+  if (doc.containsKey("prefix")) settings_->setString("is10_lacis_prefix", doc["prefix"]);
+  if (doc.containsKey("productType")) settings_->setString("is10_router_ptype", doc["productType"]);
+  if (doc.containsKey("productCode")) settings_->setString("is10_router_pcode", doc["productCode"]);
+  if (doc.containsKey("generator")) settings_->setString("is10_lacis_gen", doc["generator"]);
 
   if (settingsChangedCallback_) settingsChangedCallback_();
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -320,12 +329,11 @@ void HttpManagerIs10::handleSaveTenant() {
   }
 
   if (doc.containsKey("tid")) settings_->setString("tid", doc["tid"]);
+  if (doc.containsKey("fid")) settings_->setString("fid", doc["fid"]);
   if (doc.containsKey("lacisId")) settings_->setString("tenant_lacisid", doc["lacisId"]);
   if (doc.containsKey("email")) settings_->setString("tenant_email", doc["email"]);
   if (doc.containsKey("cic")) settings_->setString("tenant_cic", doc["cic"]);
-  if (doc.containsKey("password") && doc["password"].as<String>().length() > 0) {
-    settings_->setString("tenant_pass", doc["password"]);
-  }
+  // 注: パスワード認証は廃止（lacisId + userId + cicの3要素認証）
 
   if (settingsChangedCallback_) settingsChangedCallback_();
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -403,18 +411,18 @@ void HttpManagerIs10::handleNotFound() {
 GlobalSetting HttpManagerIs10::getGlobalSetting() {
   GlobalSetting gs;
   gs.endpoint = settings_->getString("is10_endpoint", "");
-  gs.timeout = settings_->getInt("is10_timeout", 30000);
-  gs.retryCount = settings_->getInt("is10_retry", 2);
-  gs.interval = settings_->getInt("is10_interval", 30000);
+  gs.timeout = settings_->getInt("is10_ssh_timeout", 30000);
+  gs.retryCount = settings_->getInt("is10_retry_count", 2);
+  gs.interval = settings_->getInt("is10_router_interval", 30000);
   return gs;
 }
 
 LacisIdGenSetting HttpManagerIs10::getLacisIdGenSetting() {
   LacisIdGenSetting ls;
-  ls.prefix = settings_->getString("lacis_prefix", "4");
-  ls.productType = settings_->getString("lacis_ptype", "");
-  ls.productCode = settings_->getString("lacis_pcode", "");
-  ls.generator = settings_->getString("lacis_gen", "DeviceWithMac");
+  ls.prefix = settings_->getString("is10_lacis_prefix", "4");
+  ls.productType = settings_->getString("is10_router_ptype", "");
+  ls.productCode = settings_->getString("is10_router_pcode", "");
+  ls.generator = settings_->getString("is10_lacis_gen", "DeviceWithMac");
   return ls;
 }
 
@@ -594,9 +602,13 @@ function renderConfig() {
 
   // Global
   document.getElementById('g-endpoint').value = config.global?.endpoint || '';
-  document.getElementById('g-timeout').value = config.global?.timeout || 30000;
+  document.getElementById('g-ssh-timeout').value = config.global?.sshTimeout || 30000;
   document.getElementById('g-retry').value = config.global?.retryCount || 2;
-  document.getElementById('g-interval').value = config.global?.interval || 30000;
+  document.getElementById('g-interval').value = config.global?.routerInterval || 30000;
+  document.getElementById('g-gate-url').value = config.global?.gateUrl || '';
+  document.getElementById('g-cloud-url').value = config.global?.cloudUrl || '';
+  document.getElementById('g-relay-pri').value = config.global?.relayPrimary || '';
+  document.getElementById('g-relay-sec').value = config.global?.relaySecondary || '';
 
   // LacisGen
   document.getElementById('l-prefix').value = config.lacisGen?.prefix || '4';
@@ -606,6 +618,7 @@ function renderConfig() {
 
   // Tenant
   document.getElementById('t-tid').value = config.tenant?.tid || '';
+  document.getElementById('t-fid').value = config.tenant?.fid || '';
   document.getElementById('t-lacis').value = config.tenant?.lacisId || '';
   document.getElementById('t-email').value = config.tenant?.email || '';
   document.getElementById('t-cic').value = config.tenant?.cic || '';
@@ -667,9 +680,13 @@ function showTab(name) {
 async function saveGlobal() {
   await postJson('/api/global', {
     endpoint: document.getElementById('g-endpoint').value,
-    timeout: parseInt(document.getElementById('g-timeout').value),
+    sshTimeout: parseInt(document.getElementById('g-ssh-timeout').value),
     retryCount: parseInt(document.getElementById('g-retry').value),
-    interval: parseInt(document.getElementById('g-interval').value)
+    routerInterval: parseInt(document.getElementById('g-interval').value),
+    gateUrl: document.getElementById('g-gate-url').value,
+    cloudUrl: document.getElementById('g-cloud-url').value,
+    relayPrimary: document.getElementById('g-relay-pri').value,
+    relaySecondary: document.getElementById('g-relay-sec').value
   });
   toast('Global settings saved');
 }
@@ -687,10 +704,10 @@ async function saveLacisGen() {
 async function saveTenant() {
   await postJson('/api/tenant', {
     tid: document.getElementById('t-tid').value,
+    fid: document.getElementById('t-fid').value,
     lacisId: document.getElementById('t-lacis').value,
     email: document.getElementById('t-email').value,
-    cic: document.getElementById('t-cic').value,
-    password: document.getElementById('t-pass').value
+    cic: document.getElementById('t-cic').value
   });
   toast('Tenant settings saved');
 }
@@ -829,21 +846,39 @@ String HttpManagerIs10::generateHTML() {
     <div class="card">
       <div class="card-title">Global Settings</div>
       <div class="form-group">
-        <label>Endpoint URL</label>
+        <label>Report Endpoint URL (POST先)</label>
         <input type="text" id="g-endpoint" placeholder="https://...">
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>SSH Timeout (ms)</label>
-          <input type="number" id="g-timeout" value="30000">
+          <input type="number" id="g-ssh-timeout" value="30000">
         </div>
         <div class="form-group">
           <label>Retry Count</label>
           <input type="number" id="g-retry" value="2">
         </div>
         <div class="form-group">
-          <label>Interval (ms)</label>
+          <label>Router Poll Interval (ms)</label>
           <input type="number" id="g-interval" value="30000">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>AraneaDeviceGate URL</label>
+        <input type="text" id="g-gate-url" placeholder="https://...araneaDeviceGate">
+      </div>
+      <div class="form-group">
+        <label>Cloud Report URL</label>
+        <input type="text" id="g-cloud-url" placeholder="https://...deviceStateReport">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Relay Primary (Zero3)</label>
+          <input type="text" id="g-relay-pri" placeholder="http://192.168.96.201:8080/api/events">
+        </div>
+        <div class="form-group">
+          <label>Relay Secondary</label>
+          <input type="text" id="g-relay-sec" placeholder="http://192.168.96.202:8080/api/events">
         </div>
       </div>
       <button class="btn btn-primary" onclick="saveGlobal()">Save Global Settings</button>
@@ -887,10 +922,16 @@ String HttpManagerIs10::generateHTML() {
 
   <div id="tab-tenant" class="tab-content">
     <div class="card">
-      <div class="card-title">Tenant Authentication</div>
-      <div class="form-group">
-        <label>Tenant ID (TID)</label>
-        <input type="text" id="t-tid">
+      <div class="card-title">Tenant Authentication (3要素認証: lacisId + email + cic)</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Tenant ID (TID)</label>
+          <input type="text" id="t-tid">
+        </div>
+        <div class="form-group">
+          <label>Facility ID (FID)</label>
+          <input type="text" id="t-fid" placeholder="e.g. 0150">
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -903,12 +944,8 @@ String HttpManagerIs10::generateHTML() {
         </div>
       </div>
       <div class="form-group">
-        <label>Email</label>
+        <label>Email (userId)</label>
         <input type="email" id="t-email">
-      </div>
-      <div class="form-group">
-        <label>Password (leave empty to keep current)</label>
-        <input type="password" id="t-pass">
       </div>
       <button class="btn btn-primary" onclick="saveTenant()">Save Tenant Settings</button>
     </div>
