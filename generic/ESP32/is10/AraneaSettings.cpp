@@ -42,7 +42,7 @@ void AraneaSettings::resetToDefaults() {
   _tenantAuth.lacisId = ARANEA_DEFAULT_TENANT_LACISID;
   _tenantAuth.email = ARANEA_DEFAULT_TENANT_EMAIL;
   _tenantAuth.cic = ARANEA_DEFAULT_TENANT_CIC;
-  _tenantAuth.pass = ARANEA_DEFAULT_TENANT_PASS;
+  _tenantAuth.pass = "";  // passは廃止（認証はlacisId + userId + cicの3要素）
 
   // WiFi設定
   _wifiConfig.ssid[0] = ARANEA_DEFAULT_WIFI_SSID_1;

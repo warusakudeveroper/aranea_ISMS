@@ -1,9 +1,11 @@
 /**
  * AraneaSettings.h
  *
- * 汎用araneaDevice設定クラス
+ * IS10専用 araneaDevice設定クラス
  * tid, fid, テナント認証情報などを静的に管理
- * ISMSはデフォルト設定として、他テナントはHTTP/SPIFFS経由で変更可能
+ *
+ * 【大量生産モード】このファイルを施設用に編集してビルド
+ * 【汎用モード】APモードのWeb UIから設定
  */
 
 #ifndef ARANEA_SETTINGS_H
@@ -11,13 +13,15 @@
 
 #include <Arduino.h>
 
-// デフォルト設定（ISMS: 市山水産株式会社）
-#define ARANEA_DEFAULT_TID "T2025120608261484221"
-#define ARANEA_DEFAULT_FID "9000"
-#define ARANEA_DEFAULT_TENANT_LACISID "12767487939173857894"
-#define ARANEA_DEFAULT_TENANT_EMAIL "info+ichiyama@neki.tech"
-#define ARANEA_DEFAULT_TENANT_CIC "263238"
-#define ARANEA_DEFAULT_TENANT_PASS "dJBU^TpG%j$5"
+// ========================================
+// IS10専用デフォルト設定
+// ========================================
+#define ARANEA_DEFAULT_TID "T2025120621041161827"
+#define ARANEA_DEFAULT_FID "0150"
+#define ARANEA_DEFAULT_TENANT_LACISID "18217487937895888001"
+#define ARANEA_DEFAULT_TENANT_EMAIL "soejim@mijeos.com"
+#define ARANEA_DEFAULT_TENANT_CIC "204965"
+// TENANT_PASSは廃止（認証はlacisId + userId + cicの3要素）
 
 // WiFiデフォルト設定
 #define ARANEA_DEFAULT_WIFI_SSID_1 "cluster1"

@@ -19,8 +19,8 @@ struct AraneaRegisterResult {
 struct TenantPrimaryAuth {
   String lacisId;
   String userId;
-  String pass;
   String cic;
+  // passは廃止（認証はlacisId + userId + cicの3要素）
 };
 
 class AraneaRegister {

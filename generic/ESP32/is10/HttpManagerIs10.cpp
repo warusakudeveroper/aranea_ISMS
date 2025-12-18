@@ -7,6 +7,7 @@
 #include "HttpManagerIs10.h"
 #include <SPIFFS.h>
 #include <WiFi.h>
+#include <Preferences.h>
 
 void HttpManagerIs10::begin(SettingManager* settings, int port) {
   settings_ = settings;
@@ -373,9 +374,21 @@ void HttpManagerIs10::handleReboot() {
 }
 
 void HttpManagerIs10::handleFactoryReset() {
+  // 1. "isms" namespace を clear（SettingManager経由）
   settings_->clear();
+
+  // 2. "aranea" namespace を clear（AraneaRegister の登録データ）
+  Preferences araneaPrefs;
+  araneaPrefs.begin("aranea", false);
+  araneaPrefs.clear();
+  araneaPrefs.end();
+  Serial.println("[HTTP-IS10] Cleared 'aranea' NVS namespace (CIC, registration data)");
+
+  // 3. SPIFFS設定ファイル削除
   SPIFFS.remove("/routers.json");
-  server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset...\"}");
+  SPIFFS.remove("/aranea_settings.json");
+
+  server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset complete. All settings and registration cleared.\"}");
   delay(500);
   ESP.restart();
 }

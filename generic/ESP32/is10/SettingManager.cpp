@@ -1,21 +1,22 @@
 #include "SettingManager.h"
+#include "AraneaSettings.h"
 
 // NVSの名前空間
 static const char* NVS_NAMESPACE = "isms";
 
-// デフォルト値 - リレーエンドポイント
-static const char* DEFAULT_RELAY_PRIMARY = "http://192.168.96.201:8080/api/events";
-static const char* DEFAULT_RELAY_SECONDARY = "http://192.168.96.202:8080/api/events";
+// デフォルト値 - リレーエンドポイント（フルURL形式）
+static const char* DEFAULT_RELAY_PRIMARY = "http://" ARANEA_DEFAULT_RELAY_PRIMARY ":8080/api/events";
+static const char* DEFAULT_RELAY_SECONDARY = "http://" ARANEA_DEFAULT_RELAY_SECONDARY ":8080/api/events";
 
-// デフォルト値 - araneaDeviceGate（us-central1-mobesorder）
-static const char* DEFAULT_GATE_URL = "https://us-central1-mobesorder.cloudfunctions.net/araneaDeviceGate";
+// デフォルト値 - araneaDeviceGate URL（AraneaSettings.hから）
+#define DEFAULT_GATE_URL        ARANEA_DEFAULT_GATE_URL
 
-// デフォルト値 - テナント情報（市山水産株式会社）
-static const char* DEFAULT_TID = "T2025120608261484221";
-static const char* DEFAULT_TENANT_LACISID = "12767487939173857894";
-static const char* DEFAULT_TENANT_EMAIL = "info+ichiyama@neki.tech";
-static const char* DEFAULT_TENANT_CIC = "263238";
-static const char* DEFAULT_TENANT_PASS = "dJBU^TpG%j$5";
+// デフォルト値 - テナント情報（AraneaSettings.hから）
+#define DEFAULT_TID             ARANEA_DEFAULT_TID
+#define DEFAULT_TENANT_LACISID  ARANEA_DEFAULT_TENANT_LACISID
+#define DEFAULT_TENANT_EMAIL    ARANEA_DEFAULT_TENANT_EMAIL
+#define DEFAULT_TENANT_CIC      ARANEA_DEFAULT_TENANT_CIC
+// TENANT_PASSは廃止（認証はlacisId + userId + cicの3要素）
 
 // デフォルト値 - is05チャンネル設定
 // GPIO: ch1=19, ch2=18, ch3=5, ch4=17, ch5=16, ch6=4, ch7=2, ch8=15
@@ -82,10 +83,7 @@ void SettingManager::initDefaults() {
     setString("tenant_cic", DEFAULT_TENANT_CIC);
     Serial.println("[SETTING] Set default tenant_cic");
   }
-  if (!hasKey("tenant_pass")) {
-    setString("tenant_pass", DEFAULT_TENANT_PASS);
-    Serial.println("[SETTING] Set default tenant_pass");
-  }
+  // tenant_passは廃止（認証はlacisId + userId + cicの3要素）
 
   // is05チャンネル設定（ch1〜ch8）
   for (int i = 1; i <= 8; i++) {

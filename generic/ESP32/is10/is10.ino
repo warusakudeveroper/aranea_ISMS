@@ -49,8 +49,9 @@ static const char* DEVICE_TYPE = "ar-is10";
 static const char* DEVICE_MODEL = "Openwrt_RouterInspector";
 static const char* FIRMWARE_VERSION = "1.0.0";
 
-// テナント設定はAraneaSettings/SettingManagerから読み込み
-// デフォルト値はAraneaSettings.hで定義（ISMS: 市山水産株式会社）
+// テナント設定はAraneaSettings.h で定義
+// 大量生産: AraneaSettings.hを施設用に編集してビルド
+// 汎用: APモードのWeb UIから設定
 
 // ========================================
 // ピン定義
@@ -689,10 +690,10 @@ void setup() {
     String gateUrl = AraneaSettings::getGateUrl();
     araneaReg.begin(gateUrl);
 
+    // 認証3要素: lacisId + userId + cic（passは廃止）
     TenantPrimaryAuth tenantAuth;
     tenantAuth.lacisId = settings.getString("tenant_lacisid", ARANEA_DEFAULT_TENANT_LACISID);
     tenantAuth.userId = settings.getString("tenant_email", ARANEA_DEFAULT_TENANT_EMAIL);
-    tenantAuth.pass = settings.getString("tenant_pass", ARANEA_DEFAULT_TENANT_PASS);
     tenantAuth.cic = settings.getString("tenant_cic", ARANEA_DEFAULT_TENANT_CIC);
     araneaReg.setTenantPrimary(tenantAuth);
 
@@ -705,8 +706,21 @@ void setup() {
       settings.setString("cic", myCic);
       Serial.printf("[REG] CIC: %s\n", myCic.c_str());
     } else {
+      // 登録失敗時は保存済みCICを使用
       myCic = settings.getString("cic", "");
-      Serial.printf("[REG] Failed, using saved CIC: %s\n", myCic.c_str());
+      if (myCic.length() > 0) {
+        Serial.printf("[REG] Failed, using saved CIC: %s\n", myCic.c_str());
+      } else {
+        // CICがない場合はエラー状態
+        Serial.println("[REG] ERROR: No CIC available, device cannot operate");
+        Serial.println("[REG] Check network connection and retry registration");
+        display.showError("No CIC!");
+        // 登録フラグをクリアして次回起動時に再試行
+        araneaReg.clearRegistration();
+        // 5秒後にリブートして再試行
+        delay(5000);
+        ESP.restart();
+      }
     }
   }
 
