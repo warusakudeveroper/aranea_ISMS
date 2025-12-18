@@ -13,6 +13,7 @@ OpenWrt/AsusWRT系ルーターにSSHアクセスして情報を収集し、ク�
 | ファームウェアバージョン | `1.0.0` |
 | 対象ボード | ESP32-DevKitC (4MB Flash) |
 | 使用ライブラリ | AraneaGlobalGeneric |
+| ホスト名フォーマット | `ar-is10-{MAC下6桁}` (例: `ar-is10-AABBCC`) |
 
 ## 機能一覧
 
