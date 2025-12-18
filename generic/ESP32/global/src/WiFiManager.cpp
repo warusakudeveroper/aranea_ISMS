@@ -10,6 +10,18 @@ const char* WiFiManager::SSID_LIST[SSID_COUNT] = {
 // デフォルトパスワード
 const char* WiFiManager::WIFI_PASS = "isms12345@";
 
+void WiFiManager::setHostname(const String& hostname) {
+  hostname_ = hostname;
+  Serial.printf("[WIFI] Hostname set: %s\n", hostname_.c_str());
+}
+
+void WiFiManager::applyHostname() {
+  if (hostname_.length() > 0) {
+    WiFi.setHostname(hostname_.c_str());
+    Serial.printf("[WIFI] Applied hostname: %s\n", hostname_.c_str());
+  }
+}
+
 bool WiFiManager::connectDefault() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -101,6 +113,9 @@ bool WiFiManager::connectWithSettings(SettingManager* settings) {
 bool WiFiManager::connect(const char* ssid, const char* pass, unsigned long timeoutMs) {
   WiFi.disconnect(true);
   delay(100);
+
+  // ホスト名を適用（WiFi.begin前に必要）
+  applyHostname();
 
   WiFi.begin(ssid, pass);
 

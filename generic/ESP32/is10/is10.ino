@@ -673,6 +673,7 @@ void setup() {
 
   // WiFi接続試行
   display.showConnecting("WiFi...", 0);
+  wifi.setHostname(myHostname);  // ホスト名を設定（WiFi接続前に必要）
   if (!wifi.connectWithSettings(&settings)) {
     Serial.println("[WIFI] Connection failed, starting AP mode");
     startAPMode();
