@@ -37,6 +37,7 @@
 #include "AraneaRegister.h"
 #include "HttpManagerIs10.h"
 #include "OtaManager.h"
+#include "HttpOtaManager.h"
 #include "Operator.h"
 #include "SshClient.h"
 
@@ -131,6 +132,7 @@ LacisIDGenerator lacisGen;
 AraneaRegister araneaReg;
 HttpManagerIs10 httpMgr;
 OtaManager ota;
+HttpOtaManager httpOta;
 Operator op;
 
 // 自機情報
@@ -748,6 +750,21 @@ void setup() {
   // HttpManager開始
   httpMgr.begin(&settings, 80);
   httpMgr.setDeviceInfo(DEVICE_TYPE, myLacisId, myCic, FIRMWARE_VERSION);
+
+  // HTTP OTA開始（httpMgrのWebServerを共有）
+  httpOta.begin(httpMgr.getServer());
+  httpOta.onStart([]() {
+    op.setOtaUpdating(true);
+    display.showBoot("HTTP OTA Start...");
+    Serial.println("[HTTP-OTA] Update started");
+  });
+  httpOta.onProgress([](int progress) {
+    display.showBoot("HTTP OTA: " + String(progress) + "%");
+  });
+  httpOta.onError([](const String& err) {
+    op.setOtaUpdating(false);
+    display.showError("HTTP OTA: " + err);
+  });
 
   // RUNモードへ
   op.setMode(OperatorMode::RUN);

@@ -60,6 +60,9 @@ public:
   void onSettingsChanged(void (*callback)());
   void onRebootRequest(void (*callback)());
 
+  // WebServer取得（HttpOtaManager連携用）
+  WebServer* getServer() { return server_; }
+
 private:
   WebServer* server_ = nullptr;
   SettingManager* settings_ = nullptr;
