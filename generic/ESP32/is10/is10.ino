@@ -22,10 +22,19 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <WiFi.h>
+
+// Brownout disable
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <esp_mac.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include <esp_heap_caps.h>
+
+// LibSSH-ESP32を明示的にインクルード（依存関係解決のため）
+#include "libssh_esp32.h"
 
 // AraneaGlobal共通モジュール
 #include "AraneaSettings.h"
@@ -35,6 +44,7 @@
 #include "NtpManager.h"
 #include "LacisIDGenerator.h"
 #include "AraneaRegister.h"
+#include "RouterTypes.h"
 #include "HttpManagerIs10.h"
 #include "OtaManager.h"
 #include "HttpOtaManager.h"
@@ -66,34 +76,15 @@ static const int BTN_RESET = 26;  // ファクトリーリセットボタン
 // タイミング定数
 // ========================================
 static const unsigned long ROUTER_POLL_INTERVAL_MS = 30000;   // ルーターポーリング間隔（30秒）
-static const unsigned long SSH_TIMEOUT_MS = 30000;            // SSHタイムアウト
+static const unsigned long SSH_TIMEOUT_MS = 60000;            // SSHタイムアウト（ASUSWRT遅延対策）
 static const int SSH_RETRY_COUNT = 2;                         // リトライ回数
 static const unsigned long ROUTER_INTERVAL_MS = 30000;        // 次ルーターまでのインターバル
 static const unsigned long DISPLAY_UPDATE_MS = 1000;
 static const unsigned long BUTTON_HOLD_MS = 3000;
 static const unsigned long AP_MODE_TIMEOUT_MS = 300000;       // APモード5分タイムアウト
 
-// 最大ルーター数（HttpManagerIs10.hで定義）
-// #define MAX_ROUTERS 20
-
-// ========================================
-// ルーターOSタイプ（HttpManagerIs10.hで定義）
-// ========================================
-// enum class RouterOsType { OPENWRT, ASUSWRT };
-
-// ========================================
-// ルーター設定構造体
-// ========================================
-struct RouterConfig {
-  String rid;           // Resource ID
-  String ipAddr;        // IPアドレス
-  String publicKey;     // SSH公開鍵（認証用）
-  int sshPort;          // SSHポート
-  String username;      // ユーザー名
-  String password;      // パスワード
-  bool enabled;         // 有効フラグ
-  RouterOsType osType;  // OSタイプ（OpenWrt / ASUSWRT）
-};
+// ルーター型はRouterTypes.hで定義
+// MAX_ROUTERS, RouterOsType, RouterConfig
 
 // ========================================
 // ルーター情報構造体（取得データ）
@@ -166,6 +157,13 @@ String lastPollResult = "---";
 int successCount = 0;
 int failCount = 0;
 
+// HTTPS用のグローバルSecureClient（TLSバッファ再利用でメモリ節約）
+WiFiClientSecure secureClient;
+bool secureClientInitialized = false;
+
+// SSH用のグローバルクライアント（メモリフラグメンテーション防止）
+SshClient* globalSshClient = nullptr;
+
 // ========================================
 // 前方宣言
 // ========================================
@@ -195,7 +193,8 @@ String getHostname() {
 }
 
 // ========================================
-// IS10設定読み込み
+// IS10設定読み込み（グローバル設定のみ）
+// ルーター設定はHttpManagerIs10が共有配列に読み込む
 // ========================================
 void loadIs10Config() {
   // グローバル設定
@@ -207,46 +206,14 @@ void loadIs10Config() {
   globalConfig.routerProductType = settings.getString("is10_router_ptype", "");
   globalConfig.routerProductCode = settings.getString("is10_router_pcode", "");
 
-  // ルーター設定をSPIFFSから読み込み
-  if (SPIFFS.exists("/routers.json")) {
-    File file = SPIFFS.open("/routers.json", "r");
-    if (file) {
-      String json = file.readString();
-      file.close();
-
-      DynamicJsonDocument doc(8192);
-      DeserializationError error = deserializeJson(doc, json);
-      if (!error) {
-        JsonArray arr = doc.as<JsonArray>();
-        routerCount = 0;
-        for (JsonObject obj : arr) {
-          if (routerCount >= MAX_ROUTERS) break;
-          routers[routerCount].rid = obj["rid"] | "";
-          routers[routerCount].ipAddr = obj["ipAddr"] | "";
-          routers[routerCount].publicKey = obj["publicKey"] | "";
-          routers[routerCount].sshPort = obj["sshPort"] | 22;
-          routers[routerCount].username = obj["username"] | "";
-          routers[routerCount].password = obj["password"] | "";
-          routers[routerCount].enabled = obj["enabled"] | true;
-          // OSタイプ: 0=OpenWrt(default), 1=ASUSWRT
-          int osTypeInt = obj["osType"] | 0;
-          routers[routerCount].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
-          if (routers[routerCount].ipAddr.length() > 0) {
-            routerCount++;
-          }
-        }
-        Serial.printf("[CONFIG] Loaded %d routers\n", routerCount);
-      }
-    }
-  }
-
   Serial.printf("[CONFIG] endpoint: %s\n", globalConfig.endpoint.c_str());
   Serial.printf("[CONFIG] sshTimeout: %lu\n", globalConfig.sshTimeout);
   Serial.printf("[CONFIG] routerCount: %d\n", routerCount);
 }
 
 // ========================================
-// IS10設定保存
+// IS10設定保存（グローバル設定のみ）
+// ルーター設定はHttpManagerIs10が管理
 // ========================================
 void saveIs10Config() {
   // グローバル設定
@@ -257,28 +224,7 @@ void saveIs10Config() {
   settings.setString("is10_lacis_prefix", globalConfig.lacisIdPrefix);
   settings.setString("is10_router_ptype", globalConfig.routerProductType);
   settings.setString("is10_router_pcode", globalConfig.routerProductCode);
-
-  // ルーター設定をSPIFFSに保存
-  DynamicJsonDocument doc(8192);
-  JsonArray arr = doc.to<JsonArray>();
-  for (int i = 0; i < routerCount; i++) {
-    JsonObject obj = arr.createNestedObject();
-    obj["rid"] = routers[i].rid;
-    obj["ipAddr"] = routers[i].ipAddr;
-    obj["publicKey"] = routers[i].publicKey;
-    obj["sshPort"] = routers[i].sshPort;
-    obj["username"] = routers[i].username;
-    obj["password"] = routers[i].password;
-    obj["enabled"] = routers[i].enabled;
-    obj["osType"] = (routers[i].osType == RouterOsType::ASUSWRT) ? 1 : 0;
-  }
-
-  File file = SPIFFS.open("/routers.json", "w");
-  if (file) {
-    serializeJson(doc, file);
-    file.close();
-    Serial.println("[CONFIG] Saved router config");
-  }
+  Serial.println("[CONFIG] Saved global config");
 }
 
 // ========================================
@@ -390,11 +336,21 @@ int parseClientCount(const String& output) {
 // SSH経由でルーター情報取得
 // ========================================
 bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
+  Serial.println("[DBG] SSH-0: executeSSHCommands entered");
+  Serial.flush();
+  delay(10);
+
   bool isAsuswrt = (router.osType == RouterOsType::ASUSWRT);
   const char* osName = isAsuswrt ? "ASUSWRT" : "OpenWrt";
 
   Serial.printf("[SSH] Connecting to %s:%d as %s (%s)\n",
     router.ipAddr.c_str(), router.sshPort, router.username.c_str(), osName);
+  Serial.flush();
+  delay(10);
+
+  Serial.println("[DBG] SSH-1: initializing info struct");
+  Serial.flush();
+  delay(10);
 
   // 初期化
   info.rid = router.rid;
@@ -406,8 +362,25 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   info.online = false;
   info.lastUpdate = millis();
 
-  // SSH接続
-  SshClient ssh;
+  Serial.println("[DBG] SSH-2: checking globalSshClient");
+  Serial.flush();
+  delay(10);
+
+  // グローバルSSHクライアントを初期化（初回のみ）
+  if (globalSshClient == nullptr) {
+    Serial.println("[SSH] Creating global SSH client");
+    Serial.flush();
+    globalSshClient = new SshClient();
+    Serial.println("[DBG] SSH-2a: SshClient created");
+    Serial.flush();
+  }
+  SshClient& ssh = *globalSshClient;
+
+  // 既存の接続があれば切断
+  if (ssh.isConnected()) {
+    ssh.disconnect();
+  }
+
   SshConfig config;
   config.host = router.ipAddr;
   config.port = router.sshPort;
@@ -534,10 +507,17 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
 // ルーター情報をエンドポイントへPOST
 // ========================================
 bool postRouterInfo(const RouterInfo& info) {
+  Serial.println("[DEBUG] postRouterInfo() entered");
+
   if (globalConfig.endpoint.length() == 0) {
     Serial.println("[POST] No endpoint configured");
     return false;
   }
+
+  // メモリ計測（POST前）
+  size_t freeHeap = ESP.getFreeHeap();
+  size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  Serial.printf("[MEM] PRE-POST: heap=%u, largest=%u\n", freeHeap, largestBlock);
 
   String observedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
 
@@ -570,12 +550,24 @@ bool postRouterInfo(const RouterInfo& info) {
   serializeJson(doc, json);
 
   Serial.printf("[POST] Sending to %s\n", globalConfig.endpoint.c_str());
-  Serial.println(json);
+
+  // SecureClientの初期化（一度だけ）- グローバル再利用でnew/delete削減
+  // 注: ESP32 Arduino Core 3.xではsetBufferSizes()なし、デフォルト16KB×2
+  if (!secureClientInitialized) {
+    secureClient.setInsecure();  // 証明書検証スキップ（組み込みデバイス用）
+    secureClientInitialized = true;
+    Serial.println("[POST] SecureClient initialized (insecure mode)");
+  }
 
   HTTPClient http;
-  http.begin(globalConfig.endpoint);
+  http.begin(secureClient, globalConfig.endpoint);  // グローバルSecureClientを再利用
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(10000);
+  http.setTimeout(15000);
+
+  // メモリ計測（TLS接続直前）
+  freeHeap = ESP.getFreeHeap();
+  largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  Serial.printf("[MEM] PRE-TLS: heap=%u, largest=%u\n", freeHeap, largestBlock);
 
   int httpCode = http.POST(json);
   bool success = (httpCode >= 200 && httpCode < 300);
@@ -591,6 +583,12 @@ bool postRouterInfo(const RouterInfo& info) {
   }
 
   http.end();
+
+  // メモリ計測（POST後）
+  freeHeap = ESP.getFreeHeap();
+  largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  Serial.printf("[MEM] POST-END: heap=%u, largest=%u\n", freeHeap, largestBlock);
+
   return success;
 }
 
@@ -606,11 +604,47 @@ bool pollRouter(int index) {
   }
 
   Serial.printf("[POLL] Router %d: %s (%s)\n", index, router.rid.c_str(), router.ipAddr.c_str());
+  Serial.flush();
+  delay(50);  // シリアル安定化
+
+  Serial.println("[DBG] POLL-1: before heap check");
+  Serial.flush();
+  delay(10);
+
+  // メモリ計測（SSH前）
+  size_t freeHeap = ESP.getFreeHeap();
+  Serial.printf("[DBG] POLL-2: freeHeap=%u\n", freeHeap);
+  Serial.flush();
+  delay(10);
+
+  size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  Serial.printf("[DBG] POLL-3: largestBlock=%u\n", largestBlock);
+  Serial.flush();
+  delay(10);
+
+  Serial.printf("[MEM] PRE-SSH: heap=%u, largest=%u\n", freeHeap, largestBlock);
+  Serial.flush();
+  delay(10);
+
+  Serial.println("[DBG] POLL-4: creating RouterInfo");
+  Serial.flush();
+  delay(10);
 
   RouterInfo info;
 
+  Serial.println("[DBG] POLL-5: RouterInfo created, calling executeSSHCommands");
+  Serial.flush();
+  delay(10);
+
   // SSH経由で情報取得
   bool sshOk = executeSSHCommands(router, info);
+  Serial.println("[DEBUG] executeSSHCommands returned");
+
+  // メモリ計測（SSH後）
+  Serial.println("[DEBUG] About to measure memory");
+  freeHeap = ESP.getFreeHeap();
+  largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  Serial.printf("[MEM] POST-SSH: heap=%u, largest=%u\n", freeHeap, largestBlock);
 
   if (sshOk) {
     // LacisID生成（MACが取得できた場合）
@@ -698,6 +732,9 @@ void updateDisplay() {
 // Setup
 // ========================================
 void setup() {
+  // Disable brownout detection (prevents false resets during WiFi TX power spikes)
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
   Serial.begin(115200);
   delay(100);
   Serial.println("\n[BOOT] is10 (ar-is10) starting...");
@@ -801,7 +838,9 @@ void setup() {
   // IS10設定読み込み
   loadIs10Config();
 
-  // OtaManager初期化
+  // OtaManager初期化 - DISABLED due to mDNS conflict with LibSSH
+  // Use HTTP OTA (httpOta) instead for firmware updates
+  /*
   ota.begin(myHostname, "");
   ota.onStart([]() {
     op.setOtaUpdating(true);
@@ -818,13 +857,14 @@ void setup() {
     op.setOtaUpdating(false);
     display.showError("OTA: " + err);
   });
+  */
 
-  // HttpManager開始
-  httpMgr.begin(&settings, 80);
-  httpMgr.setDeviceInfo(DEVICE_TYPE, myLacisId, myCic, FIRMWARE_VERSION);
+  // HttpManager開始（ルーター配列を共有）- WDT問題調査のため無効化
+  // httpMgr.begin(&settings, routers, &routerCount, 80);
+  // httpMgr.setDeviceInfo(DEVICE_TYPE, myLacisId, myCic, FIRMWARE_VERSION);
 
-  // HTTP OTA開始（httpMgrのWebServerを共有）
-  httpOta.begin(httpMgr.getServer());
+  // HTTP OTA開始（httpMgrのWebServerを共有）- httpMgr無効化に伴い無効化
+  // httpOta.begin(httpMgr.getServer());
   httpOta.onStart([]() {
     op.setOtaUpdating(true);
     display.showBoot("HTTP OTA Start...");
@@ -844,6 +884,40 @@ void setup() {
   // タイミング初期化
   lastRouterPoll = millis();
 
+  // 全モジュール初期化完了を待つ（WiFi/mDNS/OTA安定化）
+  Serial.println("[BOOT] Waiting for all modules to stabilize...");
+  Serial.flush();
+
+  // 5秒間の安定化待機（yield()を入れてバックグラウンドタスクを処理）
+  // NOTE: ota.handle() removed here - ArduinoOTA may crash during early init
+  for (int i = 0; i < 50; i++) {
+    delay(100);
+    yield();
+  }
+  Serial.println("[BOOT] Stabilization complete");
+  Serial.flush();
+
+  // libssh初期化 - 無効化してクラッシュ原因調査
+  Serial.println("[LIBSSH] DISABLED for crash debugging");
+  Serial.flush();
+  /*
+  Serial.printf("[LIBSSH] PRE-INIT heap=%u, largest=%u\n",
+    ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  Serial.flush();
+  delay(1000);  // Longer delay before libssh
+
+  Serial.println("[LIBSSH] Initializing...");
+  Serial.flush();
+  yield();
+  libssh_begin();
+  yield();
+  delay(1000);
+
+  Serial.printf("[LIBSSH] POST-INIT heap=%u, largest=%u\n",
+    ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  Serial.flush();
+  */
+
   Serial.println("[BOOT] is10 ready!");
 }
 
@@ -851,17 +925,56 @@ void setup() {
 // Loop
 // ========================================
 void loop() {
+  static unsigned long loopCount = 0;
+  static unsigned long lastLoopLog = 0;
   unsigned long now = millis();
 
-  // OTA処理（最優先）
-  ota.handle();
+  loopCount++;
+
+  // 最初の10回だけループ開始を出力
+  if (loopCount <= 10) {
+    Serial.printf("[LOOP-%lu] start\n", loopCount);
+    Serial.flush();
+  }
+
+  // 10秒ごとにloop進行状況を出力
+  if (now - lastLoopLog >= 10000) {
+    Serial.printf("[LOOP] count=%lu heap=%d\n", loopCount, ESP.getFreeHeap());
+    Serial.flush();
+    lastLoopLog = now;
+  }
+
+  // Debug: check where crash occurs
+  if (loopCount <= 5) {
+    Serial.printf("[DBG-L] pre-ota heap=%d\n", ESP.getFreeHeap());
+    Serial.flush();
+  }
+
+  // OTA処理（最優先）- ArduinoOTA disabled due to mDNS conflict with LibSSH
+  // ota.handle();  // Use HTTP OTA instead
+
+  if (loopCount <= 5) {
+    Serial.printf("[DBG-L] post-ota heap=%d\n", ESP.getFreeHeap());
+    Serial.flush();
+  }
+
   if (op.isOtaUpdating()) {
     delay(10);
     return;
   }
 
-  // HTTP処理
-  httpMgr.handle();
+  if (loopCount <= 5) {
+    Serial.printf("[DBG-L] pre-http heap=%d\n", ESP.getFreeHeap());
+    Serial.flush();
+  }
+
+  // HTTP処理 - httpMgr.begin()無効化に伴い無効化
+  // httpMgr.handle();
+
+  if (loopCount <= 5) {
+    Serial.printf("[DBG-L] post-http heap=%d\n", ESP.getFreeHeap());
+    Serial.flush();
+  }
 
   // APモードタイムアウトチェック
   if (apModeActive && (now - apModeStartTime >= AP_MODE_TIMEOUT_MS)) {

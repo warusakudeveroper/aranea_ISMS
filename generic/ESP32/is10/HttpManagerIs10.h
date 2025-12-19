@@ -12,27 +12,7 @@
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include "SettingManager.h"
-
-// 最大ルーター数
-#define MAX_ROUTERS 20
-
-// ルーターOSタイプ
-enum class RouterOsType {
-  OPENWRT = 0,   // OpenWrt (uci, br-lan, /tmp/dhcp.leases)
-  ASUSWRT = 1    // ASUSWRT (nvram, br0, /var/lib/misc/dnsmasq.leases)
-};
-
-// ルーター設定構造体
-struct RouterSetting {
-  String rid;
-  String ipAddr;
-  String publicKey;
-  int sshPort;
-  String username;
-  String password;
-  bool enabled;
-  RouterOsType osType;  // OpenWrt or ASUSWRT
-};
+#include "RouterTypes.h"
 
 // グローバル設定構造体
 struct GlobalSetting {
@@ -52,7 +32,14 @@ struct LacisIdGenSetting {
 
 class HttpManagerIs10 {
 public:
-  void begin(SettingManager* settings, int port = 80);
+  /**
+   * 初期化
+   * @param settings SettingManagerインスタンス
+   * @param routers 外部のルーター配列へのポインタ
+   * @param routerCount 外部のルーター数へのポインタ
+   * @param port HTTPポート
+   */
+  void begin(SettingManager* settings, RouterConfig* routers, int* routerCount, int port = 80);
   void handle();
   void setDeviceInfo(const String& type, const String& lacisId,
                      const String& cic, const String& version);
@@ -60,7 +47,7 @@ public:
   // 設定取得
   GlobalSetting getGlobalSetting();
   LacisIdGenSetting getLacisIdGenSetting();
-  RouterSetting getRouter(int index);
+  RouterConfig getRouter(int index);
   int getRouterCount();
 
   // コールバック
@@ -83,9 +70,9 @@ private:
   void (*settingsChangedCallback_)() = nullptr;
   void (*rebootCallback_)() = nullptr;
 
-  // ルーター設定キャッシュ
-  RouterSetting routers_[MAX_ROUTERS];
-  int routerCount_ = 0;
+  // 外部ルーター配列への参照
+  RouterConfig* routers_ = nullptr;
+  int* routerCount_ = nullptr;
 
   // ハンドラ
   void handleRoot();

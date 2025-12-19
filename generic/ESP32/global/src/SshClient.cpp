@@ -20,10 +20,18 @@
   #warning "LibSSH-ESP32 not installed. SSH functionality will be disabled."
 #endif
 
+// libssh初期化フラグ（一度だけ初期化するため）
+static bool _libsshInitialized = false;
+
 SshClient::SshClient() : _connected(false), _lastError(""), _session(nullptr), _channel(nullptr) {
 #if SSH_AVAILABLE
-  // libssh初期化
-  libssh_begin();
+  // libssh初期化（一度だけ）
+  if (!_libsshInitialized) {
+    Serial.println("[SSH] Initializing libssh...");
+    libssh_begin();
+    _libsshInitialized = true;
+    Serial.println("[SSH] libssh initialized");
+  }
 #endif
 }
 
@@ -164,8 +172,8 @@ SshExecResult SshClient::exec(const String& command) {
     return result;
   }
 
-  // 出力読み取り
-  char buffer[4096];
+  // 出力読み取り（スタック節約のため1KBに制限）
+  char buffer[1024];
   int nbytes;
 
   // stdout読み取り

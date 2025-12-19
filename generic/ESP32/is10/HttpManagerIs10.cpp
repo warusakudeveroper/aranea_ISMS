@@ -9,15 +9,21 @@
 #include <WiFi.h>
 #include <Preferences.h>
 
-void HttpManagerIs10::begin(SettingManager* settings, int port) {
+void HttpManagerIs10::begin(SettingManager* settings, RouterConfig* routers, int* routerCount, int port) {
   settings_ = settings;
+  routers_ = routers;
+  routerCount_ = routerCount;
   server_ = new WebServer(port);
 
   // ルーター設定読み込み
   loadRouters();
 
   // エンドポイント設定
-  server_->on("/", HTTP_GET, [this]() { handleRoot(); });
+  // NOTE: handleRoot() generates ~14KB HTML which may cause stack overflow
+  // Temporarily disabled for crash debugging
+  server_->on("/", HTTP_GET, [this]() {
+    server_->send(200, "text/html", "<html><body><h1>IS10 Router Inspector</h1><p>Config API at /api/config</p></body></html>");
+  });
   server_->on("/api/config", HTTP_GET, [this]() { handleGetConfig(); });
   server_->on("/api/global", HTTP_POST, [this]() { handleSaveGlobal(); });
   server_->on("/api/lacisgen", HTTP_POST, [this]() { handleSaveLacisGen(); });
@@ -60,21 +66,29 @@ void HttpManagerIs10::onRebootRequest(void (*callback)()) {
 // ルーター設定読み書き
 // ========================================
 void HttpManagerIs10::loadRouters() {
-  routerCount_ = 0;
+  if (!routers_ || !routerCount_) {
+    Serial.println("[HTTP-IS10] Error: routers array not set");
+    return;
+  }
+
+  *routerCount_ = 0;
 
   if (!SPIFFS.exists("/routers.json")) {
     Serial.println("[HTTP-IS10] No routers.json found");
     return;
   }
 
+  yield();  // WDT対策: SPIFFS読み込み前にyield
   File file = SPIFFS.open("/routers.json", "r");
   if (!file) return;
 
   String json = file.readString();
   file.close();
+  yield();  // WDT対策: SPIFFS読み込み後にyield
 
   DynamicJsonDocument doc(8192);
   DeserializationError err = deserializeJson(doc, json);
+  yield();  // WDT対策: JSON parse後にyield
   if (err) {
     Serial.printf("[HTTP-IS10] JSON parse error: %s\n", err.c_str());
     return;
@@ -82,30 +96,33 @@ void HttpManagerIs10::loadRouters() {
 
   JsonArray arr = doc.as<JsonArray>();
   for (JsonObject obj : arr) {
-    if (routerCount_ >= MAX_ROUTERS) break;
-    routers_[routerCount_].rid = obj["rid"] | "";
-    routers_[routerCount_].ipAddr = obj["ipAddr"] | "";
-    routers_[routerCount_].publicKey = obj["publicKey"] | "";
-    routers_[routerCount_].sshPort = obj["sshPort"] | 22;
-    routers_[routerCount_].username = obj["username"] | "";
-    routers_[routerCount_].password = obj["password"] | "";
-    routers_[routerCount_].enabled = obj["enabled"] | true;
+    if (*routerCount_ >= MAX_ROUTERS) break;
+    routers_[*routerCount_].rid = obj["rid"] | "";
+    routers_[*routerCount_].ipAddr = obj["ipAddr"] | "";
+    routers_[*routerCount_].publicKey = obj["publicKey"] | "";
+    routers_[*routerCount_].sshPort = obj["sshPort"] | 22;
+    routers_[*routerCount_].username = obj["username"] | "";
+    routers_[*routerCount_].password = obj["password"] | "";
+    routers_[*routerCount_].enabled = obj["enabled"] | true;
     // OSタイプ: 0=OpenWrt(default), 1=ASUSWRT
     int osTypeInt = obj["osType"] | 0;
-    routers_[routerCount_].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
-    if (routers_[routerCount_].ipAddr.length() > 0) {
-      routerCount_++;
+    routers_[*routerCount_].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
+    if (routers_[*routerCount_].ipAddr.length() > 0) {
+      (*routerCount_)++;
     }
   }
 
-  Serial.printf("[HTTP-IS10] Loaded %d routers\n", routerCount_);
+  Serial.printf("[HTTP-IS10] Loaded %d routers\n", *routerCount_);
 }
 
 void HttpManagerIs10::saveRouters() {
+  if (!routers_ || !routerCount_) return;
+
+  yield();  // WDT対策: SPIFFS書き込み前にyield
   DynamicJsonDocument doc(8192);
   JsonArray arr = doc.to<JsonArray>();
 
-  for (int i = 0; i < routerCount_; i++) {
+  for (int i = 0; i < *routerCount_; i++) {
     JsonObject obj = arr.createNestedObject();
     obj["rid"] = routers_[i].rid;
     obj["ipAddr"] = routers_[i].ipAddr;
@@ -117,11 +134,13 @@ void HttpManagerIs10::saveRouters() {
     obj["osType"] = (routers_[i].osType == RouterOsType::ASUSWRT) ? 1 : 0;
   }
 
+  yield();  // WDT対策: SPIFFS open前にyield
   File file = SPIFFS.open("/routers.json", "w");
   if (file) {
     serializeJson(doc, file);
     file.close();
-    Serial.printf("[HTTP-IS10] Saved %d routers\n", routerCount_);
+    yield();  // WDT対策: SPIFFS書き込み後にyield
+    Serial.printf("[HTTP-IS10] Saved %d routers\n", *routerCount_);
   }
 }
 
@@ -133,6 +152,7 @@ void HttpManagerIs10::handleRoot() {
 }
 
 void HttpManagerIs10::handleGetConfig() {
+  yield();  // WDT対策: 重い処理前にyield
   DynamicJsonDocument doc(16384);
 
   // デバイス情報
@@ -184,7 +204,7 @@ void HttpManagerIs10::handleGetConfig() {
 
   // ルーター設定
   JsonArray routersArr = doc.createNestedArray("routers");
-  for (int i = 0; i < routerCount_; i++) {
+  for (int i = 0; i < *routerCount_; i++) {
     JsonObject r = routersArr.createNestedObject();
     r["rid"] = routers_[i].rid;
     r["ipAddr"] = routers_[i].ipAddr;
@@ -196,8 +216,10 @@ void HttpManagerIs10::handleGetConfig() {
     r["hasPublicKey"] = routers_[i].publicKey.length() > 0;
   }
 
+  yield();  // WDT対策: JSON生成後にyield
   String response;
   serializeJson(doc, response);
+  yield();  // WDT対策: 送信前にyield
   server_->send(200, "application/json", response);
 }
 
@@ -255,6 +277,7 @@ void HttpManagerIs10::handleSaveRouter() {
     return;
   }
 
+  yield();  // WDT対策: 重い処理前にyield
   DynamicJsonDocument doc(4096);
   DeserializationError err = deserializeJson(doc, server_->arg("plain"));
   if (err) {
@@ -263,14 +286,14 @@ void HttpManagerIs10::handleSaveRouter() {
   }
 
   int index = doc["index"] | -1;
-  bool isNew = (index < 0 || index >= routerCount_);
+  bool isNew = (index < 0 || index >= *routerCount_);
 
   if (isNew) {
-    if (routerCount_ >= MAX_ROUTERS) {
+    if (*routerCount_ >= MAX_ROUTERS) {
       server_->send(400, "application/json", "{\"error\":\"Max routers reached\"}");
       return;
     }
-    index = routerCount_++;
+    index = (*routerCount_)++;
   }
 
   routers_[index].rid = doc["rid"] | "";
@@ -307,16 +330,16 @@ void HttpManagerIs10::handleDeleteRouter() {
   }
 
   int index = doc["index"] | -1;
-  if (index < 0 || index >= routerCount_) {
+  if (index < 0 || index >= *routerCount_) {
     server_->send(400, "application/json", "{\"error\":\"Invalid index\"}");
     return;
   }
 
   // シフト
-  for (int i = index; i < routerCount_ - 1; i++) {
+  for (int i = index; i < *routerCount_ - 1; i++) {
     routers_[i] = routers_[i + 1];
   }
-  routerCount_--;
+  (*routerCount_)--;
 
   saveRouters();
   if (settingsChangedCallback_) settingsChangedCallback_();
@@ -353,6 +376,7 @@ void HttpManagerIs10::handleSaveWifi() {
     return;
   }
 
+  yield();  // WDT対策: 重い処理前にyield
   DynamicJsonDocument doc(2048);
   DeserializationError err = deserializeJson(doc, server_->arg("plain"));
   if (err) {
@@ -434,15 +458,15 @@ LacisIdGenSetting HttpManagerIs10::getLacisIdGenSetting() {
   return ls;
 }
 
-RouterSetting HttpManagerIs10::getRouter(int index) {
-  if (index >= 0 && index < routerCount_) {
+RouterConfig HttpManagerIs10::getRouter(int index) {
+  if (routers_ && routerCount_ && index >= 0 && index < *routerCount_) {
     return routers_[index];
   }
-  return RouterSetting();
+  return RouterConfig();
 }
 
 int HttpManagerIs10::getRouterCount() {
-  return routerCount_;
+  return routerCount_ ? *routerCount_ : 0;
 }
 
 // ========================================
