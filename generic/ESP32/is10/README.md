@@ -10,7 +10,7 @@ OpenWrt/AsusWRT系ルーターにSSHアクセスして情報を収集し、ク�
 | モデル名 | `Openwrt_RouterInspector` |
 | ProductType | `010` |
 | ProductCode | `0001` |
-| ファームウェアバージョン | `1.0.0` |
+| ファームウェアバージョン | `1.1.0` |
 | 対象ボード | ESP32-DevKitC (4MB Flash) |
 | 使用ライブラリ | AraneaGlobalGeneric |
 | ホスト名フォーマット | `ar-is10-{MAC下6桁}` (例: `ar-is10-AABBCC`) |
@@ -24,14 +24,26 @@ OpenWrt/AsusWRT系ルーターにSSHアクセスして情報を収集し、ク�
 - **Web管理UI**: ブラウザから全設定を変更可能
 
 ### 取得可能なルーター情報
+
+#### OpenWrt
 | 情報 | 取得コマンド |
 |-----|-------------|
 | WAN IP | `ifconfig eth0` / `ifconfig wan` |
-| LAN IP | `ifconfig br-lan` / `ifconfig lan` |
-| 2.4GHz SSID | `uci show wireless \| grep ssid` |
-| 5GHz SSID | `uci show wireless \| grep ssid` |
+| LAN IP | `ifconfig br-lan` |
+| 2.4GHz SSID | `uci show wireless \| grep ssid` (wlan0/default_radio0) |
+| 5GHz SSID | `uci show wireless \| grep ssid` (wlan1/default_radio1) |
 | 接続クライアント数 | `cat /tmp/dhcp.leases` |
 | MACアドレス | `/sys/class/net/br-lan/address` |
+
+#### ASUSWRT
+| 情報 | 取得コマンド |
+|-----|-------------|
+| WAN IP | `nvram get wan0_ipaddr` |
+| LAN IP | `ifconfig br0` |
+| 2.4GHz SSID | `nvram get wl0_ssid` |
+| 5GHz SSID | `nvram get wl1_ssid` |
+| 接続クライアント数 | `cat /var/lib/misc/dnsmasq.leases` |
+| MACアドレス | `/sys/class/net/br0/address` |
 
 ### ネットワーク機能
 - WiFi STA接続（6つのSSIDを順次試行）
@@ -117,6 +129,7 @@ OpenWrt/AsusWRT系ルーターにSSHアクセスして情報を収集し、ク�
 ルーター設定（最大20台）
 - RID (Resource ID)
 - IPアドレス / SSHポート
+- **OS Type** (OpenWrt / ASUSWRT)
 - ユーザー名 / パスワード
 - 公開鍵（オプション）
 - 有効/無効フラグ
@@ -317,6 +330,11 @@ mcp__mcp-arduino-esp32__compile(sketch_path="is10.ino")
 - 同一ネットワーク上にいることを確認
 
 ## 変更履歴
+
+### v1.1.0
+- **ASUSWRT対応追加**: ルーター毎にOS Type（OpenWrt / ASUSWRT）を選択可能
+- 両OSに対応したSSHコマンド実装
+- Web UIにOS Type選択ドロップダウン追加
 
 ### v1.0.0
 - 初回リリース

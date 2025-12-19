@@ -90,6 +90,9 @@ void HttpManagerIs10::loadRouters() {
     routers_[routerCount_].username = obj["username"] | "";
     routers_[routerCount_].password = obj["password"] | "";
     routers_[routerCount_].enabled = obj["enabled"] | true;
+    // OSタイプ: 0=OpenWrt(default), 1=ASUSWRT
+    int osTypeInt = obj["osType"] | 0;
+    routers_[routerCount_].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
     if (routers_[routerCount_].ipAddr.length() > 0) {
       routerCount_++;
     }
@@ -111,6 +114,7 @@ void HttpManagerIs10::saveRouters() {
     obj["username"] = routers_[i].username;
     obj["password"] = routers_[i].password;
     obj["enabled"] = routers_[i].enabled;
+    obj["osType"] = (routers_[i].osType == RouterOsType::ASUSWRT) ? 1 : 0;
   }
 
   File file = SPIFFS.open("/routers.json", "w");
@@ -187,6 +191,7 @@ void HttpManagerIs10::handleGetConfig() {
     r["sshPort"] = routers_[i].sshPort;
     r["username"] = routers_[i].username;
     r["enabled"] = routers_[i].enabled;
+    r["osType"] = (routers_[i].osType == RouterOsType::ASUSWRT) ? 1 : 0;
     // publicKey, passwordは長いので省略
     r["hasPublicKey"] = routers_[i].publicKey.length() > 0;
   }
@@ -279,6 +284,9 @@ void HttpManagerIs10::handleSaveRouter() {
     routers_[index].password = doc["password"] | "";
   }
   routers_[index].enabled = doc["enabled"] | true;
+  // OSタイプ: 0=OpenWrt(default), 1=ASUSWRT
+  int osTypeInt = doc["osType"] | 0;
+  routers_[index].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
 
   saveRouters();
   if (settingsChangedCallback_) settingsChangedCallback_();
@@ -654,11 +662,13 @@ function renderWifiPairs() {
 function renderRouters() {
   const list = document.getElementById('router-list');
   list.innerHTML = '';
+  const osTypes = ['OpenWrt', 'ASUSWRT'];
   (config.routers || []).forEach((r, i) => {
+    const osLabel = osTypes[r.osType || 0];
     list.innerHTML += `
       <div class="router-item">
         <div class="router-info">
-          <div class="rid">RID: ${r.rid} ${r.enabled ? '' : '(disabled)'}</div>
+          <div class="rid">RID: ${r.rid} ${r.enabled ? '' : '(disabled)'} <span style="color:#3182ce">[${osLabel}]</span></div>
           <div class="ip">${r.ipAddr}:${r.sshPort} - ${r.username}</div>
         </div>
         <div class="router-actions">
@@ -732,6 +742,7 @@ function addRouter() {
   document.getElementById('r-user').value = '';
   document.getElementById('r-pass').value = '';
   document.getElementById('r-key').value = '';
+  document.getElementById('r-ostype').value = '0';
   document.getElementById('r-enabled').checked = true;
   document.getElementById('router-modal').style.display = 'block';
 }
@@ -745,6 +756,7 @@ function editRouter(i) {
   document.getElementById('r-user').value = r.username;
   document.getElementById('r-pass').value = '';
   document.getElementById('r-key').value = '';
+  document.getElementById('r-ostype').value = r.osType || 0;
   document.getElementById('r-enabled').checked = r.enabled;
   document.getElementById('router-modal').style.display = 'block';
 }
@@ -758,6 +770,7 @@ async function saveRouter() {
     username: document.getElementById('r-user').value,
     password: document.getElementById('r-pass').value,
     publicKey: document.getElementById('r-key').value,
+    osType: parseInt(document.getElementById('r-ostype').value),
     enabled: document.getElementById('r-enabled').checked
   });
   document.getElementById('router-modal').style.display = 'none';
@@ -819,7 +832,7 @@ String HttpManagerIs10::generateHTML() {
 <body>
 <div class="container">
   <h1>ar-is10 Router Inspector</h1>
-  <p class="subtitle">OpenWrt Router Information Collector</p>
+  <p class="subtitle">OpenWrt / ASUSWRT Router Information Collector</p>
 
   <div class="card">
     <div class="card-title">Device Information</div>
@@ -983,9 +996,18 @@ String HttpManagerIs10::generateHTML() {
         <input type="number" id="r-port" value="22">
       </div>
     </div>
-    <div class="form-group">
-      <label>IP Address</label>
-      <input type="text" id="r-ip" placeholder="192.168.x.x">
+    <div class="form-row">
+      <div class="form-group">
+        <label>IP Address</label>
+        <input type="text" id="r-ip" placeholder="192.168.x.x">
+      </div>
+      <div class="form-group">
+        <label>OS Type</label>
+        <select id="r-ostype">
+          <option value="0">OpenWrt</option>
+          <option value="1">ASUSWRT</option>
+        </select>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group">

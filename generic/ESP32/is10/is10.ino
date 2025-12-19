@@ -48,7 +48,7 @@ static const char* PRODUCT_TYPE = "010";
 static const char* PRODUCT_CODE = "0001";
 static const char* DEVICE_TYPE = "ar-is10";
 static const char* DEVICE_MODEL = "Openwrt_RouterInspector";
-static const char* FIRMWARE_VERSION = "1.0.0";
+static const char* FIRMWARE_VERSION = "1.1.0";
 
 // テナント設定はAraneaSettings.h で定義
 // 大量生産: AraneaSettings.hを施設用に編集してビルド
@@ -77,6 +77,11 @@ static const unsigned long AP_MODE_TIMEOUT_MS = 300000;       // APモード5分
 // #define MAX_ROUTERS 20
 
 // ========================================
+// ルーターOSタイプ（HttpManagerIs10.hで定義）
+// ========================================
+// enum class RouterOsType { OPENWRT, ASUSWRT };
+
+// ========================================
 // ルーター設定構造体
 // ========================================
 struct RouterConfig {
@@ -87,6 +92,7 @@ struct RouterConfig {
   String username;      // ユーザー名
   String password;      // パスワード
   bool enabled;         // 有効フラグ
+  RouterOsType osType;  // OSタイプ（OpenWrt / ASUSWRT）
 };
 
 // ========================================
@@ -222,6 +228,9 @@ void loadIs10Config() {
           routers[routerCount].username = obj["username"] | "";
           routers[routerCount].password = obj["password"] | "";
           routers[routerCount].enabled = obj["enabled"] | true;
+          // OSタイプ: 0=OpenWrt(default), 1=ASUSWRT
+          int osTypeInt = obj["osType"] | 0;
+          routers[routerCount].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
           if (routers[routerCount].ipAddr.length() > 0) {
             routerCount++;
           }
@@ -261,6 +270,7 @@ void saveIs10Config() {
     obj["username"] = routers[i].username;
     obj["password"] = routers[i].password;
     obj["enabled"] = routers[i].enabled;
+    obj["osType"] = (routers[i].osType == RouterOsType::ASUSWRT) ? 1 : 0;
   }
 
   File file = SPIFFS.open("/routers.json", "w");
@@ -380,8 +390,11 @@ int parseClientCount(const String& output) {
 // SSH経由でルーター情報取得
 // ========================================
 bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
-  Serial.printf("[SSH] Connecting to %s:%d as %s\n",
-    router.ipAddr.c_str(), router.sshPort, router.username.c_str());
+  bool isAsuswrt = (router.osType == RouterOsType::ASUSWRT);
+  const char* osName = isAsuswrt ? "ASUSWRT" : "OpenWrt";
+
+  Serial.printf("[SSH] Connecting to %s:%d as %s (%s)\n",
+    router.ipAddr.c_str(), router.sshPort, router.username.c_str(), osName);
 
   // 初期化
   info.rid = router.rid;
@@ -409,46 +422,101 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   }
 
   info.online = true;
+  SshExecResult execResult;
 
-  // WAN IP取得（eth0またはwan）
-  SshExecResult execResult = ssh.exec("ifconfig eth0 2>/dev/null || ifconfig wan 2>/dev/null");
+  // ========================================
+  // WAN IP取得
+  // ========================================
+  if (isAsuswrt) {
+    // ASUSWRT: nvramからWAN IPを取得
+    execResult = ssh.exec("nvram get wan0_ipaddr 2>/dev/null");
+  } else {
+    // OpenWrt: ifconfigからWAN IPを取得
+    execResult = ssh.exec("ifconfig eth0 2>/dev/null || ifconfig wan 2>/dev/null");
+  }
   if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-    info.wanIp = parseIpFromIfconfig(execResult.output);
+    if (isAsuswrt) {
+      info.wanIp = execResult.output;
+      info.wanIp.trim();
+    } else {
+      info.wanIp = parseIpFromIfconfig(execResult.output);
+    }
     Serial.printf("[SSH] WAN IP: %s\n", info.wanIp.c_str());
   }
 
-  // LAN IP取得（br-lanまたはlan）
-  execResult = ssh.exec("ifconfig br-lan 2>/dev/null || ifconfig lan 2>/dev/null");
+  // ========================================
+  // LAN IP取得
+  // ========================================
+  if (isAsuswrt) {
+    // ASUSWRT: br0インターフェース
+    execResult = ssh.exec("ifconfig br0 2>/dev/null");
+  } else {
+    // OpenWrt: br-lanインターフェース
+    execResult = ssh.exec("ifconfig br-lan 2>/dev/null || ifconfig lan 2>/dev/null");
+  }
   if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
     info.lanIp = parseIpFromIfconfig(execResult.output);
     Serial.printf("[SSH] LAN IP: %s\n", info.lanIp.c_str());
   }
 
+  // ========================================
   // SSID取得
-  execResult = ssh.exec("uci show wireless 2>/dev/null | grep ssid");
-  if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-    // 2.4GHz (wlan0 or radio0)
-    info.ssid24 = parseSsidFromUci(execResult.output, "wlan0");
-    if (info.ssid24.length() == 0) {
-      info.ssid24 = parseSsidFromUci(execResult.output, "default_radio0");
+  // ========================================
+  if (isAsuswrt) {
+    // ASUSWRT: nvramからSSIDを取得
+    execResult = ssh.exec("nvram get wl0_ssid 2>/dev/null");
+    if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
+      info.ssid24 = execResult.output;
+      info.ssid24.trim();
     }
-    // 5GHz (wlan1 or radio1)
-    info.ssid50 = parseSsidFromUci(execResult.output, "wlan1");
-    if (info.ssid50.length() == 0) {
-      info.ssid50 = parseSsidFromUci(execResult.output, "default_radio1");
+    execResult = ssh.exec("nvram get wl1_ssid 2>/dev/null");
+    if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
+      info.ssid50 = execResult.output;
+      info.ssid50.trim();
     }
-    Serial.printf("[SSH] SSID 2.4G: %s, 5G: %s\n", info.ssid24.c_str(), info.ssid50.c_str());
+  } else {
+    // OpenWrt: uciからSSIDを取得
+    execResult = ssh.exec("uci show wireless 2>/dev/null | grep ssid");
+    if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
+      // 2.4GHz (wlan0 or radio0)
+      info.ssid24 = parseSsidFromUci(execResult.output, "wlan0");
+      if (info.ssid24.length() == 0) {
+        info.ssid24 = parseSsidFromUci(execResult.output, "default_radio0");
+      }
+      // 5GHz (wlan1 or radio1)
+      info.ssid50 = parseSsidFromUci(execResult.output, "wlan1");
+      if (info.ssid50.length() == 0) {
+        info.ssid50 = parseSsidFromUci(execResult.output, "default_radio1");
+      }
+    }
   }
+  Serial.printf("[SSH] SSID 2.4G: %s, 5G: %s\n", info.ssid24.c_str(), info.ssid50.c_str());
 
+  // ========================================
   // DHCPリース（接続クライアント数）
-  execResult = ssh.exec("cat /tmp/dhcp.leases 2>/dev/null");
+  // ========================================
+  if (isAsuswrt) {
+    // ASUSWRT: /var/lib/misc/dnsmasq.leases
+    execResult = ssh.exec("cat /var/lib/misc/dnsmasq.leases 2>/dev/null");
+  } else {
+    // OpenWrt: /tmp/dhcp.leases
+    execResult = ssh.exec("cat /tmp/dhcp.leases 2>/dev/null");
+  }
   if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
     info.clientCount = parseClientCount(execResult.output);
     Serial.printf("[SSH] Client count: %d\n", info.clientCount);
   }
 
+  // ========================================
   // MACアドレス取得（LacisID生成用）
-  execResult = ssh.exec("cat /sys/class/net/br-lan/address 2>/dev/null || cat /sys/class/net/eth0/address 2>/dev/null");
+  // ========================================
+  if (isAsuswrt) {
+    // ASUSWRT: br0インターフェースのMAC
+    execResult = ssh.exec("cat /sys/class/net/br0/address 2>/dev/null");
+  } else {
+    // OpenWrt: br-lanインターフェースのMAC
+    execResult = ssh.exec("cat /sys/class/net/br-lan/address 2>/dev/null || cat /sys/class/net/eth0/address 2>/dev/null");
+  }
   if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
     String mac = execResult.output;
     mac.trim();
@@ -457,7 +525,7 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   }
 
   ssh.disconnect();
-  Serial.println("[SSH] Data collection complete");
+  Serial.printf("[SSH] Data collection complete (%s)\n", osName);
 
   return true;
 }

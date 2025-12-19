@@ -16,6 +16,12 @@
 // 最大ルーター数
 #define MAX_ROUTERS 20
 
+// ルーターOSタイプ
+enum class RouterOsType {
+  OPENWRT = 0,   // OpenWrt (uci, br-lan, /tmp/dhcp.leases)
+  ASUSWRT = 1    // ASUSWRT (nvram, br0, /var/lib/misc/dnsmasq.leases)
+};
+
 // ルーター設定構造体
 struct RouterSetting {
   String rid;
@@ -25,6 +31,7 @@ struct RouterSetting {
   String username;
   String password;
   bool enabled;
+  RouterOsType osType;  // OpenWrt or ASUSWRT
 };
 
 // グローバル設定構造体
