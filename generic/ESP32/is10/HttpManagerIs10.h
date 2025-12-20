@@ -16,10 +16,13 @@
 
 // グローバル設定構造体
 struct GlobalSetting {
-  String endpoint;
-  unsigned long timeout;
-  int retryCount;
-  unsigned long interval;
+  String endpoint;           // CelestialGlobe endpoint URL
+  String celestialSecret;    // X-Celestial-Secret header value
+  int scanIntervalSec;       // スキャン間隔（秒）
+  bool reportClients;        // クライアントリスト送信フラグ
+  unsigned long timeout;     // SSHタイムアウト（ms）
+  int retryCount;            // リトライ回数
+  unsigned long interval;    // ルーター間インターバル（ms）
 };
 
 // LacisID生成設定

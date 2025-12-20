@@ -23,18 +23,94 @@
 #include <Wire.h>
 #include <WiFi.h>
 
-// Brownout disable
+// Reset reason & RTC memory for crash debugging
+#include "esp_system.h"
+#include "rom/rtc.h"
+
+// Brownout disable (現在は無効化 - 分類情報取得のため)
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
-#include <WiFiClientSecure.h>
+// DISABLED: LibSSH-ESP32 TLS競合テストのため無効化
+// #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <esp_mac.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
+// REMOVED: #include <esp_task_wdt.h>  // WDT介入禁止
+
+// MQTT用（is04から流用）
+#include <mqtt_client.h>
+#include <esp_crt_bundle.h>
+
+// ========================================
+// RTC memory for crash position tracking
+// ========================================
+RTC_DATA_ATTR uint32_t bootCount = 0;
+RTC_DATA_ATTR uint32_t lastStage = 0;
+
+// Stage definitions for crash debugging
+enum DebugStage : uint32_t {
+  STAGE_BOOT_START = 1,
+  STAGE_SERIAL_INIT = 2,
+  STAGE_GPIO_INIT = 3,
+  STAGE_SPIFFS_INIT = 4,
+  STAGE_SETTINGS_INIT = 5,
+  STAGE_DISPLAY_INIT = 6,
+  STAGE_LACIS_GEN = 7,
+  STAGE_WIFI_START = 8,
+  STAGE_WIFI_DONE = 9,
+  STAGE_NTP_SYNC = 10,
+  STAGE_ARANEA_REG = 11,
+  STAGE_CONFIG_LOAD = 12,
+  STAGE_HTTP_MGR_INIT = 13,
+  STAGE_SSH_BEGIN = 14,
+  STAGE_SSH_DONE = 15,
+  STAGE_SETUP_COMPLETE = 20,
+  STAGE_LOOP_RUNNING = 100
+};
+
+static const char* resetReasonStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:  return "ESP_RST_POWERON";
+    case ESP_RST_SW:       return "ESP_RST_SW";
+    case ESP_RST_PANIC:    return "ESP_RST_PANIC";
+    case ESP_RST_INT_WDT:  return "ESP_RST_INT_WDT";
+    case ESP_RST_TASK_WDT: return "ESP_RST_TASK_WDT";
+    case ESP_RST_WDT:      return "ESP_RST_WDT";
+    case ESP_RST_BROWNOUT: return "ESP_RST_BROWNOUT";
+    case ESP_RST_SDIO:     return "ESP_RST_SDIO";
+    default:               return "ESP_RST_UNKNOWN";
+  }
+}
+
+static const char* stageStr(uint32_t stage) {
+  switch (stage) {
+    case STAGE_BOOT_START:     return "BOOT_START";
+    case STAGE_SERIAL_INIT:    return "SERIAL_INIT";
+    case STAGE_GPIO_INIT:      return "GPIO_INIT";
+    case STAGE_SPIFFS_INIT:    return "SPIFFS_INIT";
+    case STAGE_SETTINGS_INIT:  return "SETTINGS_INIT";
+    case STAGE_DISPLAY_INIT:   return "DISPLAY_INIT";
+    case STAGE_LACIS_GEN:      return "LACIS_GEN";
+    case STAGE_WIFI_START:     return "WIFI_START";
+    case STAGE_WIFI_DONE:      return "WIFI_DONE";
+    case STAGE_NTP_SYNC:       return "NTP_SYNC";
+    case STAGE_ARANEA_REG:     return "ARANEA_REG";
+    case STAGE_CONFIG_LOAD:    return "CONFIG_LOAD";
+    case STAGE_HTTP_MGR_INIT:  return "HTTP_MGR_INIT";
+    case STAGE_SSH_BEGIN:      return "SSH_BEGIN";
+    case STAGE_SSH_DONE:       return "SSH_DONE";
+    case STAGE_SETUP_COMPLETE: return "SETUP_COMPLETE";
+    case STAGE_LOOP_RUNNING:   return "LOOP_RUNNING";
+    default:                   return "UNKNOWN";
+  }
+}
 
 // LibSSH-ESP32を明示的にインクルード（依存関係解決のため）
+// Core 3.0.5で再有効化
 #include "libssh_esp32.h"
+#include <libssh/libssh.h>  // ssh_finalize() 用
 
 // AraneaGlobal共通モジュール
 #include "AraneaSettings.h"
@@ -51,14 +127,43 @@
 #include "Operator.h"
 #include "SshClient.h"
 
+// FreeRTOS for stack monitoring
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+// ========================================
+// デバッグ用: スタック残量ログ
+// ========================================
+static void logStack(const char* tag) {
+  UBaseType_t words = uxTaskGetStackHighWaterMark(NULL);
+  Serial.printf("[STACK] %s high_water=%u words (%u bytes)\n",
+                tag, (unsigned)words, (unsigned)(words * sizeof(StackType_t)));
+  // REMOVED: Serial.flush() - ブロッキング処理削除
+}
+
 // ========================================
 // デバイス定数
 // ========================================
 static const char* PRODUCT_TYPE = "010";
 static const char* PRODUCT_CODE = "0001";
-static const char* DEVICE_TYPE = "ar-is10";
+
+// ========================================
+// デバイス識別子（用途別分離 - 仕様書準拠）
+// ========================================
+// AraneaDeviceGate / deviceStateReport用（canonical）
+// mobes側でaraneaDeviceConfigのバリデーション・MQTT対象判定に使用
+static const char* ARANEA_DEVICE_TYPE = "aranea_ar-is10";
+
+// CelestialGlobe payload.source用（別軸）
+// Universal Ingest JSONのpayload.sourceに入れる
+static const char* CELESTIAL_SOURCE = "ar-is10";
+
+// AP SSID / hostname等 表示用
+// araneaDeviceGateのuserObject.typeには使用禁止
+static const char* DEVICE_SHORT_NAME = "ar-is10";
+
 static const char* DEVICE_MODEL = "Openwrt_RouterInspector";
-static const char* FIRMWARE_VERSION = "1.1.0";
+static const char* FIRMWARE_VERSION = "1.2.0";  // 通信系実装でバージョンアップ
 
 // テナント設定はAraneaSettings.h で定義
 // 大量生産: AraneaSettings.hを施設用に編集してビルド
@@ -76,7 +181,7 @@ static const int BTN_RESET = 26;  // ファクトリーリセットボタン
 // タイミング定数
 // ========================================
 static const unsigned long ROUTER_POLL_INTERVAL_MS = 30000;   // ルーターポーリング間隔（30秒）
-static const unsigned long SSH_TIMEOUT_MS = 60000;            // SSHタイムアウト（ASUSWRT遅延対策）
+static const unsigned long SSH_TIMEOUT_MS = 90000;            // SSHタイムアウト（ASUSWRT遅延対策: 90秒）
 static const int SSH_RETRY_COUNT = 2;                         // リトライ回数
 static const unsigned long ROUTER_INTERVAL_MS = 30000;        // 次ルーターまでのインターバル
 static const unsigned long DISPLAY_UPDATE_MS = 1000;
@@ -158,11 +263,223 @@ int successCount = 0;
 int failCount = 0;
 
 // HTTPS用のグローバルSecureClient（TLSバッファ再利用でメモリ節約）
-WiFiClientSecure secureClient;
-bool secureClientInitialized = false;
+// DISABLED: LibSSH-ESP32 TLS競合テストのため無効化
+// WiFiClientSecure secureClient;
+// bool secureClientInitialized = false;
 
 // SSH用のグローバルクライアント（メモリフラグメンテーション防止）
 SshClient* globalSshClient = nullptr;
+
+// SSH完了後のクリーンアップをメインループで行うためのフラグ
+// SSHタスク内から ssh_finalize() を呼ぶとクラッシュするため、
+// メインループのコンテキストで呼び出す
+volatile bool sshCleanupNeeded = false;
+TaskHandle_t sshTaskHandle = nullptr;
+
+// フラグベースSSH制御（ミニマル版アプローチ）
+volatile bool sshInProgress = false;
+volatile bool sshDone = false;
+volatile bool sshSuccess = false;
+
+// ========================================
+// MQTT関連（is04から流用）
+// ========================================
+String mqttWsUrl;
+esp_mqtt_client_handle_t mqttClient = nullptr;
+bool mqttConnected = false;
+unsigned long lastMqttReconnect = 0;
+int savedSchemaVersion = 0;  // NVS保存済みschemaVersion
+
+// ========================================
+// deviceStateReport / heartbeat関連
+// ========================================
+static const unsigned long HEARTBEAT_INTERVAL_MS = 60000;  // 60秒間隔
+unsigned long lastHeartbeat = 0;
+bool initialStateReportSent = false;
+
+// ========================================
+// CelestialGlobe送信用ルーター情報配列
+// SSHタスクで取得した情報を格納
+// ========================================
+static RouterInfo collectedRouterInfo[MAX_ROUTERS];
+static int collectedRouterCount = 0;
+
+// ========================================
+// SSH専用タスク用構造体（51KB+ スタック）
+// LibSSH-ESP32公式exampleに従い、SSH操作を専用タスクで実行
+// ========================================
+static const uint32_t SSH_TASK_STACK_SIZE = 51200;  // 51.2KB (公式example同様)
+
+struct SshTaskParams {
+  const RouterConfig* router;
+  RouterInfo* info;
+  bool success;
+  SemaphoreHandle_t doneSem;
+};
+
+// SSH専用タスク関数（ミニマル版アプローチ - フラグベース）
+// グローバル変数を直接参照し、セマフォではなくフラグで完了通知
+// CelestialGlobe送信用にcollectedRouterInfo[]に結果を格納
+void sshTaskFunction(void* pvParameters) {
+  int idx = currentRouterIndex;
+  RouterConfig& router = routers[idx];
+
+  Serial.printf("[SSH] Router %d/%d: %s (%s)\n", idx + 1, routerCount, router.rid.c_str(), router.ipAddr.c_str());
+
+  // collectedRouterInfo初期化
+  RouterInfo& info = collectedRouterInfo[idx];
+  info.rid = router.rid;
+  info.wanIp = "";
+  info.lanIp = "";
+  info.ssid24 = "";
+  info.ssid50 = "";
+  info.clientCount = 0;
+  info.online = false;
+  info.lastUpdate = millis();
+
+  libssh_begin();
+
+  ssh_session session = ssh_new();
+  if (session == NULL) {
+    Serial.println("[SSH] Failed to create session");
+    ssh_finalize();
+    sshSuccess = false;
+    sshDone = true;
+    vTaskDelete(NULL);
+    return;
+  }
+
+  ssh_options_set(session, SSH_OPTIONS_HOST, router.ipAddr.c_str());
+  unsigned int port = router.sshPort;
+  ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+  ssh_options_set(session, SSH_OPTIONS_USER, router.username.c_str());
+  long timeout = 30;  // ミニマル版と同じ30秒
+  ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout);
+
+  int rc = ssh_connect(session);
+  if (rc != SSH_OK) {
+    Serial.printf("[SSH] Connect failed: %s\n", ssh_get_error(session));
+    ssh_free(session);
+    ssh_finalize();
+    sshSuccess = false;
+    sshDone = true;
+    vTaskDelete(NULL);
+    return;
+  }
+
+  rc = ssh_userauth_password(session, NULL, router.password.c_str());
+  if (rc != SSH_AUTH_SUCCESS) {
+    Serial.printf("[SSH] Auth failed: %s\n", ssh_get_error(session));
+    ssh_disconnect(session);
+    ssh_free(session);
+    ssh_finalize();
+    sshSuccess = false;
+    sshDone = true;
+    vTaskDelete(NULL);
+    return;
+  }
+
+  // 接続成功 - 情報取得開始
+  info.online = true;
+  ssh_channel channel = ssh_channel_new(session);
+
+  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
+    // WAN IP取得
+    if (ssh_channel_request_exec(channel, "nvram get wan0_ipaddr") == SSH_OK) {
+      char buf[256];
+      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+      if (n > 0) {
+        buf[n] = '\0';
+        String wan = String(buf);
+        wan.trim();
+        info.wanIp = wan;
+        Serial.printf("[SSH] WAN: %s\n", wan.c_str());
+        sshSuccess = true;
+      }
+    }
+    ssh_channel_send_eof(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
+  }
+
+  // 追加コマンド: LAN IP
+  channel = ssh_channel_new(session);
+  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
+    if (ssh_channel_request_exec(channel, "nvram get lan_ipaddr") == SSH_OK) {
+      char buf[256];
+      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+      if (n > 0) {
+        buf[n] = '\0';
+        String lanIp = String(buf);
+        lanIp.trim();
+        info.lanIp = lanIp;
+      }
+    }
+    ssh_channel_send_eof(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
+  }
+
+  // 追加コマンド: 2.4GHz SSID
+  channel = ssh_channel_new(session);
+  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
+    if (ssh_channel_request_exec(channel, "nvram get wl0_ssid") == SSH_OK) {
+      char buf[256];
+      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+      if (n > 0) {
+        buf[n] = '\0';
+        String ssid = String(buf);
+        ssid.trim();
+        info.ssid24 = ssid;
+      }
+    }
+    ssh_channel_send_eof(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
+  }
+
+  // 追加コマンド: 5GHz SSID
+  channel = ssh_channel_new(session);
+  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
+    if (ssh_channel_request_exec(channel, "nvram get wl1_ssid") == SSH_OK) {
+      char buf[256];
+      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+      if (n > 0) {
+        buf[n] = '\0';
+        String ssid = String(buf);
+        ssid.trim();
+        info.ssid50 = ssid;
+      }
+    }
+    ssh_channel_send_eof(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
+  }
+
+  // 追加コマンド: クライアント数（DHCPリース）
+  channel = ssh_channel_new(session);
+  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
+    if (ssh_channel_request_exec(channel, "cat /var/lib/misc/dnsmasq.leases 2>/dev/null | wc -l") == SSH_OK) {
+      char buf[64];
+      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+      if (n > 0) {
+        buf[n] = '\0';
+        info.clientCount = atoi(buf);
+      }
+    }
+    ssh_channel_send_eof(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
+  }
+
+  ssh_disconnect(session);
+  ssh_free(session);
+  ssh_finalize();
+
+  info.lastUpdate = millis();
+  sshDone = true;
+  vTaskDelete(NULL);
+}
 
 // ========================================
 // 前方宣言
@@ -171,9 +488,9 @@ void loadIs10Config();
 void saveIs10Config();
 void startAPMode();
 void stopAPMode();
-bool pollRouter(int index);
+bool startSshTask(int index);
 bool executeSSHCommands(const RouterConfig& router, RouterInfo& info);
-bool postRouterInfo(const RouterInfo& info);
+// bool postRouterInfo(const RouterInfo& info);  // DISABLED for TLS isolation test
 String generateRouterLacisId(const String& mac);
 
 // ========================================
@@ -181,7 +498,7 @@ String generateRouterLacisId(const String& mac);
 // ========================================
 String getAPModeSSID() {
   String mac6 = myMac.substring(6);  // 下6桁
-  return String(DEVICE_TYPE) + "-" + mac6;
+  return String(DEVICE_SHORT_NAME) + "-" + mac6;
 }
 
 // ========================================
@@ -189,7 +506,7 @@ String getAPModeSSID() {
 // ========================================
 String getHostname() {
   String mac6 = myMac.substring(6);
-  return String(DEVICE_TYPE) + "-" + mac6;
+  return String(DEVICE_SHORT_NAME) + "-" + mac6;
 }
 
 // ========================================
@@ -336,21 +653,11 @@ int parseClientCount(const String& output) {
 // SSH経由でルーター情報取得
 // ========================================
 bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
-  Serial.println("[DBG] SSH-0: executeSSHCommands entered");
-  Serial.flush();
-  delay(10);
-
   bool isAsuswrt = (router.osType == RouterOsType::ASUSWRT);
   const char* osName = isAsuswrt ? "ASUSWRT" : "OpenWrt";
 
   Serial.printf("[SSH] Connecting to %s:%d as %s (%s)\n",
     router.ipAddr.c_str(), router.sshPort, router.username.c_str(), osName);
-  Serial.flush();
-  delay(10);
-
-  Serial.println("[DBG] SSH-1: initializing info struct");
-  Serial.flush();
-  delay(10);
 
   // 初期化
   info.rid = router.rid;
@@ -362,18 +669,17 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   info.online = false;
   info.lastUpdate = millis();
 
-  Serial.println("[DBG] SSH-2: checking globalSshClient");
-  Serial.flush();
-  delay(10);
-
-  // グローバルSSHクライアントを初期化（初回のみ）
+  // グローバルSSHクライアントを確認
   if (globalSshClient == nullptr) {
-    Serial.println("[SSH] Creating global SSH client");
-    Serial.flush();
+    Serial.println("[SSH] Creating globalSshClient...");
     globalSshClient = new SshClient();
-    Serial.println("[DBG] SSH-2a: SshClient created");
-    Serial.flush();
   }
+
+  // libsshが初期化されていない場合は初期化
+  if (!globalSshClient->isInitialized()) {
+    globalSshClient->begin();
+  }
+
   SshClient& ssh = *globalSshClient;
 
   // 既存の接続があれば切断
@@ -388,7 +694,9 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   config.password = router.password;
   config.timeout = globalConfig.sshTimeout;
 
+  logStack("SSH-before-connect");
   SshResult result = ssh.connect(config);
+  logStack("SSH-after-connect");
   if (result != SshResult::OK) {
     Serial.printf("[SSH] Connection failed: %s\n", ssh.getLastError().c_str());
     return false;
@@ -504,8 +812,405 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
 }
 
 // ========================================
-// ルーター情報をエンドポイントへPOST
+// deviceStateReport送信（mobesへの状態報告）
+// 仕様書: 起動後1回 + 60秒毎heartbeat
 // ========================================
+bool sendDeviceStateReport() {
+  String stateEndpoint = araneaReg.getSavedStateEndpoint();
+  if (stateEndpoint.length() == 0) {
+    Serial.println("[STATE] No stateEndpoint available");
+    return false;
+  }
+
+  String observedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
+
+  StaticJsonDocument<768> doc;
+
+  // auth
+  JsonObject auth = doc.createNestedObject("auth");
+  auth["tid"] = myTid;
+  auth["lacisId"] = myLacisId;
+  auth["cic"] = myCic;
+
+  // report
+  JsonObject report = doc.createNestedObject("report");
+  report["lacisId"] = myLacisId;
+  report["type"] = ARANEA_DEVICE_TYPE;  // canonical: "aranea_ar-is10"
+  report["observedAt"] = observedAt;
+
+  // state
+  JsonObject state = report.createNestedObject("state");
+  state["IPAddress"] = WiFi.localIP().toString();
+  state["MacAddress"] = myMac;
+  state["RSSI"] = WiFi.RSSI();
+  state["routerCount"] = routerCount;
+  state["successCount"] = successCount;
+  state["failCount"] = failCount;
+  state["lastPollResult"] = lastPollResult;
+  state["mqttConnected"] = mqttConnected;
+  state["heap"] = ESP.getFreeHeap();
+
+  String json;
+  serializeJson(doc, json);
+
+  Serial.printf("[STATE] Sending to %s\n", stateEndpoint.c_str());
+
+  HTTPClient http;
+  http.begin(stateEndpoint);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(10000);
+
+  int httpCode = http.POST(json);
+  String response = http.getString();
+  http.end();
+
+  bool success = (httpCode >= 200 && httpCode < 300);
+  if (success) {
+    Serial.printf("[STATE] OK %d\n", httpCode);
+  } else {
+    Serial.printf("[STATE] NG %d: %s\n", httpCode, response.c_str());
+  }
+
+  return success;
+}
+
+// ========================================
+// MQTT config適用（routers配列マージ）
+// 秘密情報（username/password）は既存値を保持
+// ========================================
+void applyRouterConfig(JsonArray routersJson) {
+  // 既存routers.jsonを読み込み済み（httpMgr.begin()で読み込み）
+  // ridをキーにしてマージ
+
+  for (JsonObject r : routersJson) {
+    String rid = r["rid"] | "";
+    if (rid.length() == 0) continue;
+
+    // 既存ルーターを探す
+    int existingIdx = -1;
+    for (int i = 0; i < routerCount; i++) {
+      if (routers[i].rid == rid) {
+        existingIdx = i;
+        break;
+      }
+    }
+
+    if (existingIdx >= 0) {
+      // 既存ルーター: 非秘密情報のみ更新
+      if (r.containsKey("ipAddr")) routers[existingIdx].ipAddr = r["ipAddr"].as<String>();
+      if (r.containsKey("sshPort")) routers[existingIdx].sshPort = r["sshPort"] | 22;
+      if (r.containsKey("enabled")) routers[existingIdx].enabled = r["enabled"] | true;
+      // username/password/publicKeyは更新しない（秘密情報保持）
+      Serial.printf("[CONFIG] Router %s updated (existing)\n", rid.c_str());
+    } else if (routerCount < MAX_ROUTERS) {
+      // 新規ルーター追加（秘密情報は空）
+      RouterConfig newRouter;
+      newRouter.rid = rid;
+      newRouter.ipAddr = r["ipAddr"] | "";
+      newRouter.sshPort = r["sshPort"] | 22;
+      newRouter.enabled = r["enabled"] | true;
+      newRouter.username = "";  // 秘密情報は手動設定が必要
+      newRouter.password = "";
+      newRouter.publicKey = "";
+      newRouter.osType = RouterOsType::ASUSWRT;  // デフォルト
+
+      routers[routerCount++] = newRouter;
+      Serial.printf("[CONFIG] Router %s added (new, needs credentials)\n", rid.c_str());
+    }
+  }
+}
+
+// ========================================
+// MQTT configメッセージ処理
+// ========================================
+void handleConfigMessage(const char* data, int len) {
+  Serial.printf("[MQTT] Config received: %d bytes\n", len);
+
+  StaticJsonDocument<2048> doc;
+  DeserializationError err = deserializeJson(doc, data, len);
+  if (err) {
+    Serial.printf("[MQTT] JSON parse error: %s\n", err.c_str());
+    return;
+  }
+
+  // schemaVersion巻き戻し防止
+  int schemaVersion = doc["schemaVersion"] | 0;
+  if (schemaVersion <= savedSchemaVersion) {
+    Serial.printf("[MQTT] Ignoring old schema: %d <= %d\n", schemaVersion, savedSchemaVersion);
+    return;
+  }
+
+  // config.is10を読む
+  JsonObject is10Cfg = doc["config"]["is10"];
+  if (is10Cfg.isNull()) {
+    Serial.println("[MQTT] No config.is10 in message");
+    return;
+  }
+
+  // scanInterval適用（秒）
+  if (is10Cfg.containsKey("scanInterval")) {
+    int sec = is10Cfg["scanInterval"];
+    if (sec >= 60 && sec <= 86400) {
+      settings.setInt("is10_scan_interval_sec", sec);
+      Serial.printf("[CONFIG] scanInterval=%d sec\n", sec);
+    }
+  }
+
+  // reportClientList適用
+  if (is10Cfg.containsKey("reportClientList")) {
+    bool reportClients = is10Cfg["reportClientList"];
+    settings.setBool("is10_report_clients", reportClients);
+    Serial.printf("[CONFIG] reportClientList=%s\n", reportClients ? "true" : "false");
+  }
+
+  // routers適用（秘密情報保持でマージ）
+  if (is10Cfg.containsKey("routers")) {
+    applyRouterConfig(is10Cfg["routers"].as<JsonArray>());
+    // routers.jsonに保存（httpMgr経由）
+    // TODO: httpMgrにsaveRouters()を公開する必要あり
+  }
+
+  // schemaVersion保存
+  savedSchemaVersion = schemaVersion;
+  settings.setInt("is10_config_schema_version", schemaVersion);
+
+  Serial.printf("[MQTT] Applied schemaVersion=%d routerCount=%d\n",
+                schemaVersion, routerCount);
+}
+
+// ========================================
+// MQTTメッセージ処理（topic振り分け）
+// ========================================
+void handleMqttMessage(const char* topic, const char* data, int dataLen) {
+  Serial.printf("[MQTT] Topic: %s\n", topic);
+
+  String topicStr = String(topic);
+
+  // configトピック
+  if (topicStr.indexOf("/config") >= 0) {
+    handleConfigMessage(data, dataLen);
+    return;
+  }
+
+  // commandトピック（将来用）
+  if (topicStr.indexOf("/command") >= 0) {
+    Serial.println("[MQTT] Command topic received (not implemented for is10)");
+    return;
+  }
+
+  Serial.println("[MQTT] Unknown topic, ignoring");
+}
+
+// ========================================
+// MQTTイベントハンドラ（is04から流用）
+// ========================================
+void mqttEventHandler(void* handlerArgs, esp_event_base_t base, int32_t eventId, void* eventData) {
+  esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)eventData;
+
+  switch (eventId) {
+    case MQTT_EVENT_CONNECTED: {
+      Serial.println("[MQTT] Connected");
+      mqttConnected = true;
+
+      // Subscribe to config and command topics
+      String cfgTopic = "aranea/" + myTid + "/" + myLacisId + "/config";
+      String cmdTopic = "aranea/" + myTid + "/" + myLacisId + "/command";
+
+      esp_mqtt_client_subscribe(mqttClient, cfgTopic.c_str(), 1);
+      esp_mqtt_client_subscribe(mqttClient, cmdTopic.c_str(), 1);
+
+      Serial.printf("[MQTT] Subscribed: %s\n", cfgTopic.c_str());
+      Serial.printf("[MQTT] Subscribed: %s\n", cmdTopic.c_str());
+      break;
+    }
+
+    case MQTT_EVENT_DISCONNECTED:
+      Serial.println("[MQTT] Disconnected");
+      mqttConnected = false;
+      break;
+
+    case MQTT_EVENT_DATA:
+      if (event->topic && event->data) {
+        char* topic = (char*)malloc(event->topic_len + 1);
+        char* data = (char*)malloc(event->data_len + 1);
+        if (topic && data) {
+          memcpy(topic, event->topic, event->topic_len);
+          topic[event->topic_len] = '\0';
+          memcpy(data, event->data, event->data_len);
+          data[event->data_len] = '\0';
+          handleMqttMessage(topic, data, event->data_len);
+          free(topic);
+          free(data);
+        }
+      }
+      break;
+
+    case MQTT_EVENT_ERROR:
+      Serial.println("[MQTT] Error");
+      if (event->error_handle) {
+        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+          Serial.printf("[MQTT] TCP error: %d\n", event->error_handle->esp_tls_last_esp_err);
+        }
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ========================================
+// MQTT接続（is04から流用）
+// ========================================
+void connectMqtt() {
+  if (mqttWsUrl.length() == 0) {
+    Serial.println("[MQTT] No URL configured");
+    return;
+  }
+
+  if (myLacisId.length() == 0 || myCic.length() == 0) {
+    Serial.println("[MQTT] Missing credentials (lacisId or cic)");
+    return;
+  }
+
+  Serial.printf("[MQTT] Connecting to %s\n", mqttWsUrl.c_str());
+  Serial.printf("[MQTT] Username: %s\n", myLacisId.c_str());
+
+  esp_mqtt_client_config_t mqttCfg = {};
+  mqttCfg.broker.address.uri = mqttWsUrl.c_str();
+  mqttCfg.credentials.username = myLacisId.c_str();
+  mqttCfg.credentials.authentication.password = myCic.c_str();
+  mqttCfg.network.timeout_ms = 10000;
+  mqttCfg.session.keepalive = 30;
+
+  // SSL/TLS設定（ESP-IDF証明書バンドル使用）
+  mqttCfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+
+  mqttClient = esp_mqtt_client_init(&mqttCfg);
+  if (!mqttClient) {
+    Serial.println("[MQTT] Failed to init client");
+    return;
+  }
+
+  esp_mqtt_client_register_event(mqttClient, MQTT_EVENT_ANY, mqttEventHandler, nullptr);
+  esp_err_t err = esp_mqtt_client_start(mqttClient);
+  if (err != ESP_OK) {
+    Serial.printf("[MQTT] Failed to start: %d\n", err);
+  }
+}
+
+// ========================================
+// CelestialGlobe SSOT送信（Universal Ingest）
+// 仕様書: observedAtはUnix ms（number型）
+// source="ar-is10", devices[], clients[]
+// ========================================
+bool sendToCelestialGlobe() {
+  // エンドポイント取得
+  String baseEndpoint = settings.getString("is10_endpoint", "");
+  if (baseEndpoint.length() == 0) {
+    Serial.println("[CELESTIAL] No endpoint configured");
+    return false;
+  }
+
+  String secret = settings.getString("is10_celestial_secret", "");
+  if (secret.length() == 0) {
+    Serial.println("[CELESTIAL] No secret configured");
+    return false;
+  }
+
+  // URL構築: endpoint?fid=XXX&source=araneaDevice
+  String url = baseEndpoint + "?fid=" + myFid + "&source=araneaDevice";
+
+  // observedAtはUnix ms（number型）
+  unsigned long long observedAtMs = 0;
+  if (ntp.isSynced()) {
+    observedAtMs = (unsigned long long)ntp.getEpoch() * 1000ULL;
+  } else {
+    observedAtMs = millis();  // フォールバック（不正確だが送信は可能）
+  }
+
+  // JSON構築（最大4KB）
+  DynamicJsonDocument doc(4096);
+
+  // auth
+  JsonObject auth = doc.createNestedObject("auth");
+  auth["tid"] = myTid;
+  auth["lacisId"] = myLacisId;  // is10のlacisId（observer）
+  auth["cic"] = myCic;
+
+  // source（CelestialGlobe用）
+  doc["source"] = CELESTIAL_SOURCE;  // "ar-is10"
+
+  // observedAt（Unix ms, number型）
+  doc["observedAt"] = observedAtMs;
+
+  // devices配列
+  JsonArray devices = doc.createNestedArray("devices");
+
+  for (int i = 0; i < collectedRouterCount; i++) {
+    RouterInfo& info = collectedRouterInfo[i];
+    if (!info.online) continue;  // オフラインはスキップ
+
+    JsonObject dev = devices.createNestedObject();
+
+    // MACアドレス（ルーターのMAC - lacisIdは送信しない）
+    // 仕様: ルーターのlacisIdはサーバがMACから生成する
+    // info.lacisIdは生成してあるが送信しない
+
+    dev["type"] = "Router";
+    dev["label"] = "Room" + info.rid;
+    dev["status"] = info.online ? "online" : "offline";
+    dev["lanIp"] = info.lanIp;
+    dev["wanIp"] = info.wanIp;
+    dev["ssid24"] = info.ssid24;
+    dev["ssid50"] = info.ssid50;
+    dev["clientCount"] = info.clientCount;
+    // firmware, uptime は取得していないので省略
+    // parentMac はis10のMACを入れない（仕様禁止）
+  }
+
+  // clients配列（reportClientList=trueの場合のみ）
+  bool reportClients = settings.getBool("is10_report_clients", true);
+  if (reportClients) {
+    JsonArray clients = doc.createNestedArray("clients");
+    // TODO: クライアント詳細情報がSSHで取得できた場合に追加
+    // 現時点ではclientCount以外の詳細は未実装
+    // クライアント詳細はASUSWRT/OpenWrtからのパースが必要
+  }
+
+  String json;
+  serializeJson(doc, json);
+
+  Serial.printf("[CELESTIAL] Sending to %s\n", url.c_str());
+  Serial.printf("[CELESTIAL] Payload size: %d bytes, devices: %d\n",
+                json.length(), devices.size());
+
+  HTTPClient http;
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Celestial-Secret", secret);
+  http.setTimeout(15000);
+
+  int httpCode = http.POST(json);
+  String response = http.getString();
+  http.end();
+
+  bool success = (httpCode >= 200 && httpCode < 300);
+  if (success) {
+    Serial.printf("[CELESTIAL] OK %d\n", httpCode);
+  } else {
+    Serial.printf("[CELESTIAL] NG %d: %s\n", httpCode, response.c_str());
+  }
+
+  return success;
+}
+
+// ========================================
+// ルーター情報をエンドポイントへPOST（旧形式 - 廃止予定）
+// ========================================
+// DISABLED: LibSSH-ESP32 TLS競合テストのため関数全体を無効化
+// NOTE: CelestialGlobe SSOT形式に移行予定
+#if 0
 bool postRouterInfo(const RouterInfo& info) {
   Serial.println("[DEBUG] postRouterInfo() entered");
 
@@ -591,70 +1296,45 @@ bool postRouterInfo(const RouterInfo& info) {
 
   return success;
 }
+#endif
 
 // ========================================
-// 単一ルーターのポーリング
+// SSHタスク起動（非ブロッキング - ミニマル版アプローチ）
 // ========================================
-bool pollRouter(int index) {
+bool startSshTask(int index) {
   if (index < 0 || index >= routerCount) return false;
+  if (sshInProgress) return false;  // 既にSSH実行中
 
   RouterConfig& router = routers[index];
   if (!router.enabled || router.ipAddr.length() == 0) {
     return false;
   }
 
-  Serial.printf("[POLL] Router %d: %s (%s)\n", index, router.rid.c_str(), router.ipAddr.c_str());
-  Serial.flush();
-  delay(50);  // シリアル安定化
+  // フラグリセット
+  sshDone = false;
+  sshSuccess = false;
+  sshInProgress = true;
 
-  Serial.println("[DBG] POLL-1: before heap check");
-  Serial.flush();
-  delay(10);
+  Serial.printf("[POLL] Starting SSH for Router %d/%d\n", index + 1, routerCount);
 
-  // メモリ計測（SSH前）
-  size_t freeHeap = ESP.getFreeHeap();
-  Serial.printf("[DBG] POLL-2: freeHeap=%u\n", freeHeap);
-  Serial.flush();
-  delay(10);
+  // SSH タスクを Core 1 で実行（ミニマル版と同じ）
+  BaseType_t xReturned = xTaskCreatePinnedToCore(
+    sshTaskFunction,
+    "ssh",
+    SSH_TASK_STACK_SIZE,
+    NULL,  // パラメータ不要（グローバル変数を使用）
+    tskIDLE_PRIORITY + 1,  // ミニマル版と同じ優先度
+    NULL,
+    1  // Core 1（ミニマル版と同じ）
+  );
 
-  size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  Serial.printf("[DBG] POLL-3: largestBlock=%u\n", largestBlock);
-  Serial.flush();
-  delay(10);
-
-  Serial.printf("[MEM] PRE-SSH: heap=%u, largest=%u\n", freeHeap, largestBlock);
-  Serial.flush();
-  delay(10);
-
-  Serial.println("[DBG] POLL-4: creating RouterInfo");
-  Serial.flush();
-  delay(10);
-
-  RouterInfo info;
-
-  Serial.println("[DBG] POLL-5: RouterInfo created, calling executeSSHCommands");
-  Serial.flush();
-  delay(10);
-
-  // SSH経由で情報取得
-  bool sshOk = executeSSHCommands(router, info);
-  Serial.println("[DEBUG] executeSSHCommands returned");
-
-  // メモリ計測（SSH後）
-  Serial.println("[DEBUG] About to measure memory");
-  freeHeap = ESP.getFreeHeap();
-  largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  Serial.printf("[MEM] POST-SSH: heap=%u, largest=%u\n", freeHeap, largestBlock);
-
-  if (sshOk) {
-    // LacisID生成（MACが取得できた場合）
-    // info.lacisId = generateRouterLacisId(mac);
-
-    // エンドポイントへPOST
-    postRouterInfo(info);
+  if (xReturned != pdPASS) {
+    Serial.println("[POLL] ERROR: Failed to create SSH task");
+    sshInProgress = false;
+    return false;
   }
 
-  return sshOk;
+  return true;
 }
 
 // ========================================
@@ -732,21 +1412,49 @@ void updateDisplay() {
 // Setup
 // ========================================
 void setup() {
-  // Disable brownout detection (prevents false resets during WiFi TX power spikes)
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  // ========================================
+  // STEP 0: Brownout Detection - 分類情報取得のため有効のまま
+  // ========================================
+  // 注: 以下をコメントアウトして rst:0x1 の本当の意味を確認する
+  // WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
+  // ========================================
+  // STEP 1: RTC Boot Count & Stage Log
+  // ========================================
+  bootCount++;
+  lastStage = STAGE_BOOT_START;
 
   Serial.begin(115200);
-  delay(100);
+  delay(50);
+  lastStage = STAGE_SERIAL_INIT;
+
+  // リセット理由と前回クラッシュ位置を出力
+  esp_reset_reason_t resetReason = esp_reset_reason();
+  Serial.println("\n========================================");
+  Serial.println("[CRASH DEBUG] Reset Reason Analysis");
+  Serial.println("========================================");
+  Serial.printf("[BOOT] bootCount=%u\n", bootCount);
+  Serial.printf("[BOOT] esp_reset_reason=%d (%s)\n", (int)resetReason, resetReasonStr(resetReason));
+  Serial.printf("[BOOT] rtc_get_reset_reason(0)=%d\n", rtc_get_reset_reason(0));
+  Serial.printf("[BOOT] rtc_get_reset_reason(1)=%d\n", rtc_get_reset_reason(1));
+  Serial.printf("[BOOT] lastStage(previous)=%u (%s)\n", lastStage, stageStr(lastStage));
+  Serial.printf("[BOOT] heap=%u, largest=%u\n",
+    ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  Serial.println("========================================");
+
   Serial.println("\n[BOOT] is10 (ar-is10) starting...");
   Serial.printf("[BOOT] Model: %s, Version: %s\n", DEVICE_MODEL, FIRMWARE_VERSION);
 
   // GPIO初期化
+  lastStage = STAGE_GPIO_INIT;
   initGPIO();
 
   // Operator初期化
   op.setMode(OperatorMode::PROVISION);
 
   // SPIFFS初期化
+  lastStage = STAGE_SPIFFS_INIT;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   if (!SPIFFS.begin(true)) {
     Serial.println("[ERROR] SPIFFS init failed");
   }
@@ -755,6 +1463,8 @@ void setup() {
   AraneaSettings::init();
 
   // SettingManager初期化（NVS）
+  lastStage = STAGE_SETTINGS_INIT;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   if (!settings.begin("isms")) {
     Serial.println("[ERROR] Settings init failed");
     return;
@@ -764,12 +1474,16 @@ void setup() {
   AraneaSettings::initDefaults(settings);
 
   // DisplayManager初期化
+  lastStage = STAGE_DISPLAY_INIT;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   if (!display.begin()) {
     Serial.println("[WARNING] Display init failed");
   }
   display.showBoot("Booting...");
 
   // LacisID生成（WiFi接続前にMACを取得）
+  lastStage = STAGE_LACIS_GEN;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   myLacisId = lacisGen.generate(PRODUCT_TYPE, PRODUCT_CODE);
   myMac = lacisGen.getStaMac12Hex();
   myHostname = getHostname();
@@ -777,21 +1491,29 @@ void setup() {
   Serial.printf("[HOST] Hostname: %s\n", myHostname.c_str());
 
   // WiFi接続試行
+  lastStage = STAGE_WIFI_START;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   display.showConnecting("WiFi...", 0);
   wifi.setHostname(myHostname);  // ホスト名を設定（WiFi接続前に必要）
   if (!wifi.connectWithSettings(&settings)) {
     Serial.println("[WIFI] Connection failed, starting AP mode");
     startAPMode();
   } else {
+    lastStage = STAGE_WIFI_DONE;
+    Serial.printf("[STAGE] %s\n", stageStr(lastStage));
     Serial.printf("[WIFI] Connected: %s\n", wifi.getIP().c_str());
 
     // NTP同期
+    lastStage = STAGE_NTP_SYNC;
+    Serial.printf("[STAGE] %s\n", stageStr(lastStage));
     display.showBoot("NTP sync...");
     if (!ntp.sync()) {
       Serial.println("[WARNING] NTP sync failed");
     }
 
     // AraneaGateway登録
+    lastStage = STAGE_ARANEA_REG;
+    Serial.printf("[STAGE] %s\n", stageStr(lastStage));
     display.showRegistering("Registering...");
 
     // テナント設定をSettingManager→AraneaSettingsの順でフォールバック
@@ -809,7 +1531,7 @@ void setup() {
     araneaReg.setTenantPrimary(tenantAuth);
 
     AraneaRegisterResult regResult = araneaReg.registerDevice(
-      myTid, DEVICE_TYPE, myLacisId, myMac, PRODUCT_TYPE, PRODUCT_CODE
+      myTid, ARANEA_DEVICE_TYPE, myLacisId, myMac, PRODUCT_TYPE, PRODUCT_CODE
     );
 
     if (regResult.ok) {
@@ -836,6 +1558,8 @@ void setup() {
   }
 
   // IS10設定読み込み
+  lastStage = STAGE_CONFIG_LOAD;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   loadIs10Config();
 
   // OtaManager初期化 - DISABLED due to mDNS conflict with LibSSH
@@ -859,24 +1583,78 @@ void setup() {
   });
   */
 
-  // HttpManager開始（ルーター配列を共有）- WDT問題調査のため無効化
-  // httpMgr.begin(&settings, routers, &routerCount, 80);
-  // httpMgr.setDeviceInfo(DEVICE_TYPE, myLacisId, myCic, FIRMWARE_VERSION);
+  // HttpManager開始（ルーター配列を共有）- Core 3.0.5で再有効化
+  httpMgr.begin(&settings, routers, &routerCount, 80);
+  httpMgr.setDeviceInfo(DEVICE_SHORT_NAME, myLacisId, myCic, FIRMWARE_VERSION);
 
-  // HTTP OTA開始（httpMgrのWebServerを共有）- httpMgr無効化に伴い無効化
+  // ========================================
+  // deviceStateReport初回送信（必須）
+  // mobesのaraneaDeviceConfigは araneaDeviceStates/{lacisId} が
+  // ないと "Device not found" で設定投入できない
+  // ========================================
+  display.showBoot("StateReport...");
+  if (sendDeviceStateReport()) {
+    initialStateReportSent = true;
+    Serial.println("[STATE] Initial state report sent");
+  } else {
+    Serial.println("[STATE] WARNING: Initial state report failed");
+    // 失敗してもloop()で再試行するので続行
+  }
+  lastHeartbeat = millis();
+
+  // ========================================
+  // MQTT接続（双方向デバイス用）
+  // ========================================
+  mqttWsUrl = araneaReg.getSavedMqttEndpoint();
+  savedSchemaVersion = settings.getInt("is10_config_schema_version", 0);
+  Serial.printf("[CONFIG] Saved schemaVersion: %d\n", savedSchemaVersion);
+
+  if (mqttWsUrl.length() > 0) {
+    display.showBoot("MQTT...");
+    Serial.printf("[MQTT] Endpoint: %s\n", mqttWsUrl.c_str());
+    connectMqtt();
+  } else {
+    Serial.println("[MQTT] No mqttEndpoint available (check device type)");
+  }
+
+  // ========================================
+  // TEST: 16台全てをハードコード
+  // ========================================
+  routerCount = 16;
+  routers[0]  = {"101", "192.168.125.171", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[1]  = {"104", "192.168.125.172", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[2]  = {"105", "192.168.125.173", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[3]  = {"106", "192.168.125.174", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[4]  = {"201", "192.168.125.175", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[5]  = {"202", "192.168.125.176", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[6]  = {"203", "192.168.125.177", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[7]  = {"204", "192.168.125.178", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[8]  = {"205", "192.168.125.179", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[9]  = {"206", "192.168.125.180", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[10] = {"301", "192.168.125.181", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[11] = {"302", "192.168.125.182", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[12] = {"303", "192.168.125.183", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[13] = {"304", "192.168.125.184", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[14] = {"305", "192.168.125.185", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  routers[15] = {"306", "192.168.125.186", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
+  Serial.printf("[TEST] Hardcoded %d routers\n", routerCount);
+
+  // HTTP OTA開始（httpMgrのWebServerを共有）
+  // DISABLED: LibSSH-ESP32 との TLS/SHA ハードウェア競合を回避するため無効化
   // httpOta.begin(httpMgr.getServer());
-  httpOta.onStart([]() {
-    op.setOtaUpdating(true);
-    display.showBoot("HTTP OTA Start...");
-    Serial.println("[HTTP-OTA] Update started");
-  });
-  httpOta.onProgress([](int progress) {
-    display.showBoot("HTTP OTA: " + String(progress) + "%");
-  });
-  httpOta.onError([](const String& err) {
-    op.setOtaUpdating(false);
-    display.showError("HTTP OTA: " + err);
-  });
+  // httpOta.onStart([]() {
+  //   op.setOtaUpdating(true);
+  //   display.showBoot("HTTP OTA Start...");
+  //   Serial.println("[HTTP-OTA] Update started");
+  // });
+  // httpOta.onProgress([](int progress) {
+  //   display.showBoot("HTTP OTA: " + String(progress) + "%");
+  // });
+  // httpOta.onError([](const String& err) {
+  //   op.setOtaUpdating(false);
+  //   display.showError("HTTP OTA: " + err);
+  // });
+  Serial.println("[HTTP-OTA] DISABLED for LibSSH compatibility test");
 
   // RUNモードへ
   op.setMode(OperatorMode::RUN);
@@ -884,40 +1662,34 @@ void setup() {
   // タイミング初期化
   lastRouterPoll = millis();
 
-  // 全モジュール初期化完了を待つ（WiFi/mDNS/OTA安定化）
-  Serial.println("[BOOT] Waiting for all modules to stabilize...");
-  Serial.flush();
-
-  // 5秒間の安定化待機（yield()を入れてバックグラウンドタスクを処理）
-  // NOTE: ota.handle() removed here - ArduinoOTA may crash during early init
-  for (int i = 0; i < 50; i++) {
+  // 3秒間の安定化待機（yield()を入れてバックグラウンドタスクを処理）
+  Serial.println("[BOOT] Waiting for all modules to stabilize (3s)...");
+  for (int i = 0; i < 30; i++) {
     delay(100);
     yield();
   }
   Serial.println("[BOOT] Stabilization complete");
-  Serial.flush();
 
-  // libssh初期化 - 無効化してクラッシュ原因調査
-  Serial.println("[LIBSSH] DISABLED for crash debugging");
-  Serial.flush();
-  /*
-  Serial.printf("[LIBSSH] PRE-INIT heap=%u, largest=%u\n",
+  // ========================================
+  // SSH初期化 - 新方式: タスク内で毎回初期化・終了
+  // ========================================
+  // libssh_begin() はSSHタスク内で呼び出す（各SSH操作の開始時）
+  // ssh_finalize() もSSHタスク内で呼び出す（各SSH操作の終了時）
+  // これにより内部タイマーの問題を回避
+  lastStage = STAGE_SSH_BEGIN;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
+  Serial.println("[SSH] Using per-task init/finalize approach (safe mode)");
+
+  lastStage = STAGE_SSH_DONE;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
+  Serial.printf("[SSH] POST-INIT heap=%u, largest=%u\n",
     ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  Serial.flush();
-  delay(1000);  // Longer delay before libssh
 
-  Serial.println("[LIBSSH] Initializing...");
-  Serial.flush();
-  yield();
-  libssh_begin();
-  yield();
-  delay(1000);
-
-  Serial.printf("[LIBSSH] POST-INIT heap=%u, largest=%u\n",
-    ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  Serial.flush();
-  */
-
+  // ========================================
+  // Setup Complete
+  // ========================================
+  lastStage = STAGE_SETUP_COMPLETE;
+  Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   Serial.println("[BOOT] is10 ready!");
 }
 
@@ -931,83 +1703,144 @@ void loop() {
 
   loopCount++;
 
-  // 最初の10回だけループ開始を出力
-  if (loopCount <= 10) {
-    Serial.printf("[LOOP-%lu] start\n", loopCount);
-    Serial.flush();
+  // loop開始時にステージ更新
+  if (loopCount == 1) {
+    lastStage = STAGE_LOOP_RUNNING;
   }
 
-  // 10秒ごとにloop進行状況を出力
-  if (now - lastLoopLog >= 10000) {
-    Serial.printf("[LOOP] count=%lu heap=%d\n", loopCount, ESP.getFreeHeap());
-    Serial.flush();
+  // ========================================
+  // ステータス出力（30秒毎のみ - ミニマル版準拠）
+  // ========================================
+  if (now - lastLoopLog >= 30000) {
+    Serial.printf("[STATUS] heap=%d largest=%u\n",
+      ESP.getFreeHeap(),
+      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     lastLoopLog = now;
   }
 
-  // Debug: check where crash occurs
-  if (loopCount <= 5) {
-    Serial.printf("[DBG-L] pre-ota heap=%d\n", ESP.getFreeHeap());
-    Serial.flush();
-  }
-
+  // ========================================
+  // 1. OTA処理チェック
+  // ========================================
   // OTA処理（最優先）- ArduinoOTA disabled due to mDNS conflict with LibSSH
   // ota.handle();  // Use HTTP OTA instead
-
-  if (loopCount <= 5) {
-    Serial.printf("[DBG-L] post-ota heap=%d\n", ESP.getFreeHeap());
-    Serial.flush();
-  }
 
   if (op.isOtaUpdating()) {
     delay(10);
     return;
   }
 
-  if (loopCount <= 5) {
-    Serial.printf("[DBG-L] pre-http heap=%d\n", ESP.getFreeHeap());
-    Serial.flush();
+  // ========================================
+  // 2. HTTP処理
+  // ========================================
+  httpMgr.handle();
+
+  // ========================================
+  // 2.5 MQTT再接続チェック（5秒間隔）
+  // ========================================
+  static const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
+  if (!apModeActive && mqttWsUrl.length() > 0 && !mqttConnected) {
+    if (now - lastMqttReconnect >= MQTT_RECONNECT_INTERVAL) {
+      Serial.println("[MQTT] Attempting reconnect...");
+      if (mqttClient) {
+        esp_mqtt_client_reconnect(mqttClient);
+      } else {
+        connectMqtt();
+      }
+      lastMqttReconnect = now;
+    }
   }
 
-  // HTTP処理 - httpMgr.begin()無効化に伴い無効化
-  // httpMgr.handle();
-
-  if (loopCount <= 5) {
-    Serial.printf("[DBG-L] post-http heap=%d\n", ESP.getFreeHeap());
-    Serial.flush();
-  }
-
-  // APモードタイムアウトチェック
+  // ========================================
+  // 3. APモードタイムアウトチェック
+  // ========================================
   if (apModeActive && (now - apModeStartTime >= AP_MODE_TIMEOUT_MS)) {
     Serial.println("[AP] Timeout, attempting STA reconnect");
     stopAPMode();
     wifi.connectWithSettings(&settings);
     if (!wifi.isConnected()) {
-      startAPMode();  // 再度APモードへ
+      startAPMode();
     }
   }
 
-  // ルーターポーリング（STAモード時のみ）
-  if (!apModeActive && routerCount > 0 && (now - lastRouterPoll >= ROUTER_POLL_INTERVAL_MS)) {
-    pollRouter(currentRouterIndex);
+  // ========================================
+  // 4. ルーターポーリング（非ブロッキング - ミニマル版アプローチ）
+  // ========================================
+  if (!apModeActive && routerCount > 0) {
+    // SSH完了チェック
+    if (sshDone && sshInProgress) {
+      sshInProgress = false;
+      if (sshSuccess) {
+        Serial.printf("[POLL] Router %d/%d SUCCESS\n", currentRouterIndex + 1, routerCount);
+        successCount++;
+      } else {
+        Serial.printf("[POLL] Router %d/%d FAILED\n", currentRouterIndex + 1, routerCount);
+        failCount++;
+      }
+      sshDone = false;
 
-    currentRouterIndex++;
-    if (currentRouterIndex >= routerCount) {
-      currentRouterIndex = 0;
+      // 次のルーターへ（1秒待機 - ミニマル版準拠）
+      delay(1000);
+      currentRouterIndex++;
+      if (currentRouterIndex >= routerCount) {
+        // 全ルーター完了
+        Serial.printf("\n[COMPLETE] %d/%d success\n", successCount, routerCount);
+        Serial.printf("[COMPLETE] heap=%d\n\n", ESP.getFreeHeap());
+
+        // CelestialGlobe SSOT送信
+        collectedRouterCount = routerCount;
+        if (sendToCelestialGlobe()) {
+          Serial.println("[COMPLETE] CelestialGlobe sent OK");
+        } else {
+          Serial.println("[COMPLETE] CelestialGlobe send failed");
+        }
+
+        currentRouterIndex = 0;
+        successCount = 0;
+        failCount = 0;
+        lastRouterPoll = now;  // インターバルリセット
+      }
     }
-
-    lastRouterPoll = now;
+    // 新しいSSH開始
+    else if (!sshInProgress && (currentRouterIndex == 0 || (now - lastRouterPoll >= ROUTER_POLL_INTERVAL_MS))) {
+      startSshTask(currentRouterIndex);
+      if (currentRouterIndex == 0) {
+        lastRouterPoll = now;
+      }
+    }
   }
 
-  // ディスプレイ更新
+  // ========================================
+  // 4.5 deviceStateReport heartbeat（60秒毎）
+  // ========================================
+  if (!apModeActive && (now - lastHeartbeat >= HEARTBEAT_INTERVAL_MS)) {
+    // 初回が失敗していた場合も再試行
+    if (!initialStateReportSent) {
+      if (sendDeviceStateReport()) {
+        initialStateReportSent = true;
+        Serial.println("[STATE] Retry state report sent");
+      }
+    } else {
+      sendDeviceStateReport();
+    }
+    lastHeartbeat = now;
+  }
+
+  // ========================================
+  // 5. ディスプレイ更新（毎秒）
+  // ========================================
   if (now - lastDisplayUpdate >= DISPLAY_UPDATE_MS) {
     updateDisplay();
     lastDisplayUpdate = now;
   }
 
-  // ボタン処理
+  // ========================================
+  // 6. ボタン処理
+  // ========================================
   handleButtons();
 
-  // WiFi再接続チェック（STAモード時）
+  // ========================================
+  // 7. WiFi再接続チェック
+  // ========================================
   if (!apModeActive && !wifi.isConnected()) {
     Serial.println("[WIFI] Disconnected, reconnecting...");
     display.showConnecting("Reconnect...", 0);
@@ -1016,5 +1849,6 @@ void loop() {
     }
   }
 
+  yield();
   delay(10);
 }

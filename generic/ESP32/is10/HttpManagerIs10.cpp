@@ -168,6 +168,9 @@ void HttpManagerIs10::handleGetConfig() {
   // グローバル設定
   JsonObject global = doc.createNestedObject("global");
   global["endpoint"] = settings_->getString("is10_endpoint", "");
+  global["celestialSecret"] = settings_->getString("is10_celestial_secret", "").length() > 0 ? "********" : "";  // マスク表示
+  global["scanIntervalSec"] = settings_->getInt("is10_scan_interval_sec", 60);
+  global["reportClients"] = settings_->getBool("is10_report_clients", true);
   global["sshTimeout"] = settings_->getInt("is10_ssh_timeout", 30000);
   global["retryCount"] = settings_->getInt("is10_retry_count", 2);
   global["routerInterval"] = settings_->getInt("is10_router_interval", 30000);
@@ -237,6 +240,20 @@ void HttpManagerIs10::handleSaveGlobal() {
   }
 
   if (doc.containsKey("endpoint")) settings_->setString("is10_endpoint", doc["endpoint"]);
+  // celestialSecret: 空でない場合のみ更新（マスク値は無視）
+  if (doc.containsKey("celestialSecret")) {
+    String secret = doc["celestialSecret"].as<String>();
+    if (secret.length() > 0 && secret != "********") {
+      settings_->setString("is10_celestial_secret", secret);
+    }
+  }
+  if (doc.containsKey("scanIntervalSec")) {
+    int sec = doc["scanIntervalSec"];
+    if (sec >= 60 && sec <= 86400) {  // 1分〜24時間
+      settings_->setInt("is10_scan_interval_sec", sec);
+    }
+  }
+  if (doc.containsKey("reportClients")) settings_->setBool("is10_report_clients", doc["reportClients"]);
   if (doc.containsKey("sshTimeout")) settings_->setInt("is10_ssh_timeout", doc["sshTimeout"]);
   if (doc.containsKey("retryCount")) settings_->setInt("is10_retry_count", doc["retryCount"]);
   if (doc.containsKey("routerInterval")) settings_->setInt("is10_router_interval", doc["routerInterval"]);
@@ -443,6 +460,9 @@ void HttpManagerIs10::handleNotFound() {
 GlobalSetting HttpManagerIs10::getGlobalSetting() {
   GlobalSetting gs;
   gs.endpoint = settings_->getString("is10_endpoint", "");
+  gs.celestialSecret = settings_->getString("is10_celestial_secret", "");
+  gs.scanIntervalSec = settings_->getInt("is10_scan_interval_sec", 60);
+  gs.reportClients = settings_->getBool("is10_report_clients", true);
   gs.timeout = settings_->getInt("is10_ssh_timeout", 30000);
   gs.retryCount = settings_->getInt("is10_retry_count", 2);
   gs.interval = settings_->getInt("is10_router_interval", 30000);
@@ -632,11 +652,16 @@ function renderConfig() {
   document.getElementById('dev-ver').textContent = config.device?.version || '-';
   document.getElementById('dev-fid').textContent = config.device?.fid || '-';
 
-  // Global
+  // Global - CelestialGlobe
   document.getElementById('g-endpoint').value = config.global?.endpoint || '';
+  document.getElementById('g-secret').value = config.global?.celestialSecret || '';
+  document.getElementById('g-scan-interval').value = config.global?.scanIntervalSec || 60;
+  document.getElementById('g-report-clients').value = config.global?.reportClients ? 'true' : 'false';
+  // Global - SSH
   document.getElementById('g-ssh-timeout').value = config.global?.sshTimeout || 30000;
   document.getElementById('g-retry').value = config.global?.retryCount || 2;
   document.getElementById('g-interval').value = config.global?.routerInterval || 30000;
+  // Global - Aranea Cloud
   document.getElementById('g-gate-url').value = config.global?.gateUrl || '';
   document.getElementById('g-cloud-url').value = config.global?.cloudUrl || '';
   document.getElementById('g-relay-pri').value = config.global?.relayPrimary || '';
@@ -714,6 +739,9 @@ function showTab(name) {
 async function saveGlobal() {
   await postJson('/api/global', {
     endpoint: document.getElementById('g-endpoint').value,
+    celestialSecret: document.getElementById('g-secret').value,
+    scanIntervalSec: parseInt(document.getElementById('g-scan-interval').value),
+    reportClients: document.getElementById('g-report-clients').value === 'true',
     sshTimeout: parseInt(document.getElementById('g-ssh-timeout').value),
     retryCount: parseInt(document.getElementById('g-retry').value),
     routerInterval: parseInt(document.getElementById('g-interval').value),
@@ -722,7 +750,7 @@ async function saveGlobal() {
     relayPrimary: document.getElementById('g-relay-pri').value,
     relaySecondary: document.getElementById('g-relay-sec').value
   });
-  toast('Global settings saved');
+  toast('All settings saved');
 }
 
 async function saveLacisGen() {
@@ -881,11 +909,32 @@ String HttpManagerIs10::generateHTML() {
 
   <div id="tab-global" class="tab-content active">
     <div class="card">
-      <div class="card-title">Global Settings</div>
+      <div class="card-title">CelestialGlobe SSOT Settings</div>
       <div class="form-group">
-        <label>Report Endpoint URL (POST先)</label>
-        <input type="text" id="g-endpoint" placeholder="https://...">
+        <label>CelestialGlobe Endpoint URL</label>
+        <input type="text" id="g-endpoint" placeholder="https://...universalIngest">
       </div>
+      <div class="form-group">
+        <label>X-Celestial-Secret (APIシークレット)</label>
+        <input type="password" id="g-secret" placeholder="(未設定または変更する場合のみ入力)">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Scan Interval (秒, 60-86400)</label>
+          <input type="number" id="g-scan-interval" min="60" max="86400" value="60">
+        </div>
+        <div class="form-group">
+          <label>Report Clients</label>
+          <select id="g-report-clients">
+            <option value="true">有効 (クライアント情報を送信)</option>
+            <option value="false">無効 (ルーター情報のみ)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">SSH Settings</div>
       <div class="form-row">
         <div class="form-group">
           <label>SSH Timeout (ms)</label>
@@ -900,12 +949,16 @@ String HttpManagerIs10::generateHTML() {
           <input type="number" id="g-interval" value="30000">
         </div>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Aranea Cloud Settings</div>
       <div class="form-group">
         <label>AraneaDeviceGate URL</label>
         <input type="text" id="g-gate-url" placeholder="https://...araneaDeviceGate">
       </div>
       <div class="form-group">
-        <label>Cloud Report URL</label>
+        <label>Cloud Report URL (deviceStateReport)</label>
         <input type="text" id="g-cloud-url" placeholder="https://...deviceStateReport">
       </div>
       <div class="form-row">
@@ -918,7 +971,7 @@ String HttpManagerIs10::generateHTML() {
           <input type="text" id="g-relay-sec" placeholder="http://192.168.96.202:8080/api/events">
         </div>
       </div>
-      <button class="btn btn-primary" onclick="saveGlobal()">Save Global Settings</button>
+      <button class="btn btn-primary" onclick="saveGlobal()">Save All Settings</button>
     </div>
   </div>
 
@@ -933,27 +986,31 @@ String HttpManagerIs10::generateHTML() {
   <div id="tab-lacis" class="tab-content">
     <div class="card">
       <div class="card-title">OpenWrt LacisID Generation</div>
-      <div class="form-row">
+      <div style="background:#fff3cd;border:1px solid #ffc107;padding:12px;border-radius:6px;margin-bottom:16px">
+        <strong style="color:#856404">Deprecated:</strong>
+        <span style="color:#856404">ルーターのlacisIDはサーバ側でMACアドレスから自動生成されます。この設定は使用されません。</span>
+      </div>
+      <div class="form-row" style="opacity:0.5">
         <div class="form-group">
           <label>Prefix</label>
-          <input type="text" id="l-prefix" value="4">
+          <input type="text" id="l-prefix" value="4" disabled>
         </div>
         <div class="form-group">
           <label>Product Type</label>
-          <input type="text" id="l-ptype" placeholder="e.g. 011">
+          <input type="text" id="l-ptype" placeholder="e.g. 011" disabled>
         </div>
         <div class="form-group">
           <label>Product Code</label>
-          <input type="text" id="l-pcode" placeholder="e.g. 0001">
+          <input type="text" id="l-pcode" placeholder="e.g. 0001" disabled>
         </div>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="opacity:0.5">
         <label>Generator</label>
-        <select id="l-gen">
+        <select id="l-gen" disabled>
           <option value="DeviceWithMac">DeviceWithMac</option>
         </select>
       </div>
-      <button class="btn btn-primary" onclick="saveLacisGen()">Save LacisID Settings</button>
+      <button class="btn btn-primary" onclick="saveLacisGen()" disabled style="opacity:0.5">Save LacisID Settings</button>
     </div>
   </div>
 
