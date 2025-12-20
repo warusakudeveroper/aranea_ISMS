@@ -517,3 +517,10 @@ RouterConfig HttpManagerIs10::getRouter(int index) {
 int HttpManagerIs10::getRouterCount() {
   return routerCount_ ? *routerCount_ : 0;
 }
+
+// ========================================
+// ルーター設定永続化（MQTT config適用時用）
+// ========================================
+void HttpManagerIs10::persistRouters() {
+  saveRouters();
+}

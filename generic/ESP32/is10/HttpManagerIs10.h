@@ -44,6 +44,11 @@ public:
   void setMqttStatus(bool connected);
   void setLastStateReport(const String& time, int code);
 
+  /**
+   * ルーター設定をSPIFFSに永続化（MQTT config適用時用）
+   */
+  void persistRouters();
+
 protected:
   // AraneaWebUI オーバーライド
   void getTypeSpecificStatus(JsonObject& obj) override;

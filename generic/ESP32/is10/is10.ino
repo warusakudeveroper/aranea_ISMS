@@ -294,7 +294,14 @@ String mqttWsUrl;
 esp_mqtt_client_handle_t mqttClient = nullptr;
 bool mqttConnected = false;
 unsigned long lastMqttReconnect = 0;
-int savedSchemaVersion = 0;  // NVS保存済みschemaVersion
+
+// ========================================
+// MQTT config双方向同期（SSOT）
+// ========================================
+int savedSchemaVersion = 0;        // NVS保存済みschemaVersion
+String savedConfigHash = "";       // サーバ発行のconfigHash（is10は計算不要）
+String lastConfigAppliedAt = "";   // ISO8601形式
+String lastConfigApplyError = "";  // 最後のエラーメッセージ（空=成功）
 
 // ========================================
 // deviceStateReport / heartbeat関連
@@ -663,8 +670,9 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   bool isAsuswrt = (router.osType == RouterOsType::ASUSWRT);
   const char* osName = isAsuswrt ? "ASUSWRT" : "OpenWrt";
 
-  Serial.printf("[SSH] Connecting to %s:%d as %s (%s)\n",
-    router.ipAddr.c_str(), router.sshPort, router.username.c_str(), osName);
+  // ログ出力（secretsは出さない: username/password は表示しない）
+  Serial.printf("[SSH] Connecting to %s:%d (%s)\n",
+    router.ipAddr.c_str(), router.sshPort, osName);
 
   // 初期化
   info.rid = router.rid;
@@ -886,7 +894,10 @@ String getDeviceName() {
 // ========================================
 // deviceStateReport送信（mobesへの状態報告）
 // 仕様書: 起動後1回 + 60秒毎heartbeat
-// SSOT: state.deviceName を含める
+// SSOT双方向同期:
+// - state.deviceName
+// - state.appliedConfigSchemaVersion / appliedConfigHash
+// - state.reportedConfig.is10（オプション）
 // ========================================
 bool sendDeviceStateReport() {
   String stateEndpoint = araneaReg.getSavedStateEndpoint();
@@ -898,7 +909,11 @@ bool sendDeviceStateReport() {
   String observedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
   String deviceName = getDeviceName();  // sanitize済み
 
-  StaticJsonDocument<1024> doc;  // deviceName追加分で拡張
+  // ReportedConfig用フラグ（デフォルトはsecretsなしで送信）
+  bool reportFullConfig = settings.getBool("is10_report_full_config", false);
+
+  // バッファサイズ: Applied + ReportedConfig分を考慮
+  DynamicJsonDocument doc(4096);
 
   // auth
   JsonObject auth = doc.createNestedObject("auth");
@@ -912,8 +927,10 @@ bool sendDeviceStateReport() {
   report["type"] = ARANEA_DEVICE_TYPE;  // canonical: "aranea_ar-is10"
   report["observedAt"] = observedAt;
 
-  // state（SSOT: deviceName追加）
+  // state
   JsonObject state = report.createNestedObject("state");
+
+  // 基本情報
   state["deviceName"] = deviceName;  // mobes userObject.name 連携用
   state["IPAddress"] = WiFi.localIP().toString();
   state["MacAddress"] = myMac;
@@ -925,12 +942,61 @@ bool sendDeviceStateReport() {
   state["mqttConnected"] = mqttConnected;
   state["heap"] = ESP.getFreeHeap();
 
+  // ========================================
+  // Applied情報（SSOT必須）
+  // mobesのconfigApplied.status判定に使用
+  // ========================================
+  state["appliedConfigSchemaVersion"] = savedSchemaVersion;
+  state["appliedConfigHash"] = savedConfigHash;
+  if (lastConfigAppliedAt.length() > 0) {
+    state["lastConfigAppliedAt"] = lastConfigAppliedAt;
+  }
+  if (lastConfigApplyError.length() > 0) {
+    state["lastConfigApplyError"] = lastConfigApplyError;
+  }
+
+  // ========================================
+  // ReportedConfig（現地設定の可視化）
+  // hashだけでもよいが、運用のためにis10設定を返す
+  // ========================================
+  state["reportedConfigSchemaVersion"] = savedSchemaVersion;
+  state["reportedConfigHash"] = savedConfigHash;
+
+  // reportedConfig.is10: 現在動作中の設定
+  JsonObject reportedConfig = state.createNestedObject("reportedConfig");
+  JsonObject is10Cfg = reportedConfig.createNestedObject("is10");
+
+  is10Cfg["scanInterval"] = settings.getInt("is10_scan_interval_sec", 60);
+  is10Cfg["reportClientList"] = settings.getBool("is10_report_clients", true);
+
+  // routers配列（secretsは reportFullConfig フラグで制御）
+  JsonArray routersArr = is10Cfg.createNestedArray("routers");
+  for (int i = 0; i < routerCount; i++) {
+    JsonObject r = routersArr.createNestedObject();
+    r["rid"] = routers[i].rid;
+    r["ipAddr"] = routers[i].ipAddr;
+    r["sshPort"] = routers[i].sshPort;
+    r["enabled"] = routers[i].enabled;
+    r["platform"] = (routers[i].osType == RouterOsType::ASUSWRT) ? "asuswrt" : "openwrt";
+
+    // secrets: reportFullConfig=true の場合のみ含める（運用要件で選択可能）
+    if (reportFullConfig) {
+      r["sshUser"] = routers[i].username;
+      r["password"] = routers[i].password;
+      if (routers[i].publicKey.length() > 0) {
+        r["privateKey"] = routers[i].publicKey;
+      }
+    }
+  }
+
   String json;
   serializeJson(doc, json);
 
-  // ログ出力（SSOT必須: deviceName, type, HTTP status）
-  Serial.printf("[STATE] deviceName=\"%s\", type=%s\n", deviceName.c_str(), ARANEA_DEVICE_TYPE);
-  Serial.printf("[STATE] Sending to %s\n", stateEndpoint.c_str());
+  // ログ出力（secretsは出さない、hashは短縮）
+  String hashShort = savedConfigHash.length() > 8 ? savedConfigHash.substring(0, 8) + "..." : savedConfigHash;
+  Serial.printf("[STATE] deviceName=\"%s\", type=%s, schema=%d, hash=%s\n",
+                deviceName.c_str(), ARANEA_DEVICE_TYPE, savedSchemaVersion, hashShort.c_str());
+  Serial.printf("[STATE] Sending to %s (%d bytes)\n", stateEndpoint.c_str(), json.length());
 
   HTTPClient http;
   http.begin(stateEndpoint);
@@ -947,81 +1013,121 @@ bool sendDeviceStateReport() {
     Serial.printf("[STATE] Response: %s\n", response.c_str());
   }
 
+  // HttpManagerIs10にもステータス反映（UI用）
+  httpMgr.setLastStateReport(observedAt, httpCode);
+
   return success;
 }
 
 // ========================================
-// MQTT config適用（routers配列マージ）
-// 秘密情報（username/password）は既存値を保持
+// MQTT config適用（routers配列フル更新）
+// SSOT: secrets（sshUser/password/privateKey）も受け取り・保存・適用
+// CelestialGlobe送信には絶対に載せない
 // ========================================
 void applyRouterConfig(JsonArray routersJson) {
-  // 既存routers.jsonを読み込み済み（httpMgr.begin()で読み込み）
-  // ridをキーにしてマージ
+  // SSOT方針: MQTTからの設定で完全上書き（マージではなく置換）
+  // 既存設定はDesiredで上書きされる
 
+  int newCount = 0;
   for (JsonObject r : routersJson) {
+    if (newCount >= MAX_ROUTERS) break;
+
     String rid = r["rid"] | "";
     if (rid.length() == 0) continue;
 
-    // 既存ルーターを探す
-    int existingIdx = -1;
-    for (int i = 0; i < routerCount; i++) {
-      if (routers[i].rid == rid) {
-        existingIdx = i;
-        break;
-      }
+    RouterConfig& router = routers[newCount];
+    router.rid = rid;
+    router.ipAddr = r["ipAddr"] | "";
+    router.sshPort = r["sshPort"] | 22;
+    router.enabled = r["enabled"] | true;
+
+    // secrets: 受け取り・保存・適用OK（CelestialGlobeには載せない）
+    // SSOT仕様: sshUser → username, password, privateKey → publicKey
+    if (r.containsKey("sshUser")) {
+      router.username = r["sshUser"].as<String>();
+    } else if (r.containsKey("username")) {
+      router.username = r["username"].as<String>();
     }
 
-    if (existingIdx >= 0) {
-      // 既存ルーター: 非秘密情報のみ更新
-      if (r.containsKey("ipAddr")) routers[existingIdx].ipAddr = r["ipAddr"].as<String>();
-      if (r.containsKey("sshPort")) routers[existingIdx].sshPort = r["sshPort"] | 22;
-      if (r.containsKey("enabled")) routers[existingIdx].enabled = r["enabled"] | true;
-      // username/password/publicKeyは更新しない（秘密情報保持）
-      Serial.printf("[CONFIG] Router %s updated (existing)\n", rid.c_str());
-    } else if (routerCount < MAX_ROUTERS) {
-      // 新規ルーター追加（秘密情報は空）
-      RouterConfig newRouter;
-      newRouter.rid = rid;
-      newRouter.ipAddr = r["ipAddr"] | "";
-      newRouter.sshPort = r["sshPort"] | 22;
-      newRouter.enabled = r["enabled"] | true;
-      newRouter.username = "";  // 秘密情報は手動設定が必要
-      newRouter.password = "";
-      newRouter.publicKey = "";
-      newRouter.osType = RouterOsType::ASUSWRT;  // デフォルト
-
-      routers[routerCount++] = newRouter;
-      Serial.printf("[CONFIG] Router %s added (new, needs credentials)\n", rid.c_str());
+    if (r.containsKey("password")) {
+      router.password = r["password"].as<String>();
     }
+
+    if (r.containsKey("privateKey")) {
+      router.publicKey = r["privateKey"].as<String>();  // publicKeyフィールドに格納
+    } else if (r.containsKey("publicKey")) {
+      router.publicKey = r["publicKey"].as<String>();
+    }
+
+    // platform → osType マッピング
+    String platform = r["platform"] | "asuswrt";
+    platform.toLowerCase();
+    if (platform == "openwrt") {
+      router.osType = RouterOsType::OPENWRT;
+    } else {
+      router.osType = RouterOsType::ASUSWRT;  // デフォルト
+    }
+
+    // ログ出力（secretsは出さない）
+    Serial.printf("[CONFIG] Router %s: %s:%d (%s)\n",
+      rid.c_str(), router.ipAddr.c_str(), router.sshPort,
+      (router.osType == RouterOsType::ASUSWRT) ? "ASUSWRT" : "OpenWrt");
+
+    newCount++;
   }
+
+  routerCount = newCount;
+  Serial.printf("[CONFIG] Applied %d routers from MQTT config\n", routerCount);
 }
 
 // ========================================
-// MQTT configメッセージ処理
+// MQTT configメッセージ処理（SSOT双方向同期）
+// 仕様:
+// - schemaVersion巻き戻し禁止
+// - secrets（sshUser/password/privateKey）は受け取り・保存・適用OK
+// - configHashはサーバ発行をそのまま保存（is10は計算しない）
+// - 適用成功後は即時deviceStateReport
 // ========================================
 void handleConfigMessage(const char* data, int len) {
   Serial.printf("[MQTT] Config received: %d bytes\n", len);
 
-  StaticJsonDocument<2048> doc;
+  // JSONパース（is10 config用に大きめのバッファ）
+  DynamicJsonDocument doc(4096);
   DeserializationError err = deserializeJson(doc, data, len);
   if (err) {
     Serial.printf("[MQTT] JSON parse error: %s\n", err.c_str());
+    lastConfigApplyError = "JSON parse error: " + String(err.c_str());
+    settings.setString("is10_config_apply_error", lastConfigApplyError);
     return;
   }
 
-  // schemaVersion巻き戻し防止
+  // schemaVersion巻き戻し禁止
   int schemaVersion = doc["schemaVersion"] | 0;
   if (schemaVersion <= savedSchemaVersion) {
-    Serial.printf("[MQTT] Ignoring old schema: %d <= %d\n", schemaVersion, savedSchemaVersion);
+    Serial.printf("[MQTT] Ignoring old/same schema: %d <= %d (rollback prevention)\n",
+                  schemaVersion, savedSchemaVersion);
     return;
   }
+
+  // configHash取得（サーバ発行、is10は計算しない）
+  String configHash = doc["configHash"] | "";
+  String configHashShort = configHash.length() > 8 ? configHash.substring(0, 8) + "..." : configHash;
+  Serial.printf("[MQTT] New config: schemaVersion=%d, hash=%s\n", schemaVersion, configHashShort.c_str());
 
   // config.is10を読む
   JsonObject is10Cfg = doc["config"]["is10"];
   if (is10Cfg.isNull()) {
-    Serial.println("[MQTT] No config.is10 in message");
+    Serial.println("[MQTT] No config.is10 in message, ignoring");
+    lastConfigApplyError = "No config.is10 in message";
+    settings.setString("is10_config_apply_error", lastConfigApplyError);
     return;
   }
+
+  // ========================================
+  // Apply処理開始
+  // ========================================
+  bool applySuccess = true;
+  String applyError = "";
 
   // scanInterval適用（秒）
   if (is10Cfg.containsKey("scanInterval")) {
@@ -1029,6 +1135,8 @@ void handleConfigMessage(const char* data, int len) {
     if (sec >= 60 && sec <= 86400) {
       settings.setInt("is10_scan_interval_sec", sec);
       Serial.printf("[CONFIG] scanInterval=%d sec\n", sec);
+    } else {
+      Serial.printf("[CONFIG] scanInterval=%d out of range (60-86400), skipped\n", sec);
     }
   }
 
@@ -1039,19 +1147,53 @@ void handleConfigMessage(const char* data, int len) {
     Serial.printf("[CONFIG] reportClientList=%s\n", reportClients ? "true" : "false");
   }
 
-  // routers適用（秘密情報保持でマージ）
+  // routers適用（secrets含む完全置換）
   if (is10Cfg.containsKey("routers")) {
     applyRouterConfig(is10Cfg["routers"].as<JsonArray>());
-    // routers.jsonに保存（httpMgr経由）
-    // TODO: httpMgrにsaveRouters()を公開する必要あり
+
+    // routers.jsonに永続化
+    httpMgr.persistRouters();
+    Serial.println("[CONFIG] Routers persisted to SPIFFS");
   }
 
-  // schemaVersion保存
-  savedSchemaVersion = schemaVersion;
-  settings.setInt("is10_config_schema_version", schemaVersion);
+  // ========================================
+  // 適用成功時の保存処理
+  // ========================================
+  if (applySuccess) {
+    // NVS保存
+    savedSchemaVersion = schemaVersion;
+    settings.setInt("is10_config_schema_version", schemaVersion);
 
-  Serial.printf("[MQTT] Applied schemaVersion=%d routerCount=%d\n",
-                schemaVersion, routerCount);
+    savedConfigHash = configHash;
+    settings.setString("is10_config_hash", configHash);
+
+    // ISO8601形式で現在時刻
+    lastConfigAppliedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
+    settings.setString("is10_config_applied_at", lastConfigAppliedAt);
+
+    // エラークリア
+    lastConfigApplyError = "";
+    settings.setString("is10_config_apply_error", "");
+
+    Serial.printf("[CONFIG] Applied successfully: schemaVersion=%d, hash=%s, at=%s\n",
+                  schemaVersion, configHashShort.c_str(), lastConfigAppliedAt.c_str());
+
+    // ========================================
+    // 即時deviceStateReport送信（SSOT必須）
+    // mobesがappliedSchemaVersion/hashで反映確認
+    // ========================================
+    Serial.println("[CONFIG] Sending immediate deviceStateReport...");
+    if (sendDeviceStateReport()) {
+      Serial.println("[CONFIG] Immediate stateReport sent OK");
+    } else {
+      Serial.println("[CONFIG] Immediate stateReport failed (will retry in heartbeat)");
+    }
+  } else {
+    // 適用失敗時（旧設定は保持）
+    lastConfigApplyError = applyError;
+    settings.setString("is10_config_apply_error", applyError);
+    Serial.printf("[CONFIG] Apply failed: %s\n", applyError.c_str());
+  }
 }
 
 // ========================================
@@ -1715,8 +1857,15 @@ void setup() {
   // MQTT接続（双方向デバイス用）
   // ========================================
   mqttWsUrl = araneaReg.getSavedMqttEndpoint();
+
+  // NVSからApplied状態を復元（SSOT双方向同期）
   savedSchemaVersion = settings.getInt("is10_config_schema_version", 0);
-  Serial.printf("[CONFIG] Saved schemaVersion: %d\n", savedSchemaVersion);
+  savedConfigHash = settings.getString("is10_config_hash", "");
+  lastConfigAppliedAt = settings.getString("is10_config_applied_at", "");
+  lastConfigApplyError = settings.getString("is10_config_apply_error", "");
+
+  String hashShort = savedConfigHash.length() > 8 ? savedConfigHash.substring(0, 8) + "..." : savedConfigHash;
+  Serial.printf("[CONFIG] Saved Applied state: schema=%d, hash=%s\n", savedSchemaVersion, hashShort.c_str());
 
   if (mqttWsUrl.length() > 0) {
     display.showBoot("MQTT...");
