@@ -115,6 +115,11 @@ public:
    */
   void onRebootRequest(void (*callback)());
 
+  /**
+   * deviceName変更コールバック（deviceStateReport即時送信用）
+   */
+  void onDeviceNameChanged(void (*callback)());
+
 protected:
   // ========================================
   // 派生クラスでオーバーライド可能
@@ -193,6 +198,7 @@ protected:
 
   void (*settingsChangedCallback_)() = nullptr;
   void (*rebootCallback_)() = nullptr;
+  void (*deviceNameChangedCallback_)() = nullptr;
 
   // CIC認証用
   bool validateCIC(const String& cic);

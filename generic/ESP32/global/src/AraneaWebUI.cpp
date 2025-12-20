@@ -76,6 +76,10 @@ void AraneaWebUI::onRebootRequest(void (*callback)()) {
   rebootCallback_ = callback;
 }
 
+void AraneaWebUI::onDeviceNameChanged(void (*callback)()) {
+  deviceNameChangedCallback_ = callback;
+}
+
 // ========================================
 // CIC認証
 // ========================================
@@ -407,8 +411,15 @@ void AraneaWebUI::handleSaveSystem() {
     return;
   }
 
+  bool deviceNameChanged = false;
   if (doc.containsKey("deviceName")) {
-    settings_->setString("device_name", doc["deviceName"].as<String>());
+    String oldName = settings_->getString("device_name", "");
+    String newName = doc["deviceName"].as<String>();
+    if (oldName != newName) {
+      settings_->setString("device_name", newName);
+      deviceNameChanged = true;
+      Serial.printf("[WebUI] deviceName changed: \"%s\" -> \"%s\"\n", oldName.c_str(), newName.c_str());
+    }
   }
   if (doc.containsKey("uiPassword")) {
     String pass = doc["uiPassword"].as<String>();
@@ -424,6 +435,12 @@ void AraneaWebUI::handleSaveSystem() {
   }
 
   if (settingsChangedCallback_) settingsChangedCallback_();
+
+  // deviceName変更時は即時deviceStateReport送信トリガー（SSOT）
+  if (deviceNameChanged && deviceNameChangedCallback_) {
+    deviceNameChangedCallback_();
+  }
+
   server_->send(200, "application/json", "{\"ok\":true}");
 }
 

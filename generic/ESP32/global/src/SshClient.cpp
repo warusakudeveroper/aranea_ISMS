@@ -24,15 +24,31 @@
 static bool _libsshInitialized = false;
 
 SshClient::SshClient() : _connected(false), _lastError(""), _session(nullptr), _channel(nullptr) {
+  // 重要: コンストラクタでは libssh_begin() を呼ばない
+  // グローバル/静的オブジェクトのコンストラクタは setup() より前に走り得るため、
+  // 環境が整っていないタイミングでの初期化を避ける
+  // 必ず begin() を明示的に呼ぶこと
+}
+
+void SshClient::begin() {
 #if SSH_AVAILABLE
-  // libssh初期化（一度だけ）
   if (!_libsshInitialized) {
-    Serial.println("[SSH] Initializing libssh...");
+    Serial.println("[SSH] begin() - Initializing libssh...");
+    Serial.flush();
     libssh_begin();
     _libsshInitialized = true;
-    Serial.println("[SSH] libssh initialized");
+    Serial.println("[SSH] libssh initialized successfully");
+    Serial.flush();
+  } else {
+    Serial.println("[SSH] begin() - libssh already initialized");
   }
+#else
+  Serial.println("[SSH] begin() - LibSSH-ESP32 not available");
 #endif
+}
+
+bool SshClient::isInitialized() {
+  return _libsshInitialized;
 }
 
 SshClient::~SshClient() {
@@ -58,19 +74,36 @@ SshResult SshClient::connect(const SshConfig& config) {
     return SshResult::CONNECT_FAILED;
   }
 
-  // オプション設定
-  ssh_options_set(session, SSH_OPTIONS_HOST, config.host.c_str());
-  int port = config.port;
-  ssh_options_set(session, SSH_OPTIONS_PORT, &port);
-  ssh_options_set(session, SSH_OPTIONS_USER, config.username.c_str());
+  // オプション設定 - 型を明示的に正しく指定
+  // libssh は文字列はポインタそのまま、整数はポインタで渡す
+  // SSH_OPTIONS_PORT は unsigned int* を期待
+  const char* host = config.host.c_str();
+  const char* user = config.username.c_str();
 
-  // タイムアウト設定
-  long timeout = config.timeout / 1000;  // 秒に変換
-  if (timeout <= 0) timeout = 30;
-  ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout);
+  ssh_options_set(session, SSH_OPTIONS_HOST, host);
+  ssh_options_set(session, SSH_OPTIONS_USER, user);
+
+  // PORT は unsigned int のアドレスを渡す（libssh API仕様）
+  unsigned int port = (unsigned int)config.port;
+  ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+
+  // タイムアウト設定（秒単位、long のアドレスを渡す）
+  long timeout_sec = (long)(config.timeout / 1000);
+  if (timeout_sec <= 0) timeout_sec = 30;
+  ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout_sec);
+
+  // デバッグ: libsshのログレベルを上げる
+  int verbosity = SSH_LOG_PROTOCOL;
+  ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
+
+  Serial.println("[SSH] Options set complete, calling ssh_connect()...");
+  Serial.flush();
+  delay(10);
 
   // 接続
   int rc = ssh_connect(session);
+  Serial.printf("[SSH] ssh_connect returned: %d\n", rc);
+  Serial.flush();
   if (rc != SSH_OK) {
     _lastError = String("Connection failed: ") + ssh_get_error(session);
     Serial.printf("[SSH] %s\n", _lastError.c_str());

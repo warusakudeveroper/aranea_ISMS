@@ -42,8 +42,13 @@ struct SshExecResult {
 /**
  * SshClient - SSHクライアントクラス
  *
+ * 重要: コンストラクタではlibsshを初期化しません。
+ *       必ず setup() 後、WiFi接続完了後に begin() を呼んでください。
+ *
  * 使用例:
  *   SshClient ssh;
+ *   // WiFi接続後...
+ *   ssh.begin();  // libssh初期化
  *   SshConfig config = {"192.168.1.1", 22, "admin", "password", "", 30000};
  *   if (ssh.connect(config) == SshResult::OK) {
  *     SshExecResult result = ssh.exec("uname -a");
@@ -55,6 +60,16 @@ class SshClient {
 public:
   SshClient();
   ~SshClient();
+
+  /**
+   * libsshライブラリを初期化
+   * 必ず setup() 後、WiFi接続完了後に呼ぶこと
+   * コンストラクタでは呼ばないこと（グローバル変数の初期化順序問題回避）
+   */
+  void begin();
+
+  // 初期化済みか確認
+  bool isInitialized();
 
   // 接続
   SshResult connect(const SshConfig& config);

@@ -826,8 +826,67 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
 }
 
 // ========================================
+// deviceName sanitize（SSOT準拠）
+// - trim
+// - 制御文字除去（改行/タブ等）
+// - 連続空白を1つに圧縮
+// - 最大64文字
+// ========================================
+String sanitizeDeviceName(const String& raw) {
+  String result;
+  result.reserve(64);
+
+  bool lastWasSpace = true;  // 先頭空白スキップ用
+  for (int i = 0; i < raw.length() && result.length() < 64; i++) {
+    char c = raw.charAt(i);
+
+    // 制御文字（0x00-0x1F, 0x7F）はスキップまたはスペースに
+    if (c < 0x20 || c == 0x7F) {
+      if (!lastWasSpace && result.length() > 0) {
+        result += ' ';
+        lastWasSpace = true;
+      }
+      continue;
+    }
+
+    // スペースの連続圧縮
+    if (c == ' ') {
+      if (!lastWasSpace) {
+        result += c;
+        lastWasSpace = true;
+      }
+      continue;
+    }
+
+    result += c;
+    lastWasSpace = false;
+  }
+
+  // 末尾空白除去
+  result.trim();
+
+  return result;
+}
+
+// ========================================
+// deviceName取得（デフォルト付き）
+// ========================================
+String getDeviceName() {
+  String deviceName = settings.getString("device_name", "");
+  deviceName = sanitizeDeviceName(deviceName);
+
+  // 空の場合はホスト名をデフォルトに
+  if (deviceName.length() == 0) {
+    deviceName = myHostname;  // "ar-is10-XXXXXX"
+  }
+
+  return deviceName;
+}
+
+// ========================================
 // deviceStateReport送信（mobesへの状態報告）
 // 仕様書: 起動後1回 + 60秒毎heartbeat
+// SSOT: state.deviceName を含める
 // ========================================
 bool sendDeviceStateReport() {
   String stateEndpoint = araneaReg.getSavedStateEndpoint();
@@ -837,8 +896,9 @@ bool sendDeviceStateReport() {
   }
 
   String observedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
+  String deviceName = getDeviceName();  // sanitize済み
 
-  StaticJsonDocument<768> doc;
+  StaticJsonDocument<1024> doc;  // deviceName追加分で拡張
 
   // auth
   JsonObject auth = doc.createNestedObject("auth");
@@ -852,8 +912,9 @@ bool sendDeviceStateReport() {
   report["type"] = ARANEA_DEVICE_TYPE;  // canonical: "aranea_ar-is10"
   report["observedAt"] = observedAt;
 
-  // state
+  // state（SSOT: deviceName追加）
   JsonObject state = report.createNestedObject("state");
+  state["deviceName"] = deviceName;  // mobes userObject.name 連携用
   state["IPAddress"] = WiFi.localIP().toString();
   state["MacAddress"] = myMac;
   state["RSSI"] = WiFi.RSSI();
@@ -867,6 +928,8 @@ bool sendDeviceStateReport() {
   String json;
   serializeJson(doc, json);
 
+  // ログ出力（SSOT必須: deviceName, type, HTTP status）
+  Serial.printf("[STATE] deviceName=\"%s\", type=%s\n", deviceName.c_str(), ARANEA_DEVICE_TYPE);
   Serial.printf("[STATE] Sending to %s\n", stateEndpoint.c_str());
 
   HTTPClient http;
@@ -879,10 +942,9 @@ bool sendDeviceStateReport() {
   http.end();
 
   bool success = (httpCode >= 200 && httpCode < 300);
-  if (success) {
-    Serial.printf("[STATE] OK %d\n", httpCode);
-  } else {
-    Serial.printf("[STATE] NG %d: %s\n", httpCode, response.c_str());
+  Serial.printf("[STATE] HTTP %d %s\n", httpCode, success ? "OK" : "NG");
+  if (!success) {
+    Serial.printf("[STATE] Response: %s\n", response.c_str());
   }
 
   return success;
@@ -1627,6 +1689,12 @@ void setup() {
   devInfo.buildDate = __DATE__ " " __TIME__;
   devInfo.modules = "WiFi,NTP,SSH,MQTT,HTTP";
   httpMgr.setDeviceInfo(devInfo);
+
+  // deviceName変更時の即時deviceStateReport送信（SSOT）
+  httpMgr.onDeviceNameChanged([]() {
+    Serial.println("[WebUI] deviceName changed - sending immediate deviceStateReport");
+    sendDeviceStateReport();
+  });
 
   // ========================================
   // deviceStateReport初回送信（必須）
