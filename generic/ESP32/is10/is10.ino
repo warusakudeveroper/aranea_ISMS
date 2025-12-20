@@ -163,7 +163,7 @@ static const char* CELESTIAL_SOURCE = "ar-is10";
 static const char* DEVICE_SHORT_NAME = "ar-is10";
 
 static const char* DEVICE_MODEL = "Openwrt_RouterInspector";
-static const char* FIRMWARE_VERSION = "1.2.0";  // 通信系実装でバージョンアップ
+static const char* FIRMWARE_VERSION = "1.2.1";  // mobes連携品質改善
 
 // テナント設定はAraneaSettings.h で定義
 // 大量生産: AraneaSettings.hを施設用に編集してビルド
@@ -196,7 +196,8 @@ static const unsigned long AP_MODE_TIMEOUT_MS = 300000;       // APモード5分
 // ========================================
 struct RouterInfo {
   String rid;
-  String lacisId;       // ルーターのLacisID（MACから生成）
+  String lacisId;       // ルーターのLacisID（MACから生成）- 送信しない
+  String routerMac;     // ルーターのMAC（大文字12HEX）- clients[].apMac用
   String wanIp;
   String lanIp;
   String ssid24;        // 2.4GHz SSID
@@ -280,6 +281,11 @@ TaskHandle_t sshTaskHandle = nullptr;
 volatile bool sshInProgress = false;
 volatile bool sshDone = false;
 volatile bool sshSuccess = false;
+unsigned long sshTaskStartTime = 0;  // タスク開始時刻（ウォッチドッグ用）
+
+// SSHタスクウォッチドッグ: libssh timeout * 2 + バッファ
+// libssh timeout = 30秒、ウォッチドッグ = 90秒
+static const unsigned long SSH_TASK_WATCHDOG_MS = 90000;
 
 // ========================================
 // MQTT関連（is04から流用）
@@ -329,6 +335,7 @@ void sshTaskFunction(void* pvParameters) {
   // collectedRouterInfo初期化
   RouterInfo& info = collectedRouterInfo[idx];
   info.rid = router.rid;
+  info.routerMac = "";  // SSH で取得
   info.wanIp = "";
   info.lanIp = "";
   info.ssid24 = "";
@@ -789,7 +796,7 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   }
 
   // ========================================
-  // MACアドレス取得（LacisID生成用）
+  // MACアドレス取得（clients[].apMac用 + LacisID生成）
   // ========================================
   if (isAsuswrt) {
     // ASUSWRT: br0インターフェースのMAC
@@ -801,8 +808,15 @@ bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
   if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
     String mac = execResult.output;
     mac.trim();
+    // routerMac: 大文字12HEX正規化（clients[].apMacで使用）
+    String cleanMac = mac;
+    cleanMac.replace(":", "");
+    cleanMac.replace("-", "");
+    cleanMac.toUpperCase();
+    info.routerMac = cleanMac;
+    // lacisId生成（送信しない、参照用）
     info.lacisId = generateRouterLacisId(mac);
-    Serial.printf("[SSH] Router MAC: %s, LacisID: %s\n", mac.c_str(), info.lacisId.c_str());
+    Serial.printf("[SSH] Router MAC: %s (norm: %s)\n", mac.c_str(), cleanMac.c_str());
   }
 
   ssh.disconnect();
@@ -1107,14 +1121,23 @@ void connectMqtt() {
 bool sendToCelestialGlobe() {
   // エンドポイント取得
   String baseEndpoint = settings.getString("is10_endpoint", "");
-  if (baseEndpoint.length() == 0) {
-    Serial.println("[CELESTIAL] No endpoint configured");
-    return false;
-  }
-
   String secret = settings.getString("is10_celestial_secret", "");
-  if (secret.length() == 0) {
-    Serial.println("[CELESTIAL] No secret configured");
+
+  // 設定不備チェック（スキップ理由を明確にログ出力）
+  if (baseEndpoint.length() == 0 || secret.length() == 0) {
+    Serial.println("[CELESTIAL] SKIPPED - Missing configuration:");
+    if (baseEndpoint.length() == 0) {
+      Serial.println("[CELESTIAL]   - Endpoint: NOT SET");
+    } else {
+      Serial.println("[CELESTIAL]   - Endpoint: OK");
+    }
+    if (secret.length() == 0) {
+      Serial.println("[CELESTIAL]   - X-Celestial-Secret: NOT SET");
+    } else {
+      Serial.println("[CELESTIAL]   - X-Celestial-Secret: OK");
+    }
+    Serial.println("[CELESTIAL] Configure via HTTP UI: http://<device-ip>/");
+    Serial.println("[CELESTIAL] Settings tab > CelestialGlobe section");
     return false;
   }
 
@@ -1153,9 +1176,9 @@ bool sendToCelestialGlobe() {
 
     JsonObject dev = devices.createNestedObject();
 
-    // MACアドレス（ルーターのMAC - lacisIdは送信しない）
+    // MACアドレス（大文字12HEX - サーバがlacisId生成に使用）
     // 仕様: ルーターのlacisIdはサーバがMACから生成する
-    // info.lacisIdは生成してあるが送信しない
+    dev["mac"] = info.routerMac;  // 大文字12HEX正規化済み
 
     dev["type"] = "Router";
     dev["label"] = "Room" + info.rid;
@@ -1170,12 +1193,14 @@ bool sendToCelestialGlobe() {
   }
 
   // clients配列（reportClientList=trueの場合のみ）
+  // 仕様: 各clientにapMac（接続先ルーターMAC）を含める
+  // 例: { "mac": "AABBCCDDEEFF", "apMac": "112233445566", "hostname": "iPhone" }
   bool reportClients = settings.getBool("is10_report_clients", true);
   if (reportClients) {
     JsonArray clients = doc.createNestedArray("clients");
     // TODO: クライアント詳細情報がSSHで取得できた場合に追加
-    // 現時点ではclientCount以外の詳細は未実装
-    // クライアント詳細はASUSWRT/OpenWrtからのパースが必要
+    // DHCPリースからclient MAC取得 → apMac = info.routerMac をセット
+    // parentMacはルーターの上流が確実に分かる場合のみ（不明なら空）
   }
 
   String json;
@@ -1314,6 +1339,7 @@ bool startSshTask(int index) {
   sshDone = false;
   sshSuccess = false;
   sshInProgress = true;
+  sshTaskStartTime = millis();  // ウォッチドッグ用
 
   Serial.printf("[POLL] Starting SSH for Router %d/%d\n", index + 1, routerCount);
 
@@ -1485,7 +1511,9 @@ void setup() {
   lastStage = STAGE_LACIS_GEN;
   Serial.printf("[STAGE] %s\n", stageStr(lastStage));
   myLacisId = lacisGen.generate(PRODUCT_TYPE, PRODUCT_CODE);
+  myLacisId.toUpperCase();  // 大文字正規化（mobes連携で必須）
   myMac = lacisGen.getStaMac12Hex();
+  myMac.toUpperCase();  // 大文字正規化（コロンなし12HEX）
   myHostname = getHostname();
   Serial.printf("[LACIS] ID: %s, MAC: %s\n", myLacisId.c_str(), myMac.c_str());
   Serial.printf("[HOST] Hostname: %s\n", myHostname.c_str());
@@ -1585,7 +1613,20 @@ void setup() {
 
   // HttpManager開始（ルーター配列を共有）- Core 3.0.5で再有効化
   httpMgr.begin(&settings, routers, &routerCount, 80);
-  httpMgr.setDeviceInfo(DEVICE_SHORT_NAME, myLacisId, myCic, FIRMWARE_VERSION);
+
+  // デバイス情報設定（AraneaWebUI共通形式）
+  AraneaDeviceInfo devInfo;
+  devInfo.deviceType = DEVICE_SHORT_NAME;
+  devInfo.modelName = "Router Inspector";
+  devInfo.contextDesc = "ルーターの状態監視とクライアント情報収集を行います";
+  devInfo.lacisId = myLacisId;
+  devInfo.cic = myCic;
+  devInfo.mac = myMac;
+  devInfo.hostname = myHostname;
+  devInfo.firmwareVersion = FIRMWARE_VERSION;
+  devInfo.buildDate = __DATE__ " " __TIME__;
+  devInfo.modules = "WiFi,NTP,SSH,MQTT,HTTP";
+  httpMgr.setDeviceInfo(devInfo);
 
   // ========================================
   // deviceStateReport初回送信（必須）
@@ -1614,7 +1655,13 @@ void setup() {
     Serial.printf("[MQTT] Endpoint: %s\n", mqttWsUrl.c_str());
     connectMqtt();
   } else {
-    Serial.println("[MQTT] No mqttEndpoint available (check device type)");
+    // MQTT endpointが空 = legacy登録 or サーバ側でtype未対応
+    Serial.println("[MQTT] WARNING: No mqttEndpoint available");
+    Serial.println("[MQTT] Possible causes:");
+    Serial.printf("[MQTT]   1. Device type '%s' not registered on mobes\n", ARANEA_DEVICE_TYPE);
+    Serial.println("[MQTT]   2. Legacy registration without mqttEndpoint");
+    Serial.println("[MQTT] Solution: Clear registration (hold RESET 3s) and re-register");
+    Serial.println("[MQTT] Or configure type on mobes araneaDeviceConfig");
   }
 
   // ========================================
@@ -1766,6 +1813,31 @@ void loop() {
   // 4. ルーターポーリング（非ブロッキング - ミニマル版アプローチ）
   // ========================================
   if (!apModeActive && routerCount > 0) {
+    // SSHタスクウォッチドッグ: 長時間ハングしたら強制スキップ
+    if (sshInProgress && !sshDone && (now - sshTaskStartTime >= SSH_TASK_WATCHDOG_MS)) {
+      Serial.printf("[WATCHDOG] SSH task timeout after %lu ms, forcing skip\n",
+                    now - sshTaskStartTime);
+      Serial.printf("[WATCHDOG] Router %d/%d marked as FAILED (watchdog)\n",
+                    currentRouterIndex + 1, routerCount);
+      // 強制的に失敗として処理
+      sshInProgress = false;
+      sshDone = true;
+      sshSuccess = false;
+      failCount++;
+      // 次のルーターへ進む
+      currentRouterIndex++;
+      if (currentRouterIndex >= routerCount) {
+        Serial.printf("\n[COMPLETE] %d/%d success (watchdog triggered)\n", successCount, routerCount);
+        collectedRouterCount = routerCount;
+        sendToCelestialGlobe();
+        currentRouterIndex = 0;
+        successCount = 0;
+        failCount = 0;
+        lastRouterPoll = now;
+      }
+      sshDone = false;  // フラグリセット
+    }
+
     // SSH完了チェック
     if (sshDone && sshInProgress) {
       sshInProgress = false;
@@ -1844,8 +1916,26 @@ void loop() {
   if (!apModeActive && !wifi.isConnected()) {
     Serial.println("[WIFI] Disconnected, reconnecting...");
     display.showConnecting("Reconnect...", 0);
+
+    // WiFi切断時はMQTTも切断状態にする
+    if (mqttConnected) {
+      Serial.println("[MQTT] Marking as disconnected due to WiFi loss");
+      mqttConnected = false;
+    }
+
     if (!wifi.connectWithSettings(&settings)) {
       startAPMode();
+    } else {
+      // WiFi再接続成功 → MQTT再接続をトリガー
+      Serial.println("[WIFI] Reconnected, triggering MQTT reconnect...");
+      if (mqttWsUrl.length() > 0 && mqttClient) {
+        // 既存クライアントを再接続
+        esp_mqtt_client_reconnect(mqttClient);
+        lastMqttReconnect = now;
+      } else if (mqttWsUrl.length() > 0) {
+        // クライアントがない場合は新規作成
+        connectMqtt();
+      }
     }
   }
 

@@ -1,21 +1,19 @@
 /**
  * HttpManagerIs10.h
  *
- * IS10 (Openwrt_RouterInspector) 専用HTTPサーバー
- * Chakra UI風モダンデザイン
+ * IS10 (Router Inspector) HTTPサーバー
+ * AraneaWebUI 基底クラスを継承し、is10固有の機能を追加
  */
 
 #ifndef HTTP_MANAGER_IS10_H
 #define HTTP_MANAGER_IS10_H
 
 #include <Arduino.h>
-#include <WebServer.h>
-#include <ArduinoJson.h>
-#include "SettingManager.h"
+#include "AraneaWebUI.h"
 #include "RouterTypes.h"
 
-// グローバル設定構造体
-struct GlobalSetting {
+// IS10グローバル設定構造体
+struct Is10GlobalSetting {
   String endpoint;           // CelestialGlobe endpoint URL
   String celestialSecret;    // X-Celestial-Secret header value
   int scanIntervalSec;       // スキャン間隔（秒）
@@ -25,15 +23,7 @@ struct GlobalSetting {
   unsigned long interval;    // ルーター間インターバル（ms）
 };
 
-// LacisID生成設定
-struct LacisIdGenSetting {
-  String prefix;
-  String productType;
-  String productCode;
-  String generator;
-};
-
-class HttpManagerIs10 {
+class HttpManagerIs10 : public AraneaWebUI {
 public:
   /**
    * 初期化
@@ -43,63 +33,47 @@ public:
    * @param port HTTPポート
    */
   void begin(SettingManager* settings, RouterConfig* routers, int* routerCount, int port = 80);
-  void handle();
-  void setDeviceInfo(const String& type, const String& lacisId,
-                     const String& cic, const String& version);
 
   // 設定取得
-  GlobalSetting getGlobalSetting();
-  LacisIdGenSetting getLacisIdGenSetting();
+  Is10GlobalSetting getGlobalSetting();
   RouterConfig getRouter(int index);
   int getRouterCount();
 
-  // コールバック
-  void onSettingsChanged(void (*callback)());
-  void onRebootRequest(void (*callback)());
+  // ルーターステータス更新（メインループから呼び出し）
+  void setRouterStatus(int totalRouters, int successfulPolls, unsigned long lastPollTime);
+  void setMqttStatus(bool connected);
+  void setLastStateReport(const String& time, int code);
 
-  // WebServer取得（HttpOtaManager連携用）
-  WebServer* getServer() { return server_; }
+protected:
+  // AraneaWebUI オーバーライド
+  void getTypeSpecificStatus(JsonObject& obj) override;
+  void getTypeSpecificConfig(JsonObject& obj) override;
+  String generateTypeSpecificTabs() override;
+  String generateTypeSpecificTabContents() override;
+  String generateTypeSpecificJS() override;
+  void registerTypeSpecificEndpoints() override;
 
 private:
-  WebServer* server_ = nullptr;
-  SettingManager* settings_ = nullptr;
-
-  String deviceType_;
-  String lacisId_;
-  String cic_;
-  String firmwareVersion_;
-  String fid_;
-
-  void (*settingsChangedCallback_)() = nullptr;
-  void (*rebootCallback_)() = nullptr;
-
   // 外部ルーター配列への参照
   RouterConfig* routers_ = nullptr;
   int* routerCount_ = nullptr;
 
-  // ハンドラ
-  void handleRoot();
-  void handleGetConfig();
-  void handleSaveGlobal();
-  void handleSaveLacisGen();
+  // ステータス情報
+  int totalRouters_ = 0;
+  int successfulPolls_ = 0;
+  unsigned long lastPollTime_ = 0;
+  bool mqttConnected_ = false;
+  String lastStateReportTime_;
+  int lastStateReportCode_ = 0;
+
+  // is10固有ハンドラ
+  void handleSaveInspector();
   void handleSaveRouter();
   void handleDeleteRouter();
-  void handleSaveTenant();
-  void handleSaveWifi();
-  void handleReboot();
-  void handleFactoryReset();
-  void handleNotFound();
 
-  // 設定読み書き
+  // ルーター設定読み書き
   void loadRouters();
   void saveRouters();
-  void loadGlobalSettings();
-  void saveGlobalSettings();
-
-  // HTML生成
-  String generateHTML();
-  String generateCSS();
-  String generateJS();
 };
 
 #endif // HTTP_MANAGER_IS10_H
