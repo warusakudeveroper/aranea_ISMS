@@ -130,6 +130,25 @@ static const char* stageStr(uint32_t stage) {
 // FreeRTOS for stack monitoring
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+
+// ========================================
+// Serialミューテックス（SSHタスクとのSerial競合防止）
+// ========================================
+static SemaphoreHandle_t gSerialMutex = nullptr;
+
+// スレッドセーフなSerial出力マクロ
+#define SERIAL_PRINTF(...) do { \
+  if (gSerialMutex) xSemaphoreTake(gSerialMutex, portMAX_DELAY); \
+  Serial.printf(__VA_ARGS__); \
+  if (gSerialMutex) xSemaphoreGive(gSerialMutex); \
+} while(0)
+
+#define SERIAL_PRINTLN(msg) do { \
+  if (gSerialMutex) xSemaphoreTake(gSerialMutex, portMAX_DELAY); \
+  Serial.println(msg); \
+  if (gSerialMutex) xSemaphoreGive(gSerialMutex); \
+} while(0)
 
 // ========================================
 // デバッグ用: スタック残量ログ
@@ -333,11 +352,21 @@ struct SshTaskParams {
 // SSH専用タスク関数（ミニマル版アプローチ - フラグベース）
 // グローバル変数を直接参照し、セマフォではなくフラグで完了通知
 // CelestialGlobe送信用にcollectedRouterInfo[]に結果を格納
+//
+// 修正版 v1.2.1:
+// - connectedOk/dataOk の2段階成功判定（接続完了を優先）
+// - libssh_begin()/ssh_finalize()はsetup()で1回のみ呼び出し
+// - タイムアウトはglobalConfig.sshTimeoutを使用
+// - SERIAL_PRINTFでスレッドセーフ出力
 void sshTaskFunction(void* pvParameters) {
   int idx = currentRouterIndex;
   RouterConfig& router = routers[idx];
 
-  Serial.printf("[SSH] Router %d/%d: %s (%s)\n", idx + 1, routerCount, router.rid.c_str(), router.ipAddr.c_str());
+  // 2段階成功判定フラグ
+  bool connectedOk = false;  // SSH認証成功
+  bool dataOk = false;       // データ取得成功
+
+  SERIAL_PRINTF("[SSH] Router %d/%d: %s (%s)\n", idx + 1, routerCount, router.rid.c_str(), router.ipAddr.c_str());
 
   // collectedRouterInfo初期化
   RouterInfo& info = collectedRouterInfo[idx];
@@ -351,12 +380,12 @@ void sshTaskFunction(void* pvParameters) {
   info.online = false;
   info.lastUpdate = millis();
 
-  libssh_begin();
+  // libssh_begin() はsetup()で1回だけ呼び出し済み（削除）
 
   ssh_session session = ssh_new();
   if (session == NULL) {
-    Serial.println("[SSH] Failed to create session");
-    ssh_finalize();
+    SERIAL_PRINTLN("[SSH] Failed to create session");
+    // ssh_finalize() は呼び出さない（グローバル状態を保持）
     sshSuccess = false;
     sshDone = true;
     vTaskDelete(NULL);
@@ -367,14 +396,15 @@ void sshTaskFunction(void* pvParameters) {
   unsigned int port = router.sshPort;
   ssh_options_set(session, SSH_OPTIONS_PORT, &port);
   ssh_options_set(session, SSH_OPTIONS_USER, router.username.c_str());
-  long timeout = 30;  // ミニマル版と同じ30秒
+  // タイムアウトをglobalConfigから取得（秒単位）
+  long timeout = globalConfig.sshTimeout / 1000;
   ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout);
 
   int rc = ssh_connect(session);
   if (rc != SSH_OK) {
-    Serial.printf("[SSH] Connect failed: %s\n", ssh_get_error(session));
+    SERIAL_PRINTF("[SSH] Connect failed: %s\n", ssh_get_error(session));
     ssh_free(session);
-    ssh_finalize();
+    // ssh_finalize() は呼び出さない
     sshSuccess = false;
     sshDone = true;
     vTaskDelete(NULL);
@@ -383,18 +413,21 @@ void sshTaskFunction(void* pvParameters) {
 
   rc = ssh_userauth_password(session, NULL, router.password.c_str());
   if (rc != SSH_AUTH_SUCCESS) {
-    Serial.printf("[SSH] Auth failed: %s\n", ssh_get_error(session));
+    SERIAL_PRINTF("[SSH] Auth failed: %s\n", ssh_get_error(session));
     ssh_disconnect(session);
     ssh_free(session);
-    ssh_finalize();
+    // ssh_finalize() は呼び出さない
     sshSuccess = false;
     sshDone = true;
     vTaskDelete(NULL);
     return;
   }
 
-  // 接続成功 - 情報取得開始
+  // SSH認証成功 = connectedOk
+  connectedOk = true;
   info.online = true;
+  SERIAL_PRINTLN("[SSH] Auth success (connectedOk=true)");
+
   ssh_channel channel = ssh_channel_new(session);
 
   if (channel) {
@@ -415,8 +448,8 @@ void sshTaskFunction(void* pvParameters) {
           char* end = p + strlen(p) - 1;
           while (end > p && isspace(*end)) *end-- = '\0';
           info.wanIp = p;
-          Serial.printf("[SSH] WAN: %s\n", p);
-          sshSuccess = true;
+          SERIAL_PRINTF("[SSH] WAN: %s\n", p);
+          dataOk = true;  // データ取得成功
         }
       }
       ssh_channel_send_eof(channel);
@@ -516,9 +549,16 @@ void sshTaskFunction(void* pvParameters) {
 
   ssh_disconnect(session);
   ssh_free(session);
-  ssh_finalize();
+  // ssh_finalize() は呼び出さない（グローバル状態を保持）
 
   info.lastUpdate = millis();
+
+  // 成功判定: connectedOk（SSH認証成功）を優先
+  // dataOk が false でも connectedOk が true なら完走扱い
+  sshSuccess = connectedOk;
+  SERIAL_PRINTF("[SSH] Done: connectedOk=%d, dataOk=%d, sshSuccess=%d\n",
+                connectedOk, dataOk, sshSuccess);
+
   sshDone = true;
   vTaskDelete(NULL);
 }
@@ -1941,14 +1981,24 @@ void setup() {
   Serial.println("[BOOT] Stabilization complete");
 
   // ========================================
-  // SSH初期化 - 新方式: タスク内で毎回初期化・終了
+  // Serialミューテックス初期化（SSHタスクとの競合防止）
   // ========================================
-  // libssh_begin() はSSHタスク内で呼び出す（各SSH操作の開始時）
-  // ssh_finalize() もSSHタスク内で呼び出す（各SSH操作の終了時）
-  // これにより内部タイマーの問題を回避
+  gSerialMutex = xSemaphoreCreateMutex();
+  if (gSerialMutex == nullptr) {
+    Serial.println("[ERROR] Failed to create Serial mutex");
+  } else {
+    Serial.println("[MUTEX] Serial mutex created");
+  }
+
+  // ========================================
+  // SSH初期化 - 新方式: setup()で1回だけlibssh_begin()
+  // ========================================
+  // libssh_begin() をsetup()で1回だけ呼び出す
+  // ssh_finalize() は呼び出さない（グローバル状態破壊を防ぐ）
   lastStage = STAGE_SSH_BEGIN;
   Serial.printf("[STAGE] %s\n", stageStr(lastStage));
-  Serial.println("[SSH] Using per-task init/finalize approach (safe mode)");
+  libssh_begin();
+  Serial.println("[SSH] libssh_begin() called once in setup()");
 
   lastStage = STAGE_SSH_DONE;
   Serial.printf("[STAGE] %s\n", stageStr(lastStage));
