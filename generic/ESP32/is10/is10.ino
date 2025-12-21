@@ -318,10 +318,10 @@ static RouterInfo collectedRouterInfo[MAX_ROUTERS];
 static int collectedRouterCount = 0;
 
 // ========================================
-// SSH専用タスク用構造体（51KB+ スタック）
+// SSH専用タスク用構造体（32KB スタック）
 // LibSSH-ESP32公式exampleに従い、SSH操作を専用タスクで実行
 // ========================================
-static const uint32_t SSH_TASK_STACK_SIZE = 51200;  // 51.2KB (公式example同様)
+static const uint32_t SSH_TASK_STACK_SIZE = 32768;  // 32KB (heapLargest制約に対応)
 
 struct SshTaskParams {
   const RouterConfig* router;
@@ -397,93 +397,121 @@ void sshTaskFunction(void* pvParameters) {
   info.online = true;
   ssh_channel channel = ssh_channel_new(session);
 
-  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
-    // WAN IP取得
-    if (ssh_channel_request_exec(channel, "nvram get wan0_ipaddr") == SSH_OK) {
-      char buf[256];
-      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-      if (n > 0) {
-        buf[n] = '\0';
-        String wan = String(buf);
-        wan.trim();
-        info.wanIp = wan;
-        Serial.printf("[SSH] WAN: %s\n", wan.c_str());
-        sshSuccess = true;
+  if (channel) {
+    if (ssh_channel_open_session(channel) == SSH_OK) {
+      // WAN IP取得
+      if (ssh_channel_request_exec(channel, "nvram get wan0_ipaddr") == SSH_OK) {
+        char buf[256];
+        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+          buf[n] = '\0';
+          // String生成を最小化
+          char wanBuf[64];
+          strncpy(wanBuf, buf, sizeof(wanBuf) - 1);
+          wanBuf[sizeof(wanBuf) - 1] = '\0';
+          // trim処理
+          char* p = wanBuf;
+          while (*p && isspace(*p)) p++;
+          char* end = p + strlen(p) - 1;
+          while (end > p && isspace(*end)) *end-- = '\0';
+          info.wanIp = p;
+          Serial.printf("[SSH] WAN: %s\n", p);
+          sshSuccess = true;
+        }
       }
+      ssh_channel_send_eof(channel);
+      ssh_channel_close(channel);
     }
-    ssh_channel_send_eof(channel);
-    ssh_channel_close(channel);
-    ssh_channel_free(channel);
+    ssh_channel_free(channel);  // open_session失敗時もfree
+    channel = nullptr;
   }
 
   // 追加コマンド: LAN IP
   channel = ssh_channel_new(session);
-  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
-    if (ssh_channel_request_exec(channel, "nvram get lan_ipaddr") == SSH_OK) {
-      char buf[256];
-      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-      if (n > 0) {
-        buf[n] = '\0';
-        String lanIp = String(buf);
-        lanIp.trim();
-        info.lanIp = lanIp;
+  if (channel) {
+    if (ssh_channel_open_session(channel) == SSH_OK) {
+      if (ssh_channel_request_exec(channel, "nvram get lan_ipaddr") == SSH_OK) {
+        char buf[256];
+        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+          buf[n] = '\0';
+          char* p = buf;
+          while (*p && isspace(*p)) p++;
+          char* end = p + strlen(p) - 1;
+          while (end > p && isspace(*end)) *end-- = '\0';
+          info.lanIp = p;
+        }
       }
+      ssh_channel_send_eof(channel);
+      ssh_channel_close(channel);
     }
-    ssh_channel_send_eof(channel);
-    ssh_channel_close(channel);
     ssh_channel_free(channel);
+    channel = nullptr;
   }
 
   // 追加コマンド: 2.4GHz SSID
   channel = ssh_channel_new(session);
-  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
-    if (ssh_channel_request_exec(channel, "nvram get wl0_ssid") == SSH_OK) {
-      char buf[256];
-      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-      if (n > 0) {
-        buf[n] = '\0';
-        String ssid = String(buf);
-        ssid.trim();
-        info.ssid24 = ssid;
+  if (channel) {
+    if (ssh_channel_open_session(channel) == SSH_OK) {
+      if (ssh_channel_request_exec(channel, "nvram get wl0_ssid") == SSH_OK) {
+        char buf[256];
+        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+          buf[n] = '\0';
+          char* p = buf;
+          while (*p && isspace(*p)) p++;
+          char* end = p + strlen(p) - 1;
+          while (end > p && isspace(*end)) *end-- = '\0';
+          info.ssid24 = p;
+        }
       }
+      ssh_channel_send_eof(channel);
+      ssh_channel_close(channel);
     }
-    ssh_channel_send_eof(channel);
-    ssh_channel_close(channel);
     ssh_channel_free(channel);
+    channel = nullptr;
   }
 
   // 追加コマンド: 5GHz SSID
   channel = ssh_channel_new(session);
-  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
-    if (ssh_channel_request_exec(channel, "nvram get wl1_ssid") == SSH_OK) {
-      char buf[256];
-      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-      if (n > 0) {
-        buf[n] = '\0';
-        String ssid = String(buf);
-        ssid.trim();
-        info.ssid50 = ssid;
+  if (channel) {
+    if (ssh_channel_open_session(channel) == SSH_OK) {
+      if (ssh_channel_request_exec(channel, "nvram get wl1_ssid") == SSH_OK) {
+        char buf[256];
+        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+          buf[n] = '\0';
+          char* p = buf;
+          while (*p && isspace(*p)) p++;
+          char* end = p + strlen(p) - 1;
+          while (end > p && isspace(*end)) *end-- = '\0';
+          info.ssid50 = p;
+        }
       }
+      ssh_channel_send_eof(channel);
+      ssh_channel_close(channel);
     }
-    ssh_channel_send_eof(channel);
-    ssh_channel_close(channel);
     ssh_channel_free(channel);
+    channel = nullptr;
   }
 
   // 追加コマンド: クライアント数（DHCPリース）
   channel = ssh_channel_new(session);
-  if (channel && ssh_channel_open_session(channel) == SSH_OK) {
-    if (ssh_channel_request_exec(channel, "cat /var/lib/misc/dnsmasq.leases 2>/dev/null | wc -l") == SSH_OK) {
-      char buf[64];
-      int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-      if (n > 0) {
-        buf[n] = '\0';
-        info.clientCount = atoi(buf);
+  if (channel) {
+    if (ssh_channel_open_session(channel) == SSH_OK) {
+      if (ssh_channel_request_exec(channel, "cat /var/lib/misc/dnsmasq.leases 2>/dev/null | wc -l") == SSH_OK) {
+        char buf[64];
+        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+          buf[n] = '\0';
+          info.clientCount = atoi(buf);
+        }
       }
+      ssh_channel_send_eof(channel);
+      ssh_channel_close(channel);
     }
-    ssh_channel_send_eof(channel);
-    ssh_channel_close(channel);
     ssh_channel_free(channel);
+    channel = nullptr;
   }
 
   ssh_disconnect(session);
@@ -1881,28 +1909,6 @@ void setup() {
     Serial.println("[MQTT] Or configure type on mobes araneaDeviceConfig");
   }
 
-  // ========================================
-  // TEST: 16台全てをハードコード
-  // ========================================
-  routerCount = 16;
-  routers[0]  = {"101", "192.168.125.171", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[1]  = {"104", "192.168.125.172", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[2]  = {"105", "192.168.125.173", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[3]  = {"106", "192.168.125.174", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[4]  = {"201", "192.168.125.175", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[5]  = {"202", "192.168.125.176", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[6]  = {"203", "192.168.125.177", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[7]  = {"204", "192.168.125.178", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[8]  = {"205", "192.168.125.179", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[9]  = {"206", "192.168.125.180", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[10] = {"301", "192.168.125.181", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[11] = {"302", "192.168.125.182", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[12] = {"303", "192.168.125.183", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[13] = {"304", "192.168.125.184", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[14] = {"305", "192.168.125.185", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  routers[15] = {"306", "192.168.125.186", "", 65305, "HALE_admin", "Hale_tam_2020063", true, RouterOsType::ASUSWRT};
-  Serial.printf("[TEST] Hardcoded %d routers\n", routerCount);
-
   // HTTP OTA開始（httpMgrのWebServerを共有）
   // DISABLED: LibSSH-ESP32 との TLS/SHA ハードウェア競合を回避するため無効化
   // httpOta.begin(httpMgr.getServer());
@@ -2058,26 +2064,53 @@ void loop() {
     // SSH完了チェック
     if (sshDone && sshInProgress) {
       sshInProgress = false;
+
+      // ヒープ状況を毎回ログ出力（デバッグ用）
+      uint32_t freeHeap = ESP.getFreeHeap();
+      uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+
       if (sshSuccess) {
-        Serial.printf("[POLL] Router %d/%d SUCCESS\n", currentRouterIndex + 1, routerCount);
+        Serial.printf("[POLL] Router %d/%d SUCCESS (heap=%u, largest=%u)\n",
+                      currentRouterIndex + 1, routerCount, freeHeap, largestBlock);
         successCount++;
       } else {
-        Serial.printf("[POLL] Router %d/%d FAILED\n", currentRouterIndex + 1, routerCount);
+        Serial.printf("[POLL] Router %d/%d FAILED (heap=%u, largest=%u)\n",
+                      currentRouterIndex + 1, routerCount, freeHeap, largestBlock);
         failCount++;
       }
+
+      // ヒープ危険水準警告（SSH_TASK_STACK_SIZE + マージン）
+      if (largestBlock < SSH_TASK_STACK_SIZE + 10000) {
+        Serial.printf("[HEAP] WARNING: Low memory! largest=%u < required=%u\n",
+                      largestBlock, SSH_TASK_STACK_SIZE + 10000);
+      }
+
       sshDone = false;
 
-      // 次のルーターへ（1秒待機 - ミニマル版準拠）
-      delay(1000);
+      // 次のルーターへ（10秒待機 - メモリ回復＋MQTT/HTTP余裕）
+      delay(10000);
       currentRouterIndex++;
       if (currentRouterIndex >= routerCount) {
         // 全ルーター完了
+        uint32_t freeHeap = ESP.getFreeHeap();
+        uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
         Serial.printf("\n[COMPLETE] %d/%d success\n", successCount, routerCount);
-        Serial.printf("[COMPLETE] heap=%d\n\n", ESP.getFreeHeap());
+        Serial.printf("[COMPLETE] heap=%u, largest=%u\n\n", freeHeap, largestBlock);
 
-        // CelestialGlobe SSOT送信
+        // CelestialGlobe送信前にメモリ回復待機
+        Serial.println("[COMPLETE] Waiting 3s for memory recovery before CelestialGlobe...");
+        delay(3000);
+
+        // 再チェック
+        freeHeap = ESP.getFreeHeap();
+        largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        Serial.printf("[COMPLETE] After wait: heap=%u, largest=%u\n", freeHeap, largestBlock);
+
+        // CelestialGlobe SSOT送信（ヒープ16KB以上必要）
         collectedRouterCount = routerCount;
-        if (sendToCelestialGlobe()) {
+        if (largestBlock < 16000) {
+          Serial.printf("[COMPLETE] SKIP CelestialGlobe - low memory (largest=%u < 16000)\n", largestBlock);
+        } else if (sendToCelestialGlobe()) {
           Serial.println("[COMPLETE] CelestialGlobe sent OK");
         } else {
           Serial.println("[COMPLETE] CelestialGlobe send failed");
@@ -2091,9 +2124,29 @@ void loop() {
     }
     // 新しいSSH開始
     else if (!sshInProgress && (currentRouterIndex == 0 || (now - lastRouterPoll >= ROUTER_POLL_INTERVAL_MS))) {
-      startSshTask(currentRouterIndex);
-      if (currentRouterIndex == 0) {
+      // SSH開始前にヒープチェック（クラッシュ防止）
+      uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      uint32_t requiredMemory = SSH_TASK_STACK_SIZE + 20000;  // スタック + libsshバッファ
+
+      if (largestBlock < requiredMemory) {
+        Serial.printf("[HEAP] CRITICAL: Skipping Router %d/%d - insufficient memory\n",
+                      currentRouterIndex + 1, routerCount);
+        Serial.printf("[HEAP] largest=%u < required=%u\n", largestBlock, requiredMemory);
+        Serial.printf("[HEAP] Aborting cycle, %d/%d completed\n", successCount, routerCount);
+
+        // サイクル中断・リセット
+        currentRouterIndex = 0;
+        successCount = 0;
+        failCount = 0;
         lastRouterPoll = now;
+
+        // 次サイクルまで待機させるため長めのインターバル
+        Serial.println("[HEAP] Waiting 60s for memory recovery...");
+      } else {
+        startSshTask(currentRouterIndex);
+        if (currentRouterIndex == 0) {
+          lastRouterPoll = now;
+        }
       }
     }
   }
