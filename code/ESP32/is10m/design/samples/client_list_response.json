@@ -1,0 +1,362 @@
+{
+    "error_code": 0,
+    "apmng_client": {
+        "count": {
+            "client_list": 16
+        },
+        "client_list": [
+            {
+                "client_list_82": {
+                    "mac": "6C-C8-40-8C-CD-4C",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f15",
+                    "encode": "1",
+                    "ip": "192.168.97.15",
+                    "entry_id": "82",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-51",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "15%3a12%3a28",
+                    "ap_name": "MercuryMOAP1200D%5bap02-10%5d"
+                }
+            },
+            {
+                "client_list_980": {
+                    "mac": "6C-C8-40-56-09-AC",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f21",
+                    "encode": "1",
+                    "ip": "192.168.97.12",
+                    "entry_id": "980",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-63",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "07%3a06%3a19",
+                    "ap_name": "MercuryMOAP1200D%5bap02-04%5d"
+                }
+            },
+            {
+                "client_list_132": {
+                    "mac": "6C-C8-40-8C-52-44",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f21",
+                    "encode": "1",
+                    "ip": "192.168.97.21",
+                    "entry_id": "132",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-57",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "15%3a39%3a25",
+                    "ap_name": "MercuryMOAP1200D%5bap02-02%5d"
+                }
+            },
+            {
+                "client_list_102": {
+                    "mac": "6C-C8-40-8D-0D-3C",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f15",
+                    "encode": "1",
+                    "ip": "192.168.97.19",
+                    "entry_id": "102",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-66",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "15%3a40%3a54",
+                    "ap_name": "MercuryMOAP1200D%5bap02-07%5d"
+                }
+            },
+            {
+                "client_list_108": {
+                    "mac": "6C-C8-40-8D-10-00",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f15",
+                    "encode": "1",
+                    "ip": "192.168.97.13",
+                    "entry_id": "108",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-52",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "15%3a50%3a55",
+                    "ap_name": "MercuryMOAP1200D%5bap02-05%5d"
+                }
+            },
+            {
+                "client_list_251": {
+                    "mac": "0E-04-A8-19-5F-6B",
+                    "ipv6": "%3a%3a",
+                    "ssid": "ichiyamasuisan",
+                    "connect_date": "2025%2f12%2f22",
+                    "encode": "1",
+                    "ip": "192.168.0.13",
+                    "entry_id": "251",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-52",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "07%3a19%3a08",
+                    "ap_name": "MercuryMOAP1200D%5bap02-05%5d"
+                }
+            },
+            {
+                "client_list_272": {
+                    "mac": "6C-C8-40-8C-B4-7C",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f18",
+                    "encode": "1",
+                    "ip": "192.168.97.11",
+                    "entry_id": "272",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-50",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "07%3a35%3a40",
+                    "ap_name": "MercuryMOAP1200D%5bap02-03%5d"
+                }
+            },
+            {
+                "client_list_812": {
+                    "mac": "6C-C8-40-55-F9-B0",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f18",
+                    "encode": "1",
+                    "ip": "192.168.97.14",
+                    "entry_id": "812",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-69",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "10%3a59%3a04",
+                    "ap_name": "MercuryMOAP1200D%5bap02-03%5d"
+                }
+            },
+            {
+                "client_list_418": {
+                    "mac": "6C-C8-40-8C-A9-28",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f16",
+                    "encode": "1",
+                    "ip": "192.168.97.22",
+                    "entry_id": "418",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-71",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "10%3a08%3a40",
+                    "ap_name": "MercuryMOAP1200D%5bap02-06%5d"
+                }
+            },
+            {
+                "client_list_983": {
+                    "mac": "6C-C8-40-8C-EE-C8",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f19",
+                    "encode": "1",
+                    "ip": "192.168.97.23",
+                    "entry_id": "983",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-48",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "13%3a42%3a42",
+                    "ap_name": "MercuryMOAP1200D%5bap02-09%5d"
+                }
+            },
+            {
+                "client_list_84": {
+                    "mac": "6C-C8-40-8C-44-90",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f15",
+                    "encode": "1",
+                    "ip": "192.168.97.16",
+                    "entry_id": "84",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-67",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "15%3a13%3a31",
+                    "ap_name": "MercuryMOAP1200D%5bap02-08%5d"
+                }
+            },
+            {
+                "client_list_260": {
+                    "mac": "F8-B3-B7-49-6D-EC",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f22",
+                    "encode": "1",
+                    "ip": "192.168.3.91",
+                    "entry_id": "260",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-51",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "07%3a23%3a48",
+                    "ap_name": "MercuryMOAP1200D%5bap02-20%5d"
+                }
+            },
+            {
+                "client_list_27": {
+                    "mac": "78-4F-43-7B-46-92",
+                    "ipv6": "%3a%3a",
+                    "ssid": "fgop",
+                    "connect_date": "2025%2f12%2f15",
+                    "encode": "1",
+                    "ip": "192.168.3.105",
+                    "entry_id": "27",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "5GHz",
+                            "rssi": "-51",
+                            "freq_unit": "2",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "14%3a20%3a46",
+                    "ap_name": "MercuryMOAP1200D%5bap02-20%5d"
+                }
+            },
+            {
+                "client_list_81": {
+                    "mac": "BC-07-1D-B9-47-79",
+                    "ipv6": "%3a%3a",
+                    "ssid": "ichiyama_C",
+                    "connect_date": "2025%2f12%2f15",
+                    "encode": "1",
+                    "ip": "192.168.96.86",
+                    "entry_id": "81",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-38",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "15%3a10%3a51",
+                    "ap_name": "MercuryMOAP1200D%5bap02-14%5d"
+                }
+            },
+            {
+                "client_list_107": {
+                    "mac": "BC-07-1D-B9-48-17",
+                    "ipv6": "%3a%3a",
+                    "ssid": "ichiyama_C",
+                    "connect_date": "2025%2f12%2f15",
+                    "encode": "1",
+                    "ip": "192.168.96.85",
+                    "entry_id": "107",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-43",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "15%3a48%3a22",
+                    "ap_name": "MercuryMOAP1200D%5bap02-14%5d"
+                }
+            },
+            {
+                "client_list_45": {
+                    "mac": "6C-C8-40-8C-EE-AC",
+                    "ipv6": "%3a%3a",
+                    "ssid": "cluster1",
+                    "connect_date": "2025%2f12%2f21",
+                    "encode": "1",
+                    "ip": "192.168.97.20",
+                    "entry_id": "45",
+                    "vlan_id": "0",
+                    "rf_entry": [
+                        {
+                            "freq_name": "2.4GHz",
+                            "rssi": "-52",
+                            "freq_unit": "1",
+                            "nego_rate": "0"
+                        }
+                    ],
+                    "connect_time": "10%3a36%3a15",
+                    "ap_name": "MercuryMOAP1200D%5bap02-17%5d"
+                }
+            }
+        ]
+    }
+}

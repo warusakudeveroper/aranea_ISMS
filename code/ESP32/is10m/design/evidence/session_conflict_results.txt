@@ -1,0 +1,21 @@
+=== Session Conflict Investigation ===
+Date: 2025年 12月22日 月曜日 07時36分50秒 JST
+
+### Test A: Fresh Login + Multiple Requests ###
+Token A: 7c52da7f2f90ac30...
+  Request 1 (after 500ms): error=0 clients=16
+  Request 2 (after 500ms): error=0 clients=16
+  Request 3 (after 500ms): error=0 clients=16
+
+### Test B: Force Login (force=1) ###
+Force login error_code: 0
+Token B: 52392996d1b15275...
+After force login: error=0 clients=16
+
+### Test C: Old Token A After Force Login B ###
+Old token A result: error=-40401
+
+### Test D: Login + Delay + Request ###
+Token D: b6321ba2cecf657e...
+Waiting 2 seconds...
+After 2s delay: error=0 clients=16

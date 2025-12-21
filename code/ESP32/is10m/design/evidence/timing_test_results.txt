@@ -1,0 +1,36 @@
+=== Mercury AC Token Timing Test ===
+Date: 2025年 12月22日 月曜日 07時36分18秒 JST
+
+### Test 1: Login Response Time ###
+Login response time: 0.210709s
+Token acquired: 3eab3026713a7b71...
+
+### Test 2: Valid Token - Data Fetch Time ###
+Data fetch time: 0.310218s
+Error code: 0
+
+### Test 3: Invalid Token Response Time ###
+Invalid token response time: 0.278217s
+Error code: -40401
+Full response: {"data":{"group":1,"code":-40401},"error_code":-40401}
+
+### Test 4: Re-login After Token Error ###
+Re-login time: 0.201555s
+New token: ...
+
+### Test 5: Verify New Token Works ###
+Verify time: 0.232268s
+Error code: -40401
+AP count: 0
+
+### Test 6: Consecutive Requests (Same Token) ###
+  Request 1: {"data":{"group":1,"code":-40401},"error_code":-40401}0.198744s
+  Request 2: {"data":{"group":1,"code":-40401},"error_code":-40401}0.237055s
+  Request 3: {"data":{"group":1,"code":-40401},"error_code":-40401}0.208540s
+
+=== TIMING SUMMARY ===
+Login:          0.210709s
+Data fetch:     0.310218s
+Invalid token:  0.278217s
+Re-login:       0.201555s
+Verify:         0.232268s

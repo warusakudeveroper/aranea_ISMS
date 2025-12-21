@@ -1,0 +1,49 @@
+=== Mercury AC API Complete Flow Test ===
+Date: 2025年 12月22日 月曜日 07時29分10秒 JST
+
+### Step 1: Login ###
+Login Response:
+{"stok":"0bd1c4a5a22c4781cf507edb43f0a7b3","role":"sys_admin","error_code":0}
+
+Extracted Token: 0bd1c4a5a22c4781cf507edb43f0a7b3
+Error Code: 0
+
+Login SUCCESS\!
+
+### Step 2: Get Client List ###
+Error Code: 0
+Client Count: 16
+
+First 3 clients:
+  1. MAC:6C-C8-40-8C-CD-4C IP:192.168.97.15 AP:MercuryMOAP1200D[ap02-10] SSID:cluster1
+  2. MAC:6C-C8-40-56-09-AC IP:192.168.97.12 AP:MercuryMOAP1200D[ap02-04] SSID:cluster1
+  3. MAC:6C-C8-40-8C-52-44 IP:192.168.97.21 AP:MercuryMOAP1200D[ap02-02] SSID:cluster1
+
+Client List SUCCESS\! (16 clients)
+
+### Step 3: Get AP List ###
+Error Code: 0
+AP Count: 18
+
+First 3 APs:
+  1. MercuryMOAP1200D[ap02-10] MAC:4C-B7-E0-59-FC-EF IP:192.168.96.19 Clients:2.4G=1,5G=0
+  2. MercuryMOAP1200D[ap02-04] MAC:4C-B7-E0-59-FB-AF IP:192.168.96.13 Clients:2.4G=1,5G=0
+  3. MercuryMOAP1200D[ap02-02] MAC:4C-B7-E0-59-FC-25 IP:192.168.96.11 Clients:2.4G=1,5G=0
+
+AP List SUCCESS\! (18 APs)
+
+### Step 4: Invalid Token Test ###
+Invalid token error code: -40401
+
+### Step 5: Missing Filter Test ###
+Without filter - client count: 0 (confirms filter is required)
+
+=== TEST SUMMARY ===
+✅ Login API: Working
+✅ Client List API: Working (16 clients)
+✅ AP List API: Working (18 APs)
+✅ Invalid Token: Returns error code -40401
+✅ Filter Required: Confirmed (0 clients without filter)
+
+All tests PASSED\!
+Test completed: 2025年 12月22日 月曜日 07時30分12秒 JST

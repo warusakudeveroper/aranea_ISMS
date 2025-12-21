@@ -1,0 +1,32 @@
+=== Token Expiry & Recommended Flow Test ===
+Date: 2025年 12月22日 月曜日 07時37分45秒 JST
+
+### ESP32 Recommended Flow Test ###
+
+Step 1: Initial login (force=1)
+  error_code: 0
+  token: 82ebf25462e4238f60c0...
+
+Step 2: Immediate data fetch
+  error_code: 0
+  client_count: 16
+
+Step 3: Simulated poll cycles (3 cycles, 10s interval)
+  Cycle 1: waiting 10s...
+  Cycle 1: error=0 clients=16
+  Cycle 2: waiting 10s...
+  Cycle 2: error=0 clients=16
+  Cycle 3: waiting 10s...
+  Cycle 3: error=0 clients=16
+
+Step 4: AP list with same token
+  error_code: 0
+  ap_count: 18
+
+=== SUMMARY ===
+✓ force=1 login: Always use for clean session
+✓ Immediate request: Works without delay
+✓ Token reuse: Works for multiple requests
+✓ Error handling: Check error_code, re-login on -40401
+
+Test completed: 2025年 12月22日 月曜日 07時38分17秒 JST
