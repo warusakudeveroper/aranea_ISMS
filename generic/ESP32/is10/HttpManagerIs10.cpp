@@ -32,6 +32,9 @@ void HttpManagerIs10::registerTypeSpecificEndpoints() {
   server_->on("/api/is10/inspector", HTTP_POST, [this]() { handleSaveInspector(); });
   server_->on("/api/is10/router", HTTP_POST, [this]() { handleSaveRouter(); });
   server_->on("/api/is10/router/delete", HTTP_POST, [this]() { handleDeleteRouter(); });
+  server_->on("/api/is10/router/clear", HTTP_POST, [this]() { handleClearRouters(); });
+  server_->on("/api/is10/polling", HTTP_POST, [this]() { handlePollingControl(); });
+  server_->on("/api/is10/import", HTTP_POST, [this]() { handleImportConfig(); });
 }
 
 // ========================================
@@ -52,6 +55,20 @@ void HttpManagerIs10::setLastStateReport(const String& time, int code) {
   lastStateReportCode_ = code;
 }
 
+void HttpManagerIs10::setPollingEnabled(bool enabled) {
+  pollingEnabled_ = enabled;
+  Serial.printf("[HTTP-IS10] Polling %s\n", enabled ? "enabled" : "disabled");
+}
+
+void HttpManagerIs10::setPollingStatus(int currentRouter, bool inProgress) {
+  currentRouterIndex_ = currentRouter;
+  pollingInProgress_ = inProgress;
+}
+
+void HttpManagerIs10::onPollingControl(void (*callback)(bool enabled)) {
+  pollingControlCallback_ = callback;
+}
+
 // ========================================
 // is10固有ステータス（API用）
 // ========================================
@@ -60,6 +77,11 @@ void HttpManagerIs10::getTypeSpecificStatus(JsonObject& obj) {
   obj["totalRouters"] = totalRouters_;
   obj["successfulPolls"] = successfulPolls_;
   obj["lastPollTime"] = lastPollTime_;
+
+  // ポーリング制御状態
+  obj["pollingEnabled"] = pollingEnabled_;
+  obj["pollingInProgress"] = pollingInProgress_;
+  obj["currentRouterIndex"] = currentRouterIndex_;
 
   // MQTT状態
   obj["mqttConnected"] = mqttConnected_;
@@ -72,8 +94,8 @@ void HttpManagerIs10::getTypeSpecificStatus(JsonObject& obj) {
   obj["celestialConfigured"] = settings_->getString("is10_endpoint", "").length() > 0;
 
   // SSH設定
-  obj["sshTimeout"] = settings_->getInt("is10_ssh_timeout", 30000);
-  obj["scanIntervalSec"] = settings_->getInt("is10_scan_interval_sec", 60);
+  obj["sshTimeout"] = settings_->getInt("is10_timeout", 30000);
+  obj["scanIntervalSec"] = settings_->getInt("is10_interval", 60);
 }
 
 // ========================================
@@ -83,12 +105,12 @@ void HttpManagerIs10::getTypeSpecificConfig(JsonObject& obj) {
   // CelestialGlobe/SSH設定
   JsonObject inspector = obj.createNestedObject("inspector");
   inspector["endpoint"] = settings_->getString("is10_endpoint", "");
-  inspector["celestialSecret"] = settings_->getString("is10_celestial_secret", "").length() > 0 ? "********" : "";
-  inspector["scanIntervalSec"] = settings_->getInt("is10_scan_interval_sec", 60);
-  inspector["reportClients"] = settings_->getBool("is10_report_clients", true);
-  inspector["sshTimeout"] = settings_->getInt("is10_ssh_timeout", 30000);
-  inspector["retryCount"] = settings_->getInt("is10_retry_count", 2);
-  inspector["routerInterval"] = settings_->getInt("is10_router_interval", 30000);
+  inspector["celestialSecret"] = settings_->getString("is10_secret", "").length() > 0 ? "********" : "";
+  inspector["scanIntervalSec"] = settings_->getInt("is10_interval", 60);
+  inspector["reportClients"] = settings_->getBool("is10_clients", true);
+  inspector["sshTimeout"] = settings_->getInt("is10_timeout", 30000);
+  inspector["retryCount"] = settings_->getInt("is10_retry", 2);
+  inspector["routerInterval"] = settings_->getInt("is10_rtr_intv", 30000);
 
   // ルーター設定
   JsonArray routersArr = obj.createNestedArray("routers");
@@ -122,10 +144,21 @@ String HttpManagerIs10::generateTypeSpecificTabContents() {
 <!-- Inspector Tab -->
 <div id="tab-inspector" class="tab-content">
 <div class="card">
-<div class="card-title">Inspector Status</div>
+<div class="card-title">Polling Status</div>
 <div class="status-grid">
-<div class="status-item"><div class="label">Routers</div><div class="value" id="is-routers">-</div></div>
+<div class="status-item"><div class="label">Status</div><div class="value" id="is-polling-status">-</div></div>
+<div class="status-item"><div class="label">Progress</div><div class="value" id="is-polling-progress">-</div></div>
+<div class="status-item"><div class="label">Result</div><div class="value" id="is-routers">-</div></div>
 <div class="status-item"><div class="label">Last Poll</div><div class="value" id="is-poll">-</div></div>
+</div>
+<div class="btn-group" style="margin-top:12px">
+<button class="btn btn-primary" id="btn-polling-toggle" onclick="togglePolling()">Stop Polling</button>
+<button class="btn" onclick="refreshStatus()">Refresh</button>
+</div>
+</div>
+<div class="card">
+<div class="card-title">Connection Status</div>
+<div class="status-grid">
 <div class="status-item"><div class="label">MQTT</div><div class="value" id="is-mqtt">-</div></div>
 <div class="status-item"><div class="label">State Report</div><div class="value" id="is-report">-</div></div>
 </div>
@@ -154,7 +187,10 @@ String HttpManagerIs10::generateTypeSpecificTabContents() {
 <div id="tab-routers" class="tab-content">
 <div class="card">
 <div class="card-title">Router Configuration</div>
+<div class="btn-group">
 <button class="btn btn-primary" onclick="addRouter()">+ Add Router</button>
+<button class="btn btn-danger" onclick="clearAllRouters()">Clear All</button>
+</div>
 <div id="router-list" style="margin-top:12px"></div>
 </div>
 </div>
@@ -221,10 +257,32 @@ function renderRouterList(){
     </div>`;
   });
 }
+let pollingEnabled=true;
 function refreshTypeSpecificStatus(s){
   const ts=s.typeSpecific||{};
   const total=ts.totalRouters||0;
   const success=ts.successfulPolls||0;
+  pollingEnabled=ts.pollingEnabled!==false;
+  const inProgress=ts.pollingInProgress||false;
+  const currentIdx=ts.currentRouterIndex||0;
+  // Polling status
+  const statusEl=document.getElementById('is-polling-status');
+  const progressEl=document.getElementById('is-polling-progress');
+  const btn=document.getElementById('btn-polling-toggle');
+  if(!pollingEnabled){
+    statusEl.textContent='Stopped';statusEl.className='value warn';
+    progressEl.textContent='-';
+    btn.textContent='Start Polling';btn.className='btn btn-primary';
+  }else if(inProgress){
+    statusEl.textContent='Running';statusEl.className='value good';
+    progressEl.textContent=`Router ${currentIdx+1}/${total}`;
+    btn.textContent='Stop Polling';btn.className='btn btn-danger';
+  }else{
+    statusEl.textContent='Idle';statusEl.className='value';
+    progressEl.textContent='Waiting...';
+    btn.textContent='Stop Polling';btn.className='btn btn-danger';
+  }
+  // Results
   document.getElementById('is-routers').textContent=`${success}/${total}`;
   document.getElementById('is-routers').className='value '+(success===total&&total>0?'good':'warn');
   const lastPoll=ts.lastPollTime||0;
@@ -234,6 +292,18 @@ function refreshTypeSpecificStatus(s){
   const code=ts.lastStateReportCode||0;
   document.getElementById('is-report').textContent=code>0?`HTTP ${code}`:'-';
   document.getElementById('is-report').className='value '+(code===200?'good':code>0?'bad':'');
+}
+async function togglePolling(){
+  const newState=!pollingEnabled;
+  await post('/api/is10/polling',{enabled:newState});
+  toast(newState?'Polling started':'Polling stopped');
+  refreshStatus();
+}
+async function clearAllRouters(){
+  if(!confirm('Clear all router configurations?'))return;
+  await post('/api/is10/router/clear',{});
+  toast('All routers cleared');
+  load();
 }
 async function saveInspector(){
   await post('/api/is10/inspector',{
@@ -320,19 +390,19 @@ void HttpManagerIs10::handleSaveInspector() {
   if (doc.containsKey("celestialSecret")) {
     String secret = doc["celestialSecret"].as<String>();
     if (secret.length() > 0 && secret != "********") {
-      settings_->setString("is10_celestial_secret", secret);
+      settings_->setString("is10_secret", secret);
     }
   }
   if (doc.containsKey("scanIntervalSec")) {
     int sec = doc["scanIntervalSec"];
     if (sec >= 60 && sec <= 86400) {
-      settings_->setInt("is10_scan_interval_sec", sec);
+      settings_->setInt("is10_interval", sec);
     }
   }
-  if (doc.containsKey("reportClients")) settings_->setBool("is10_report_clients", doc["reportClients"]);
-  if (doc.containsKey("sshTimeout")) settings_->setInt("is10_ssh_timeout", doc["sshTimeout"]);
-  if (doc.containsKey("retryCount")) settings_->setInt("is10_retry_count", doc["retryCount"]);
-  if (doc.containsKey("routerInterval")) settings_->setInt("is10_router_interval", doc["routerInterval"]);
+  if (doc.containsKey("reportClients")) settings_->setBool("is10_clients", doc["reportClients"].as<bool>());
+  if (doc.containsKey("sshTimeout")) settings_->setInt("is10_timeout", doc["sshTimeout"].as<int>());
+  if (doc.containsKey("retryCount")) settings_->setInt("is10_retry", doc["retryCount"].as<int>());
+  if (doc.containsKey("routerInterval")) settings_->setInt("is10_rtr_intv", doc["routerInterval"].as<int>());
 
   if (settingsChangedCallback_) settingsChangedCallback_();
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -353,6 +423,35 @@ void HttpManagerIs10::handleSaveRouter() {
   }
 
   int index = doc["index"] | -1;
+  String rid = doc["rid"] | "";
+  String ipAddr = doc["ipAddr"] | "";
+
+  // 必須フィールドのバリデーション
+  if (rid.length() == 0) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"rid is required\"}");
+    return;
+  }
+  if (ipAddr.length() == 0) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"ipAddr is required\"}");
+    return;
+  }
+
+  // IPv4形式バリデーション
+  if (!AraneaWebUI::validateIPv4(ipAddr)) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid ipAddr: must be valid IPv4 (e.g. 192.168.1.1)\"}");
+    return;
+  }
+
+  // ridが指定されている場合、既存ルーターを検索
+  if (rid.length() > 0 && index < 0) {
+    for (int i = 0; i < *routerCount_; i++) {
+      if (routers_[i].rid == rid) {
+        index = i;
+        break;
+      }
+    }
+  }
+
   bool isNew = (index < 0 || index >= *routerCount_);
 
   if (isNew) {
@@ -498,12 +597,12 @@ void HttpManagerIs10::saveRouters() {
 Is10GlobalSetting HttpManagerIs10::getGlobalSetting() {
   Is10GlobalSetting gs;
   gs.endpoint = settings_->getString("is10_endpoint", "");
-  gs.celestialSecret = settings_->getString("is10_celestial_secret", "");
-  gs.scanIntervalSec = settings_->getInt("is10_scan_interval_sec", 60);
-  gs.reportClients = settings_->getBool("is10_report_clients", true);
-  gs.timeout = settings_->getInt("is10_ssh_timeout", 30000);
-  gs.retryCount = settings_->getInt("is10_retry_count", 2);
-  gs.interval = settings_->getInt("is10_router_interval", 30000);
+  gs.celestialSecret = settings_->getString("is10_secret", "");
+  gs.scanIntervalSec = settings_->getInt("is10_interval", 60);
+  gs.reportClients = settings_->getBool("is10_clients", true);
+  gs.timeout = settings_->getInt("is10_timeout", 30000);
+  gs.retryCount = settings_->getInt("is10_retry", 2);
+  gs.interval = settings_->getInt("is10_rtr_intv", 30000);
   return gs;
 }
 
@@ -523,4 +622,137 @@ int HttpManagerIs10::getRouterCount() {
 // ========================================
 void HttpManagerIs10::persistRouters() {
   saveRouters();
+}
+
+// ========================================
+// ルーター設定クリア
+// ========================================
+void HttpManagerIs10::handleClearRouters() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  *routerCount_ = 0;
+  SPIFFS.remove("/routers.json");
+  totalRouters_ = 0;
+  successfulPolls_ = 0;
+
+  Serial.println("[HTTP-IS10] All routers cleared");
+  server_->send(200, "application/json", "{\"ok\":true,\"message\":\"All routers cleared\"}");
+}
+
+// ========================================
+// ポーリング制御
+// ========================================
+void HttpManagerIs10::handlePollingControl() {
+  if (!checkAuth()) { requestAuth(); return; }
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, server_->arg("plain"));
+  if (err) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  if (doc.containsKey("enabled")) {
+    bool enabled = doc["enabled"];
+    pollingEnabled_ = enabled;
+    Serial.printf("[HTTP-IS10] Polling %s via API\n", enabled ? "started" : "stopped");
+
+    // コールバック呼び出し（メインループでの処理用）
+    if (pollingControlCallback_) {
+      pollingControlCallback_(enabled);
+    }
+
+    String response = "{\"ok\":true,\"pollingEnabled\":";
+    response += enabled ? "true" : "false";
+    response += "}";
+    server_->send(200, "application/json", response);
+  } else {
+    // ステータス取得のみ
+    String response = "{\"ok\":true,\"pollingEnabled\":";
+    response += pollingEnabled_ ? "true" : "false";
+    response += ",\"currentRouterIndex\":";
+    response += String(currentRouterIndex_);
+    response += ",\"pollingInProgress\":";
+    response += pollingInProgress_ ? "true" : "false";
+    response += "}";
+    server_->send(200, "application/json", response);
+  }
+}
+
+// ========================================
+// 設定一括インポート
+// ========================================
+void HttpManagerIs10::handleImportConfig() {
+  if (!checkAuth()) { requestAuth(); return; }
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  yield();
+  DynamicJsonDocument doc(16384);
+  DeserializationError err = deserializeJson(doc, server_->arg("plain"));
+  if (err) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  int importedCount = 0;
+
+  // Inspector設定
+  if (doc.containsKey("inspector")) {
+    JsonObject ins = doc["inspector"];
+    if (ins.containsKey("endpoint")) settings_->setString("is10_endpoint", ins["endpoint"]);
+    if (ins.containsKey("celestialSecret")) {
+      String secret = ins["celestialSecret"].as<String>();
+      if (secret.length() > 0 && secret != "********") {
+        settings_->setString("is10_secret", secret);
+      }
+    }
+    if (ins.containsKey("scanIntervalSec")) settings_->setInt("is10_interval", ins["scanIntervalSec"].as<int>());
+    if (ins.containsKey("reportClients")) settings_->setBool("is10_clients", ins["reportClients"].as<bool>());
+    if (ins.containsKey("sshTimeout")) settings_->setInt("is10_timeout", ins["sshTimeout"].as<int>());
+    if (ins.containsKey("retryCount")) settings_->setInt("is10_retry", ins["retryCount"].as<int>());
+    if (ins.containsKey("routerInterval")) settings_->setInt("is10_rtr_intv", ins["routerInterval"].as<int>());
+    importedCount++;
+  }
+
+  // ルーター設定
+  if (doc.containsKey("routers") && doc["routers"].is<JsonArray>()) {
+    *routerCount_ = 0;
+    JsonArray arr = doc["routers"].as<JsonArray>();
+    for (JsonObject obj : arr) {
+      if (*routerCount_ >= MAX_ROUTERS) break;
+      routers_[*routerCount_].rid = obj["rid"] | "";
+      routers_[*routerCount_].ipAddr = obj["ipAddr"] | "";
+      routers_[*routerCount_].publicKey = obj["publicKey"] | "";
+      routers_[*routerCount_].sshPort = obj["sshPort"] | 22;
+      routers_[*routerCount_].username = obj["username"] | "";
+      routers_[*routerCount_].password = obj["password"] | "";
+      routers_[*routerCount_].enabled = obj["enabled"] | true;
+      int osTypeInt = obj["osType"] | 0;
+      routers_[*routerCount_].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
+      if (routers_[*routerCount_].ipAddr.length() > 0) {
+        (*routerCount_)++;
+      }
+    }
+    saveRouters();
+    totalRouters_ = *routerCount_;
+    successfulPolls_ = 0;
+    importedCount++;
+  }
+
+  if (settingsChangedCallback_) settingsChangedCallback_();
+
+  String response = "{\"ok\":true,\"importedSections\":";
+  response += String(importedCount);
+  response += ",\"routerCount\":";
+  response += String(*routerCount_);
+  response += "}";
+  server_->send(200, "application/json", response);
+  Serial.printf("[HTTP-IS10] Config imported: %d sections, %d routers\n", importedCount, *routerCount_);
 }

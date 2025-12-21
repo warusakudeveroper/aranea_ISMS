@@ -44,6 +44,14 @@ public:
   void setMqttStatus(bool connected);
   void setLastStateReport(const String& time, int code);
 
+  // ポーリング制御
+  void setPollingEnabled(bool enabled);
+  bool isPollingEnabled() const { return pollingEnabled_; }
+  void setPollingStatus(int currentRouter, bool inProgress);
+
+  // コールバック設定
+  void onPollingControl(void (*callback)(bool enabled));
+
   /**
    * ルーター設定をSPIFFSに永続化（MQTT config適用時用）
    */
@@ -71,10 +79,19 @@ private:
   String lastStateReportTime_;
   int lastStateReportCode_ = 0;
 
+  // ポーリング制御状態
+  bool pollingEnabled_ = true;
+  int currentRouterIndex_ = 0;
+  bool pollingInProgress_ = false;
+  void (*pollingControlCallback_)(bool) = nullptr;
+
   // is10固有ハンドラ
   void handleSaveInspector();
   void handleSaveRouter();
   void handleDeleteRouter();
+  void handleClearRouters();
+  void handlePollingControl();
+  void handleImportConfig();
 
   // ルーター設定読み書き
   void loadRouters();

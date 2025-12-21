@@ -1146,6 +1146,7 @@ void applyRouterConfig(JsonArray routersJson) {
 
   routerCount = newCount;
   Serial.printf("[CONFIG] Applied %d routers from MQTT config\n", routerCount);
+  httpMgr.setRouterStatus(routerCount, 0, 0);  // ステータス更新
 }
 
 // ========================================
@@ -1900,6 +1901,10 @@ void setup() {
   devInfo.modules = "WiFi,NTP,SSH,MQTT,HTTP";
   httpMgr.setDeviceInfo(devInfo);
 
+  // ルーターステータス初期化（totalRouters=0問題の修正）
+  httpMgr.setRouterStatus(routerCount, 0, 0);
+  Serial.printf("[HTTP] Initial router status: %d routers configured\n", routerCount);
+
   // deviceName変更時の即時deviceStateReport送信（SSOT）
   httpMgr.onDeviceNameChanged([]() {
     Serial.println("[WebUI] deviceName changed - sending immediate deviceStateReport");
@@ -1950,21 +1955,20 @@ void setup() {
   }
 
   // HTTP OTA開始（httpMgrのWebServerを共有）
-  // DISABLED: LibSSH-ESP32 との TLS/SHA ハードウェア競合を回避するため無効化
-  // httpOta.begin(httpMgr.getServer());
-  // httpOta.onStart([]() {
-  //   op.setOtaUpdating(true);
-  //   display.showBoot("HTTP OTA Start...");
-  //   Serial.println("[HTTP-OTA] Update started");
-  // });
-  // httpOta.onProgress([](int progress) {
-  //   display.showBoot("HTTP OTA: " + String(progress) + "%");
-  // });
-  // httpOta.onError([](const String& err) {
-  //   op.setOtaUpdating(false);
-  //   display.showError("HTTP OTA: " + err);
-  // });
-  Serial.println("[HTTP-OTA] DISABLED for LibSSH compatibility test");
+  httpOta.begin(httpMgr.getServer());
+  httpOta.onStart([]() {
+    op.setOtaUpdating(true);
+    display.showBoot("HTTP OTA Start...");
+    Serial.println("[HTTP-OTA] Update started");
+  });
+  httpOta.onProgress([](int progress) {
+    display.showBoot("HTTP OTA: " + String(progress) + "%");
+  });
+  httpOta.onError([](const String& err) {
+    op.setOtaUpdating(false);
+    display.showError("HTTP OTA: " + err);
+  });
+  Serial.println("[HTTP-OTA] Enabled");
 
   // RUNモードへ
   op.setMode(OperatorMode::RUN);
@@ -2085,7 +2089,10 @@ void loop() {
   // ========================================
   // 4. ルーターポーリング（非ブロッキング - ミニマル版アプローチ）
   // ========================================
-  if (!apModeActive && routerCount > 0) {
+  // ポーリングステータスを更新
+  httpMgr.setPollingStatus(currentRouterIndex, sshInProgress);
+
+  if (!apModeActive && routerCount > 0 && httpMgr.isPollingEnabled()) {
     // SSHタスクウォッチドッグ: 長時間ハングしたら強制スキップ
     if (sshInProgress && !sshDone && (now - sshTaskStartTime >= SSH_TASK_WATCHDOG_MS)) {
       Serial.printf("[WATCHDOG] SSH task timeout after %lu ms, forcing skip\n",
@@ -2101,6 +2108,7 @@ void loop() {
       currentRouterIndex++;
       if (currentRouterIndex >= routerCount) {
         Serial.printf("\n[COMPLETE] %d/%d success (watchdog triggered)\n", successCount, routerCount);
+        httpMgr.setRouterStatus(routerCount, successCount, millis());  // ステータス更新
         collectedRouterCount = routerCount;
         sendToCelestialGlobe();
         currentRouterIndex = 0;
@@ -2146,6 +2154,7 @@ void loop() {
         uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
         Serial.printf("\n[COMPLETE] %d/%d success\n", successCount, routerCount);
         Serial.printf("[COMPLETE] heap=%u, largest=%u\n\n", freeHeap, largestBlock);
+        httpMgr.setRouterStatus(routerCount, successCount, millis());  // ステータス更新
 
         // CelestialGlobe送信前にメモリ回復待機
         Serial.println("[COMPLETE] Waiting 3s for memory recovery before CelestialGlobe...");

@@ -384,6 +384,30 @@ void AraneaWebUI::handleSaveTenant() {
     return;
   }
 
+  // バリデーション
+  if (doc.containsKey("tid")) {
+    String tid = doc["tid"].as<String>();
+    if (tid.length() > 0 && !validateTid(tid)) {
+      server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid tid: must be T + 19 digits (20 chars total)\"}");
+      return;
+    }
+  }
+  if (doc.containsKey("fid")) {
+    String fid = doc["fid"].as<String>();
+    if (fid.length() > 0 && !validateFid(fid)) {
+      server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid fid: must be exactly 4 digits\"}");
+      return;
+    }
+  }
+  if (doc.containsKey("lacisId")) {
+    String lacisId = doc["lacisId"].as<String>();
+    if (lacisId.length() > 0 && !validateLacisId(lacisId)) {
+      server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid lacisId: must be exactly 20 digits\"}");
+      return;
+    }
+  }
+
+  // 保存
   if (doc.containsKey("tid")) settings_->setString("tid", doc["tid"]);
   if (doc.containsKey("fid")) settings_->setString("fid", doc["fid"]);
   if (doc.containsKey("lacisId")) settings_->setString("tenant_lacisid", doc["lacisId"]);
@@ -449,8 +473,27 @@ void AraneaWebUI::handleSaveSystem() {
 // ========================================
 void AraneaWebUI::handleReboot() {
   if (!checkAuth()) { requestAuth(); return; }
+
+  Serial.println("[WebUI] Reboot requested via API");
+
+  // Connection: closeヘッダを追加してレスポンス送信
+  server_->sendHeader("Connection", "close");
   server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Rebooting...\"}");
-  delay(500);
+
+  // ネットワークスタックに送信時間を与える
+  for (int i = 0; i < 10; i++) {
+    yield();
+    delay(100);
+  }
+
+  // クライアント接続を明示的にクローズ
+  if (server_->client().connected()) {
+    server_->client().flush();
+    server_->client().stop();
+  }
+
+  delay(100);
+
   if (rebootCallback_) rebootCallback_();
   ESP.restart();
 }
@@ -460,21 +503,50 @@ void AraneaWebUI::handleReboot() {
 // ========================================
 void AraneaWebUI::handleFactoryReset() {
   if (!checkAuth()) { requestAuth(); return; }
+
+  Serial.println("[WebUI] Factory reset requested");
+
   // isms namespace クリア
   settings_->clear();
+  Serial.println("[WebUI] NVS isms namespace cleared");
 
   // aranea namespace クリア
   Preferences araneaPrefs;
   araneaPrefs.begin("aranea", false);
   araneaPrefs.clear();
   araneaPrefs.end();
+  Serial.println("[WebUI] NVS aranea namespace cleared");
 
-  // SPIFFS設定ファイル削除
-  SPIFFS.remove("/routers.json");
-  SPIFFS.remove("/aranea_settings.json");
+  // SPIFFS全ファイル削除
+  File root = SPIFFS.open("/");
+  File file = root.openNextFile();
+  while (file) {
+    String fileName = file.name();
+    file.close();
+    SPIFFS.remove("/" + fileName);
+    Serial.printf("[WebUI] Deleted: %s\n", fileName.c_str());
+    file = root.openNextFile();
+  }
+  root.close();
+  Serial.println("[WebUI] SPIFFS cleared");
 
-  server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset complete\"}");
-  delay(500);
+  // Connection: closeヘッダを追加してレスポンス送信
+  server_->sendHeader("Connection", "close");
+  server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset complete. All settings and SPIFFS cleared.\"}");
+
+  // ネットワークスタックに送信時間を与える
+  for (int i = 0; i < 10; i++) {
+    yield();
+    delay(100);
+  }
+
+  // クライアント接続を明示的にクローズ
+  if (server_->client().connected()) {
+    server_->client().flush();
+    server_->client().stop();
+  }
+
+  delay(100);
   ESP.restart();
 }
 
@@ -547,6 +619,85 @@ String AraneaWebUI::formatUptime(unsigned long seconds) {
   } else {
     return String(mins) + "m " + String(secs) + "s";
   }
+}
+
+// ========================================
+// バリデーションヘルパー
+// ========================================
+
+// FID: 4桁の数字
+bool AraneaWebUI::validateFid(const String& fid) {
+  if (fid.length() != 4) return false;
+  for (size_t i = 0; i < fid.length(); i++) {
+    if (!isDigit(fid[i])) return false;
+  }
+  return true;
+}
+
+// TID: T + 19桁の数字 (合計20文字)
+bool AraneaWebUI::validateTid(const String& tid) {
+  if (tid.length() != 20) return false;
+  if (tid[0] != 'T') return false;
+  for (size_t i = 1; i < tid.length(); i++) {
+    if (!isDigit(tid[i])) return false;
+  }
+  return true;
+}
+
+// LacisID: 20桁の数字
+bool AraneaWebUI::validateLacisId(const String& lacisId) {
+  if (lacisId.length() != 20) return false;
+  for (size_t i = 0; i < lacisId.length(); i++) {
+    if (!isDigit(lacisId[i])) return false;
+  }
+  return true;
+}
+
+// IPv4アドレス: 4オクテット、各0-255、CIDR不可
+bool AraneaWebUI::validateIPv4(const String& ip) {
+  if (ip.length() == 0 || ip.length() > 15) return false;
+
+  // CIDR表記チェック
+  if (ip.indexOf('/') >= 0) return false;
+
+  // 連続ドットチェック
+  if (ip.indexOf("..") >= 0) return false;
+
+  // 先頭・末尾のドットチェック
+  if (ip[0] == '.' || ip[ip.length() - 1] == '.') return false;
+
+  int dotCount = 0;
+  int octetStart = 0;
+
+  for (size_t i = 0; i <= ip.length(); i++) {
+    if (i == ip.length() || ip[i] == '.') {
+      // オクテット抽出
+      String octet = ip.substring(octetStart, i);
+
+      // 空オクテットチェック
+      if (octet.length() == 0) return false;
+
+      // 数字のみかチェック
+      for (size_t j = 0; j < octet.length(); j++) {
+        if (!isDigit(octet[j])) return false;
+      }
+
+      // 範囲チェック (0-255)
+      int val = octet.toInt();
+      if (val < 0 || val > 255) return false;
+
+      // 先頭ゼロチェック（01, 001等は不正だが0は許可）
+      if (octet.length() > 1 && octet[0] == '0') return false;
+
+      if (i < ip.length()) {
+        dotCount++;
+        octetStart = i + 1;
+      }
+    }
+  }
+
+  // ドット数が3であること（4オクテット）
+  return dotCount == 3;
 }
 
 // ========================================

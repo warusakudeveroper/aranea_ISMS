@@ -206,6 +206,38 @@ protected:
   // Basic Auth認証
   bool checkAuth();
   void requestAuth();
+
+  // ========================================
+  // バリデーションヘルパー（静的メソッド）
+  // ========================================
+public:
+  /**
+   * FIDバリデーション: 4桁の数字
+   * @return true if valid, false otherwise
+   */
+  static bool validateFid(const String& fid);
+
+  /**
+   * TIDバリデーション: T + 19桁の数字 (合計20文字)
+   * @return true if valid, false otherwise
+   */
+  static bool validateTid(const String& tid);
+
+  /**
+   * LacisIDバリデーション: 20桁の数字
+   * @return true if valid, false otherwise
+   */
+  static bool validateLacisId(const String& lacisId);
+
+  /**
+   * IPv4アドレスバリデーション
+   * - 4オクテット必須 (x.x.x.x)
+   * - 各オクテット 0-255
+   * - CIDR表記不可 (/xx)
+   * - 空欄や不正文字不可
+   * @return true if valid, false otherwise
+   */
+  static bool validateIPv4(const String& ip);
 };
 
 #endif // ARANEA_WEB_UI_H
