@@ -334,7 +334,7 @@ void AraneaWebUI::handleSaveAP() {
     }
   }
   if (doc.containsKey("timeout")) {
-    settings_->setInt("ap_timeout", doc["timeout"]);
+    settings_->setInt("ap_timeout", doc["timeout"].as<int>());
   }
 
   if (settingsChangedCallback_) settingsChangedCallback_();
@@ -358,10 +358,10 @@ void AraneaWebUI::handleSaveCloud() {
     return;
   }
 
-  if (doc.containsKey("gateUrl")) settings_->setString("gate_url", doc["gateUrl"]);
-  if (doc.containsKey("stateReportUrl")) settings_->setString("state_report_url", doc["stateReportUrl"]);
-  if (doc.containsKey("relayPrimary")) settings_->setString("relay_pri", doc["relayPrimary"]);
-  if (doc.containsKey("relaySecondary")) settings_->setString("relay_sec", doc["relaySecondary"]);
+  if (doc.containsKey("gateUrl")) settings_->setString("gate_url", doc["gateUrl"].as<String>());
+  if (doc.containsKey("stateReportUrl")) settings_->setString("state_report_url", doc["stateReportUrl"].as<String>());
+  if (doc.containsKey("relayPrimary")) settings_->setString("relay_pri", doc["relayPrimary"].as<String>());
+  if (doc.containsKey("relaySecondary")) settings_->setString("relay_sec", doc["relaySecondary"].as<String>());
 
   if (settingsChangedCallback_) settingsChangedCallback_();
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -408,11 +408,11 @@ void AraneaWebUI::handleSaveTenant() {
   }
 
   // 保存
-  if (doc.containsKey("tid")) settings_->setString("tid", doc["tid"]);
-  if (doc.containsKey("fid")) settings_->setString("fid", doc["fid"]);
-  if (doc.containsKey("lacisId")) settings_->setString("tenant_lacisid", doc["lacisId"]);
-  if (doc.containsKey("email")) settings_->setString("tenant_email", doc["email"]);
-  if (doc.containsKey("cic")) settings_->setString("tenant_cic", doc["cic"]);
+  if (doc.containsKey("tid")) settings_->setString("tid", doc["tid"].as<String>());
+  if (doc.containsKey("fid")) settings_->setString("fid", doc["fid"].as<String>());
+  if (doc.containsKey("lacisId")) settings_->setString("tenant_lacisid", doc["lacisId"].as<String>());
+  if (doc.containsKey("email")) settings_->setString("tenant_email", doc["email"].as<String>());
+  if (doc.containsKey("cic")) settings_->setString("tenant_cic", doc["cic"].as<String>());
 
   if (settingsChangedCallback_) settingsChangedCallback_();
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -452,10 +452,10 @@ void AraneaWebUI::handleSaveSystem() {
     }
   }
   if (doc.containsKey("rebootEnabled")) {
-    settings_->setBool("reboot_enabled", doc["rebootEnabled"]);
+    settings_->setBool("reboot_enabled", doc["rebootEnabled"].as<bool>());
   }
   if (doc.containsKey("rebootTime")) {
-    settings_->setString("reboot_time", doc["rebootTime"]);
+    settings_->setString("reboot_time", doc["rebootTime"].as<String>());
   }
 
   if (settingsChangedCallback_) settingsChangedCallback_();
