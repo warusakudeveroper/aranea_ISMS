@@ -316,13 +316,123 @@ bee86a2 feat(is10): Add communication system implementation v1.2.0
 
 ---
 
-## 9. 更新履歴
+## 9. 外部レビューによる追加検証結果（2025-12-21追記）
+
+外部レビューにより以下の重要な発見が得られた。
+
+### 9.1 シリアル出力の競合問題
+
+**発見**: SSHタスク内で162箇所の `Serial.printf()` が使用されている
+
+**問題点**:
+- SSHタスク（Core 1）とメインループ（Core 1）が同時にSerial出力
+- ESP32のSerial出力はスレッドセーフではない
+- 出力競合がメモリ破壊を引き起こす可能性
+
+**推奨対策**:
+```cpp
+// 現在の実装
+void sshTaskFunction(void* pvParameters) {
+  Serial.printf("[SSH] Router %d/%d: %s (%s)\n", ...);
+  // ... 多数のSerial.printf()
+}
+
+// 改善案
+void sshTaskFunction(void* pvParameters) {
+  // エラー時のみSerial出力
+  if (error) {
+    Serial.printf("[SSH] ERROR: ...\n");
+  }
+  // 成功時はメインループで出力
+}
+```
+
+### 9.2 String使用によるメモリフラグメンテーション
+
+**発見**: SSHタスク内で `String` が多用されている
+
+**問題箇所**:
+```cpp
+// generic/ESP32/is10/is10.ino:336-496 (sshTaskFunction)
+info.wanIp = wan;     // String代入
+info.lanIp = lanIp;   // String代入
+info.ssid24 = ssid;   // String代入
+info.ssid50 = ssid;   // String代入
+```
+
+**推奨対策**:
+```cpp
+// 現在の実装
+String wan = String(buf);
+wan.trim();
+info.wanIp = wan;
+
+// 改善案
+char wanBuf[64];
+strncpy(wanBuf, buf, sizeof(wanBuf) - 1);
+wanBuf[sizeof(wanBuf) - 1] = '\0';
+info.wanIp = String(wanBuf);  // 最後にString化
+```
+
+### 9.3 SSHタイムアウト設定の不一致
+
+**発見**: コード内タイムアウトとレポート記載値に不一致
+
+| 項目 | コード値 | レポート記載値 | 推奨値 |
+|------|----------|----------------|--------|
+| sshTimeout | 30秒 | 90秒 | **90秒**（ASUSWRT対応） |
+
+```cpp
+// generic/ESP32/is10/is10.ino:370
+long timeout = 30;  // 現在の設定
+// ASUSWRTの遅延を考慮して90秒を推奨
+```
+
+### 9.4 WDT（Watchdog Timer）の状態
+
+**発見**: WDTは既に無効化されている
+
+```cpp
+// generic/ESP32/is10/is10.ino:40
+// REMOVED: #include <esp_task_wdt.h>  // WDT無効化
+```
+
+Section 7.2.3 の「Watchdog設定の確認」は**対応不要**。
+
+### 9.5 優先度付き対策リスト（更新版）
+
+#### 高優先度（即時対応）
+
+| 対策 | 効果 | 備考 |
+|------|------|------|
+| シリアルモニター非接続テスト | boot:0x3問題の解決 | DTR/RTS無効化アダプタ使用 |
+| SSH内Serial出力の削減 | 競合回避 | エラーのみに限定 |
+| SSHタイムアウト延長 | 90秒に変更 | ASUSWRT対応 |
+
+#### 中優先度（リファクタリング）
+
+| 対策 | 効果 | 備考 |
+|------|------|------|
+| String使用箇所の削減 | フラグメンテーション対策 | char[]への置き換え |
+| メモリ監視閾値の見直し | 現在71.2KB、80KB推奨 | SSH失敗時の余裕確保 |
+
+#### 低優先度（アーキテクチャ変更）
+
+| 対策 | 効果 | 備考 |
+|------|------|------|
+| LibSSH代替ライブラリ | メモリ50%削減可能性 | libssh2-esp32評価 |
+| ESP32-WROVER移行 | PSRAM追加 | ハードウェア変更 |
+
+---
+
+## 10. 更新履歴
 
 | 日付 | 内容 |
 |------|------|
 | 2025-12-21 | 初版作成 |
+| 2025-12-21 | 外部レビュー結果を追記（Section 9） |
 
 ---
 
 **作成**: Claude Code (AI Assistant)
-**レビュー**: 要確認
+**レビュー**: 完了（2025-12-21）
