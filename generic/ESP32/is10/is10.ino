@@ -598,9 +598,9 @@ String getHostname() {
 void loadIs10Config() {
   // グローバル設定
   globalConfig.endpoint = settings.getString("is10_endpoint", AraneaSettings::getCloudUrl());
-  globalConfig.sshTimeout = settings.getInt("is10_ssh_timeout", SSH_TIMEOUT_MS);
-  globalConfig.retryCount = settings.getInt("is10_retry_count", SSH_RETRY_COUNT);
-  globalConfig.routerInterval = settings.getInt("is10_router_interval", ROUTER_INTERVAL_MS);
+  globalConfig.sshTimeout = settings.getInt("is10_timeout", SSH_TIMEOUT_MS);
+  globalConfig.retryCount = settings.getInt("is10_retry", SSH_RETRY_COUNT);
+  globalConfig.routerInterval = settings.getInt("is10_rtr_intv", ROUTER_INTERVAL_MS);
   globalConfig.lacisIdPrefix = settings.getString("is10_lacis_prefix", "4");
   globalConfig.routerProductType = settings.getString("is10_router_ptype", "");
   globalConfig.routerProductCode = settings.getString("is10_router_pcode", "");
@@ -617,9 +617,9 @@ void loadIs10Config() {
 void saveIs10Config() {
   // グローバル設定
   settings.setString("is10_endpoint", globalConfig.endpoint);
-  settings.setInt("is10_ssh_timeout", globalConfig.sshTimeout);
-  settings.setInt("is10_retry_count", globalConfig.retryCount);
-  settings.setInt("is10_router_interval", globalConfig.routerInterval);
+  settings.setInt("is10_timeout", globalConfig.sshTimeout);
+  settings.setInt("is10_retry", globalConfig.retryCount);
+  settings.setInt("is10_rtr_intv", globalConfig.routerInterval);
   settings.setString("is10_lacis_prefix", globalConfig.lacisIdPrefix);
   settings.setString("is10_router_ptype", globalConfig.routerProductType);
   settings.setString("is10_router_pcode", globalConfig.routerProductCode);

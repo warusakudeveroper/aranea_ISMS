@@ -105,7 +105,7 @@ void HttpManagerIs10::getTypeSpecificConfig(JsonObject& obj) {
   // CelestialGlobe/SSH設定
   JsonObject inspector = obj.createNestedObject("inspector");
   inspector["endpoint"] = settings_->getString("is10_endpoint", "");
-  inspector["celestialSecret"] = settings_->getString("is10_secret", "").length() > 0 ? "********" : "";
+  inspector["celestialSecret"] = settings_->getString("is10_secret", "");  // ブラインドなし
   inspector["scanIntervalSec"] = settings_->getInt("is10_interval", 60);
   inspector["reportClients"] = settings_->getBool("is10_clients", true);
   inspector["sshTimeout"] = settings_->getInt("is10_timeout", 30000);
@@ -120,9 +120,10 @@ void HttpManagerIs10::getTypeSpecificConfig(JsonObject& obj) {
     r["ipAddr"] = routers_[i].ipAddr;
     r["sshPort"] = routers_[i].sshPort;
     r["username"] = routers_[i].username;
+    r["password"] = routers_[i].password;
+    r["publicKey"] = routers_[i].publicKey;
     r["enabled"] = routers_[i].enabled;
     r["osType"] = (routers_[i].osType == RouterOsType::ASUSWRT) ? 1 : 0;
-    r["hasPublicKey"] = routers_[i].publicKey.length() > 0;
   }
 }
 
@@ -210,7 +211,7 @@ String HttpManagerIs10::generateTypeSpecificTabContents() {
 </div>
 <div class="form-row">
 <div class="form-group"><label>Username</label><input type="text" id="r-user"></div>
-<div class="form-group"><label>Password</label><input type="password" id="r-pass"></div>
+<div class="form-group"><label>Password</label><input type="text" id="r-pass"></div>
 </div>
 <div class="form-group"><label>Public Key (optional)</label><textarea id="r-key" rows="3" style="font-size:12px"></textarea></div>
 <div class="form-group"><label><input type="checkbox" id="r-enabled" checked> Enabled</label></div>
@@ -337,8 +338,8 @@ function editRouter(i){
   document.getElementById('r-ip').value=r.ipAddr;
   document.getElementById('r-port').value=r.sshPort;
   document.getElementById('r-user').value=r.username;
-  document.getElementById('r-pass').value='';
-  document.getElementById('r-key').value='';
+  document.getElementById('r-pass').value=r.password||'';
+  document.getElementById('r-key').value=r.publicKey||'';
   document.getElementById('r-ostype').value=r.osType||0;
   document.getElementById('r-enabled').checked=r.enabled;
   document.getElementById('router-modal').style.display='block';
@@ -465,12 +466,12 @@ void HttpManagerIs10::handleSaveRouter() {
   routers_[index].rid = doc["rid"] | "";
   routers_[index].ipAddr = doc["ipAddr"] | "";
   if (doc.containsKey("publicKey") && doc["publicKey"].as<String>().length() > 0) {
-    routers_[index].publicKey = doc["publicKey"] | "";
+    routers_[index].publicKey = doc["publicKey"].as<String>();
   }
-  routers_[index].sshPort = doc["sshPort"] | 22;
-  routers_[index].username = doc["username"] | "";
+  routers_[index].sshPort = doc["sshPort"].as<int>();
+  routers_[index].username = doc["username"].as<String>();
   if (doc.containsKey("password") && doc["password"].as<String>().length() > 0) {
-    routers_[index].password = doc["password"] | "";
+    routers_[index].password = doc["password"].as<String>();
   }
   routers_[index].enabled = doc["enabled"] | true;
   int osTypeInt = doc["osType"] | 0;
@@ -545,14 +546,14 @@ void HttpManagerIs10::loadRouters() {
   JsonArray arr = doc.as<JsonArray>();
   for (JsonObject obj : arr) {
     if (*routerCount_ >= MAX_ROUTERS) break;
-    routers_[*routerCount_].rid = obj["rid"] | "";
-    routers_[*routerCount_].ipAddr = obj["ipAddr"] | "";
-    routers_[*routerCount_].publicKey = obj["publicKey"] | "";
-    routers_[*routerCount_].sshPort = obj["sshPort"] | 22;
-    routers_[*routerCount_].username = obj["username"] | "";
-    routers_[*routerCount_].password = obj["password"] | "";
+    routers_[*routerCount_].rid = obj["rid"].as<String>();
+    routers_[*routerCount_].ipAddr = obj["ipAddr"].as<String>();
+    routers_[*routerCount_].publicKey = obj["publicKey"].as<String>();
+    routers_[*routerCount_].sshPort = obj["sshPort"].as<int>();
+    routers_[*routerCount_].username = obj["username"].as<String>();
+    routers_[*routerCount_].password = obj["password"].as<String>();
     routers_[*routerCount_].enabled = obj["enabled"] | true;
-    int osTypeInt = obj["osType"] | 0;
+    int osTypeInt = obj["osType"].as<int>();
     routers_[*routerCount_].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
     if (routers_[*routerCount_].ipAddr.length() > 0) {
       (*routerCount_)++;
@@ -727,14 +728,14 @@ void HttpManagerIs10::handleImportConfig() {
     JsonArray arr = doc["routers"].as<JsonArray>();
     for (JsonObject obj : arr) {
       if (*routerCount_ >= MAX_ROUTERS) break;
-      routers_[*routerCount_].rid = obj["rid"] | "";
-      routers_[*routerCount_].ipAddr = obj["ipAddr"] | "";
-      routers_[*routerCount_].publicKey = obj["publicKey"] | "";
-      routers_[*routerCount_].sshPort = obj["sshPort"] | 22;
-      routers_[*routerCount_].username = obj["username"] | "";
-      routers_[*routerCount_].password = obj["password"] | "";
+      routers_[*routerCount_].rid = obj["rid"].as<String>();
+      routers_[*routerCount_].ipAddr = obj["ipAddr"].as<String>();
+      routers_[*routerCount_].publicKey = obj["publicKey"].as<String>();
+      routers_[*routerCount_].sshPort = obj["sshPort"].as<int>();
+      routers_[*routerCount_].username = obj["username"].as<String>();
+      routers_[*routerCount_].password = obj["password"].as<String>();
       routers_[*routerCount_].enabled = obj["enabled"] | true;
-      int osTypeInt = obj["osType"] | 0;
+      int osTypeInt = obj["osType"].as<int>();
       routers_[*routerCount_].osType = (osTypeInt == 1) ? RouterOsType::ASUSWRT : RouterOsType::OPENWRT;
       if (routers_[*routerCount_].ipAddr.length() > 0) {
         (*routerCount_)++;
