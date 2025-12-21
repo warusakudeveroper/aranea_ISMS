@@ -252,6 +252,7 @@ unsigned long lastDisplayUpdate = 0;
 unsigned long btnWifiPressTime = 0;
 unsigned long btnResetPressTime = 0;
 String lastPollResult = "---";
+unsigned long celestialDueAt = 0;  // CelestialGlobe送信予約時刻（非ブロッキング用）
 
 // ========================================
 // MQTT関連（共通モジュール使用）
@@ -294,14 +295,14 @@ String getHostname() {
 // ルーター設定はHttpManagerIs10が共有配列に読み込む
 // ========================================
 void loadIs10Config() {
-  // グローバル設定
-  globalConfig.endpoint = settings.getString("is10_endpoint", AraneaSettings::getCloudUrl());
-  globalConfig.sshTimeout = settings.getInt("is10_timeout", SSH_TIMEOUT_MS);
-  globalConfig.retryCount = settings.getInt("is10_retry", SSH_RETRY_COUNT);
-  globalConfig.routerInterval = settings.getInt("is10_rtr_intv", ROUTER_INTERVAL_MS);
-  globalConfig.lacisIdPrefix = settings.getString("is10_lacis_prefix", "4");
-  globalConfig.routerProductType = settings.getString("is10_router_ptype", "");
-  globalConfig.routerProductCode = settings.getString("is10_router_pcode", "");
+  // グローバル設定（Is10Keys.h定数を使用）
+  globalConfig.endpoint = settings.getString(Is10Keys::kEndpoint, AraneaSettings::getCloudUrl());
+  globalConfig.sshTimeout = settings.getInt(Is10Keys::kTimeout, SSH_TIMEOUT_MS);
+  globalConfig.retryCount = settings.getInt(Is10Keys::kRetry, SSH_RETRY_COUNT);
+  globalConfig.routerInterval = settings.getInt(Is10Keys::kRtrIntv, ROUTER_INTERVAL_MS);
+  globalConfig.lacisIdPrefix = settings.getString(Is10Keys::kLacisPrefix, "4");
+  globalConfig.routerProductType = settings.getString(Is10Keys::kRouterPtype, "");
+  globalConfig.routerProductCode = settings.getString(Is10Keys::kRouterPcode, "");
 
   Serial.printf("[CONFIG] endpoint: %s\n", globalConfig.endpoint.c_str());
   Serial.printf("[CONFIG] sshTimeout: %lu\n", globalConfig.sshTimeout);
@@ -313,14 +314,14 @@ void loadIs10Config() {
 // ルーター設定はHttpManagerIs10が管理
 // ========================================
 void saveIs10Config() {
-  // グローバル設定
-  settings.setString("is10_endpoint", globalConfig.endpoint);
-  settings.setInt("is10_timeout", globalConfig.sshTimeout);
-  settings.setInt("is10_retry", globalConfig.retryCount);
-  settings.setInt("is10_rtr_intv", globalConfig.routerInterval);
-  settings.setString("is10_lacis_prefix", globalConfig.lacisIdPrefix);
-  settings.setString("is10_router_ptype", globalConfig.routerProductType);
-  settings.setString("is10_router_pcode", globalConfig.routerProductCode);
+  // グローバル設定（Is10Keys.h定数を使用）
+  settings.setString(Is10Keys::kEndpoint, globalConfig.endpoint);
+  settings.setInt(Is10Keys::kTimeout, globalConfig.sshTimeout);
+  settings.setInt(Is10Keys::kRetry, globalConfig.retryCount);
+  settings.setInt(Is10Keys::kRtrIntv, globalConfig.routerInterval);
+  settings.setString(Is10Keys::kLacisPrefix, globalConfig.lacisIdPrefix);
+  settings.setString(Is10Keys::kRouterPtype, globalConfig.routerProductType);
+  settings.setString(Is10Keys::kRouterPcode, globalConfig.routerProductCode);
   Serial.println("[CONFIG] Saved global config");
 }
 
@@ -822,20 +823,16 @@ void setup() {
   sshPoller.begin(routers, &routerCount, globalConfig.sshTimeout);
   sshPoller.setRouterInterval(globalConfig.routerInterval);
   sshPoller.setPollInterval(ROUTER_POLL_INTERVAL_MS);
+  sshPoller.setSerialMutex(gSerialMutex);  // Serial出力ミューテックス統一
 
-  // サイクル完了時にCelestialGlobe送信
+  // サイクル完了時にCelestialGlobe送信予約（非ブロッキング）
   sshPoller.onCycleComplete([](int success, int total) {
     Serial.printf("[SSH-POLLER] Cycle complete: %d/%d\n", success, total);
     httpMgr.setRouterStatus(total, success, millis());
 
-    // CelestialGlobe送信（メモリ回復待機後）
-    delay(3000);
-    uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    if (largestBlock >= 16000) {
-      celestialSender.send();
-    } else {
-      Serial.printf("[SSH-POLLER] Skip CelestialGlobe - low memory (%u < 16000)\n", largestBlock);
-    }
+    // CelestialGlobe送信を3秒後に予約（メモリ回復待機）
+    // delay()はメインループをブロックするため非使用
+    celestialDueAt = millis() + 3000;
   });
 
   Serial.println("[SSH-POLLER] Initialized");
@@ -924,6 +921,25 @@ void loop() {
 
   // SshPollerIs10のメインループ処理
   sshPoller.handle();
+
+  // SshPollerからrestart要求があれば再起動
+  // watchdogタイムアウト等で立つ。ランダム開始インデックスで故障ルーター回避
+  if (sshPoller.needsRestart()) {
+    Serial.printf("[SSH-POLLER] Restart requested: %s\n", sshPoller.getRestartReason().c_str());
+    delay(1000);  // ログ出力待ち
+    ESP.restart();
+  }
+
+  // CelestialGlobe送信（予約時刻到達時）
+  if (celestialDueAt > 0 && now >= celestialDueAt) {
+    celestialDueAt = 0;  // 予約クリア
+    uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    if (largestBlock >= 16000) {
+      celestialSender.send();
+    } else {
+      Serial.printf("[LOOP] Skip CelestialGlobe - low memory (%u < 16000)\n", largestBlock);
+    }
+  }
 
   // ========================================
   // 4.5 deviceStateReport heartbeat（StateReporter経由）

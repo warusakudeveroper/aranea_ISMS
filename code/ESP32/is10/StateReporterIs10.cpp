@@ -11,6 +11,7 @@
 #include "MqttManager.h"
 #include "SshPollerIs10.h"
 #include "HttpManagerIs10.h"
+#include "Is10Keys.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
@@ -31,10 +32,10 @@ void StateReporterIs10::begin(StateReporter* reporter, SettingManager* settings,
   routerCount_ = routerCount;
 
   // NVSからSSoT状態を復元
-  schemaVersion_ = settings_->getInt("is10_config_schema_version", 0);
-  configHash_ = settings_->getString("is10_config_hash", "");
-  lastAppliedAt_ = settings_->getString("is10_config_applied_at", "");
-  lastApplyError_ = settings_->getString("is10_config_apply_error", "");
+  schemaVersion_ = settings_->getInt(Is10Keys::kSchema, 0);
+  configHash_ = settings_->getString(Is10Keys::kHash, "");
+  lastAppliedAt_ = settings_->getString(Is10Keys::kAppliedAt, "");
+  lastApplyError_ = settings_->getString(Is10Keys::kApplyErr, "");
 
   // StateReporterにペイロード構築コールバックを登録
   if (reporter_) {
@@ -53,17 +54,17 @@ void StateReporterIs10::setAppliedConfig(int schemaVersion, const String& hash,
 
   // NVS保存
   if (settings_) {
-    settings_->setInt("is10_config_schema_version", schemaVersion);
-    settings_->setString("is10_config_hash", hash);
-    settings_->setString("is10_config_applied_at", appliedAt);
-    settings_->setString("is10_config_apply_error", "");
+    settings_->setInt(Is10Keys::kSchema, schemaVersion);
+    settings_->setString(Is10Keys::kHash, hash);
+    settings_->setString(Is10Keys::kAppliedAt, appliedAt);
+    settings_->setString(Is10Keys::kApplyErr, "");
   }
 }
 
 void StateReporterIs10::setApplyError(const String& error) {
   lastApplyError_ = error;
   if (settings_) {
-    settings_->setString("is10_config_apply_error", error);
+    settings_->setString(Is10Keys::kApplyErr, error);
   }
 }
 
@@ -71,7 +72,7 @@ void StateReporterIs10::setApplyError(const String& error) {
 // deviceName取得（デフォルト付き）
 // ========================================
 String StateReporterIs10::getDeviceName() {
-  String deviceName = settings_ ? settings_->getString("device_name", "") : "";
+  String deviceName = settings_ ? settings_->getString(CommonKeys::kDeviceName, "") : "";
   deviceName = sanitizeDeviceName(deviceName);
 
   // 空の場合はホスト名をデフォルトに
@@ -131,7 +132,7 @@ String StateReporterIs10::buildPayload() {
 
   String observedAt = (ntp_ && ntp_->isSynced()) ? ntp_->getIso8601() : "1970-01-01T00:00:00Z";
   String deviceName = getDeviceName();
-  bool reportFullConfig = settings_ ? settings_->getBool("is10_report_full_config", false) : false;
+  bool reportFullConfig = settings_ ? settings_->getBool(Is10Keys::kReportFull, false) : false;
 
   DynamicJsonDocument doc(4096);
 
@@ -183,8 +184,8 @@ String StateReporterIs10::buildPayload() {
   JsonObject reportedConfig = state.createNestedObject("reportedConfig");
   JsonObject is10Cfg = reportedConfig.createNestedObject("is10");
 
-  is10Cfg["scanInterval"] = settings_ ? settings_->getInt("is10_scan_interval_sec", 60) : 60;
-  is10Cfg["reportClientList"] = settings_ ? settings_->getBool("is10_report_clients", true) : true;
+  is10Cfg["scanInterval"] = settings_ ? settings_->getInt(Is10Keys::kScanIntv, 60) : 60;
+  is10Cfg["reportClientList"] = settings_ ? settings_->getBool(Is10Keys::kReportClnt, true) : true;
 
   // routers配列
   if (routers_ && routerCount_) {

@@ -6,6 +6,7 @@
  */
 
 #include "HttpManagerIs10.h"
+#include "Is10Keys.h"
 #include <SPIFFS.h>
 #include <WiFi.h>
 
@@ -91,11 +92,11 @@ void HttpManagerIs10::getTypeSpecificStatus(JsonObject& obj) {
   obj["lastStateReportCode"] = lastStateReportCode_;
 
   // CelestialGlobe設定有無
-  obj["celestialConfigured"] = settings_->getString("is10_endpoint", "").length() > 0;
+  obj["celestialConfigured"] = settings_->getString(Is10Keys::kEndpoint, "").length() > 0;
 
   // SSH設定
-  obj["sshTimeout"] = settings_->getInt("is10_timeout", 30000);
-  obj["scanIntervalSec"] = settings_->getInt("is10_interval", 60);
+  obj["sshTimeout"] = settings_->getInt(Is10Keys::kTimeout, 30000);
+  obj["scanIntervalSec"] = settings_->getInt(Is10Keys::kInterval, 60);
 }
 
 // ========================================
@@ -104,13 +105,13 @@ void HttpManagerIs10::getTypeSpecificStatus(JsonObject& obj) {
 void HttpManagerIs10::getTypeSpecificConfig(JsonObject& obj) {
   // CelestialGlobe/SSH設定
   JsonObject inspector = obj.createNestedObject("inspector");
-  inspector["endpoint"] = settings_->getString("is10_endpoint", "");
-  inspector["celestialSecret"] = settings_->getString("is10_secret", "");  // ブラインドなし
-  inspector["scanIntervalSec"] = settings_->getInt("is10_interval", 60);
-  inspector["reportClients"] = settings_->getBool("is10_clients", true);
-  inspector["sshTimeout"] = settings_->getInt("is10_timeout", 30000);
-  inspector["retryCount"] = settings_->getInt("is10_retry", 2);
-  inspector["routerInterval"] = settings_->getInt("is10_rtr_intv", 30000);
+  inspector["endpoint"] = settings_->getString(Is10Keys::kEndpoint, "");
+  inspector["celestialSecret"] = settings_->getString(Is10Keys::kSecret, "");  // ブラインドなし
+  inspector["scanIntervalSec"] = settings_->getInt(Is10Keys::kInterval, 60);
+  inspector["reportClients"] = settings_->getBool(Is10Keys::kReportClnt, true);
+  inspector["sshTimeout"] = settings_->getInt(Is10Keys::kTimeout, 30000);
+  inspector["retryCount"] = settings_->getInt(Is10Keys::kRetry, 2);
+  inspector["routerInterval"] = settings_->getInt(Is10Keys::kRtrIntv, 30000);
 
   // ルーター設定
   JsonArray routersArr = obj.createNestedArray("routers");
@@ -387,23 +388,23 @@ void HttpManagerIs10::handleSaveInspector() {
     return;
   }
 
-  if (doc.containsKey("endpoint")) settings_->setString("is10_endpoint", doc["endpoint"]);
+  if (doc.containsKey("endpoint")) settings_->setString(Is10Keys::kEndpoint, doc["endpoint"]);
   if (doc.containsKey("celestialSecret")) {
     String secret = doc["celestialSecret"].as<String>();
     if (secret.length() > 0 && secret != "********") {
-      settings_->setString("is10_secret", secret);
+      settings_->setString(Is10Keys::kSecret, secret);
     }
   }
   if (doc.containsKey("scanIntervalSec")) {
     int sec = doc["scanIntervalSec"];
     if (sec >= 60 && sec <= 86400) {
-      settings_->setInt("is10_interval", sec);
+      settings_->setInt(Is10Keys::kInterval, sec);
     }
   }
-  if (doc.containsKey("reportClients")) settings_->setBool("is10_clients", doc["reportClients"].as<bool>());
-  if (doc.containsKey("sshTimeout")) settings_->setInt("is10_timeout", doc["sshTimeout"].as<int>());
-  if (doc.containsKey("retryCount")) settings_->setInt("is10_retry", doc["retryCount"].as<int>());
-  if (doc.containsKey("routerInterval")) settings_->setInt("is10_rtr_intv", doc["routerInterval"].as<int>());
+  if (doc.containsKey("reportClients")) settings_->setBool(Is10Keys::kReportClnt, doc["reportClients"].as<bool>());
+  if (doc.containsKey("sshTimeout")) settings_->setInt(Is10Keys::kTimeout, doc["sshTimeout"].as<int>());
+  if (doc.containsKey("retryCount")) settings_->setInt(Is10Keys::kRetry, doc["retryCount"].as<int>());
+  if (doc.containsKey("routerInterval")) settings_->setInt(Is10Keys::kRtrIntv, doc["routerInterval"].as<int>());
 
   if (settingsChangedCallback_) settingsChangedCallback_();
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -597,13 +598,13 @@ void HttpManagerIs10::saveRouters() {
 // ========================================
 Is10GlobalSetting HttpManagerIs10::getGlobalSetting() {
   Is10GlobalSetting gs;
-  gs.endpoint = settings_->getString("is10_endpoint", "");
-  gs.celestialSecret = settings_->getString("is10_secret", "");
-  gs.scanIntervalSec = settings_->getInt("is10_interval", 60);
-  gs.reportClients = settings_->getBool("is10_clients", true);
-  gs.timeout = settings_->getInt("is10_timeout", 30000);
-  gs.retryCount = settings_->getInt("is10_retry", 2);
-  gs.interval = settings_->getInt("is10_rtr_intv", 30000);
+  gs.endpoint = settings_->getString(Is10Keys::kEndpoint, "");
+  gs.celestialSecret = settings_->getString(Is10Keys::kSecret, "");
+  gs.scanIntervalSec = settings_->getInt(Is10Keys::kInterval, 60);
+  gs.reportClients = settings_->getBool(Is10Keys::kReportClnt, true);
+  gs.timeout = settings_->getInt(Is10Keys::kTimeout, 30000);
+  gs.retryCount = settings_->getInt(Is10Keys::kRetry, 2);
+  gs.interval = settings_->getInt(Is10Keys::kRtrIntv, 30000);
   return gs;
 }
 
@@ -707,18 +708,18 @@ void HttpManagerIs10::handleImportConfig() {
   // Inspector設定
   if (doc.containsKey("inspector")) {
     JsonObject ins = doc["inspector"];
-    if (ins.containsKey("endpoint")) settings_->setString("is10_endpoint", ins["endpoint"]);
+    if (ins.containsKey("endpoint")) settings_->setString(Is10Keys::kEndpoint, ins["endpoint"]);
     if (ins.containsKey("celestialSecret")) {
       String secret = ins["celestialSecret"].as<String>();
       if (secret.length() > 0 && secret != "********") {
-        settings_->setString("is10_secret", secret);
+        settings_->setString(Is10Keys::kSecret, secret);
       }
     }
-    if (ins.containsKey("scanIntervalSec")) settings_->setInt("is10_interval", ins["scanIntervalSec"].as<int>());
-    if (ins.containsKey("reportClients")) settings_->setBool("is10_clients", ins["reportClients"].as<bool>());
-    if (ins.containsKey("sshTimeout")) settings_->setInt("is10_timeout", ins["sshTimeout"].as<int>());
-    if (ins.containsKey("retryCount")) settings_->setInt("is10_retry", ins["retryCount"].as<int>());
-    if (ins.containsKey("routerInterval")) settings_->setInt("is10_rtr_intv", ins["routerInterval"].as<int>());
+    if (ins.containsKey("scanIntervalSec")) settings_->setInt(Is10Keys::kInterval, ins["scanIntervalSec"].as<int>());
+    if (ins.containsKey("reportClients")) settings_->setBool(Is10Keys::kReportClnt, ins["reportClients"].as<bool>());
+    if (ins.containsKey("sshTimeout")) settings_->setInt(Is10Keys::kTimeout, ins["sshTimeout"].as<int>());
+    if (ins.containsKey("retryCount")) settings_->setInt(Is10Keys::kRetry, ins["retryCount"].as<int>());
+    if (ins.containsKey("routerInterval")) settings_->setInt(Is10Keys::kRtrIntv, ins["routerInterval"].as<int>());
     importedCount++;
   }
 

@@ -7,6 +7,7 @@
 #include "CelestialSenderIs10.h"
 #include "SettingManager.h"
 #include "NtpManager.h"
+#include "Is10Keys.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
@@ -30,8 +31,8 @@ void CelestialSenderIs10::setAuth(const String& tid, const String& lacisId,
 
 bool CelestialSenderIs10::isConfigured() {
   if (!settings_) return false;
-  String endpoint = settings_->getString("is10_endpoint", "");
-  String secret = settings_->getString("is10_celestial_secret", "");
+  String endpoint = settings_->getString(Is10Keys::kEndpoint, "");
+  String secret = settings_->getString(Is10Keys::kSecret, "");
   return endpoint.length() > 0 && secret.length() > 0;
 }
 
@@ -42,8 +43,8 @@ bool CelestialSenderIs10::send() {
   }
 
   // エンドポイント取得
-  String baseEndpoint = settings_->getString("is10_endpoint", "");
-  String secret = settings_->getString("is10_celestial_secret", "");
+  String baseEndpoint = settings_->getString(Is10Keys::kEndpoint, "");
+  String secret = settings_->getString(Is10Keys::kSecret, "");
 
   // 設定不備チェック（スキップ理由を明確にログ出力）
   if (baseEndpoint.length() == 0 || secret.length() == 0) {
@@ -119,7 +120,7 @@ bool CelestialSenderIs10::send() {
   // clients配列（reportClientList=trueの場合のみ）
   // 仕様: 各clientにapMac（接続先ルーターMAC）を含める
   // 例: { "mac": "AABBCCDDEEFF", "apMac": "112233445566", "hostname": "iPhone" }
-  bool reportClients = settings_->getBool("is10_report_clients", true);
+  bool reportClients = settings_->getBool(Is10Keys::kReportClnt, true);
   if (reportClients) {
     JsonArray clients = doc.createNestedArray("clients");
     // TODO: クライアント詳細情報がSSHで取得できた場合に追加

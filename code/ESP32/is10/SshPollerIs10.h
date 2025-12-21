@@ -8,6 +8,12 @@
  * - FreeRTOSタスクによる非同期実行
  * - ルーター情報収集（WAN IP, LAN IP, SSID, クライアント数等）
  * - ウォッチドッグによるタイムアウト管理
+ *
+ * 設計改善点（P0対応）:
+ * - delay()撤去 → nextAt方式（非ブロッキング）
+ * - ランダム開始インデックス（特定ルーターでのハング防止）
+ * - タスクにindex固定渡し（競合防止）
+ * - watchdog発火時はrestart flag（タスク積み上げ防止）
  */
 
 #ifndef SSH_POLLER_IS10_H
@@ -40,6 +46,14 @@ struct RouterInfo {
 };
 
 // ========================================
+// SSHタスクパラメータ（index固定渡し用）
+// ========================================
+struct SshTaskParams {
+  class SshPollerIs10* poller;
+  int routerIndex;
+};
+
+// ========================================
 // SshPollerIs10 クラス
 // ========================================
 class SshPollerIs10 {
@@ -58,6 +72,7 @@ public:
   /**
    * ループ処理
    * main loop()で毎回呼び出す
+   * 非ブロッキング（delay使用なし）
    */
   void handle();
 
@@ -102,6 +117,18 @@ public:
    */
   unsigned long getLastPollTime() const { return lastPollTime_; }
 
+  /**
+   * 復旧リスタートが必要か
+   * watchdog発火で立つ。呼び出し側でESP.restart()すべき
+   */
+  bool needsRestart() const { return needsRestart_; }
+  String getRestartReason() const { return restartReason_; }
+
+  /**
+   * 外部ミューテックス設定（Serial統一用）
+   */
+  void setSerialMutex(SemaphoreHandle_t mutex) { externalSerialMutex_ = mutex; }
+
   // ========================================
   // コールバック
   // ========================================
@@ -139,13 +166,23 @@ private:
   volatile bool sshDone_ = false;
   volatile bool sshSuccess_ = false;
   int currentRouterIndex_ = 0;
+  int startIndex_ = 0;                       // サイクル開始インデックス（ランダム）
+  int processedCount_ = 0;                   // 今サイクルで処理済み数
   int successCount_ = 0;
   int failCount_ = 0;
   unsigned long sshTaskStartTime_ = 0;
-  unsigned long lastRouterPoll_ = 0;
   unsigned long lastPollTime_ = 0;
 
-  // 収集データ
+  // 非ブロッキングタイミング
+  unsigned long nextRouterAt_ = 0;           // 次のルーター開始時刻
+  unsigned long nextCycleAt_ = 0;            // 次のサイクル開始時刻
+  bool cycleInProgress_ = false;
+
+  // 復旧フラグ
+  volatile bool needsRestart_ = false;
+  String restartReason_;
+
+  // 収集データ（20スロット固定）
   static const int MAX_ROUTER_INFOS = 20;
   RouterInfo routerInfos_[MAX_ROUTER_INFOS];
   int routerInfoCount_ = 0;
@@ -155,8 +192,12 @@ private:
   static const unsigned long SSH_TASK_WATCHDOG_MS = 90000;  // 90秒
   TaskHandle_t sshTaskHandle_ = nullptr;
 
-  // Serialミューテックス
-  SemaphoreHandle_t serialMutex_ = nullptr;
+  // タスクパラメータ（同時に1タスク前提）
+  SshTaskParams taskParams_;
+
+  // Serialミューテックス（外部統一 or 内部）
+  SemaphoreHandle_t externalSerialMutex_ = nullptr;
+  SemaphoreHandle_t internalSerialMutex_ = nullptr;
 
   // コールバック
   std::function<void(int, bool, const RouterInfo&)> routerPolledCallback_ = nullptr;
@@ -167,9 +208,12 @@ private:
   void executeSSH(int index);
 
   // ヘルパー
+  void startCycle();
   void startSshTask(int index);
   void processCompletedSsh();
   void handleWatchdog();
+  void advanceToNextRouter();
+  int getActualRouterIndex(int offset);
   String generateRouterLacisId(const String& mac);
 
   // パース用ヘルパー
@@ -179,6 +223,7 @@ private:
 
   // スレッドセーフ出力
   void serialPrintf(const char* format, ...);
+  SemaphoreHandle_t getSerialMutex();
 };
 
 #endif // SSH_POLLER_IS10_H

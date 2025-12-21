@@ -29,6 +29,7 @@
 
 #include "AraneaSettings.h"
 #include "SettingManager.h"
+#include "Is10Keys.h"
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 
@@ -94,60 +95,60 @@ void AraneaSettings::initDefaults(SettingManager& settings) {
   // 未設定のキーのみデフォルト値を設定
 
   // relay.primary（フルURL形式）
-  if (!settings.hasKey("relay_pri")) {
+  if (!settings.hasKey(CommonKeys::kRelayPri)) {
     String url = "http://" + String(ARANEA_DEFAULT_RELAY_PRIMARY) + ":8080/api/events";
-    settings.setString("relay_pri", url);
+    settings.setString(CommonKeys::kRelayPri, url);
     Serial.println("[AraneaSettings] Set default relay_pri");
   }
 
   // relay.secondary
-  if (!settings.hasKey("relay_sec")) {
+  if (!settings.hasKey(CommonKeys::kRelaySec)) {
     String url = "http://" + String(ARANEA_DEFAULT_RELAY_SECONDARY) + ":8080/api/events";
-    settings.setString("relay_sec", url);
+    settings.setString(CommonKeys::kRelaySec, url);
     Serial.println("[AraneaSettings] Set default relay_sec");
   }
 
   // araneaDeviceGate URL
-  if (!settings.hasKey("gate_url")) {
-    settings.setString("gate_url", ARANEA_DEFAULT_GATE_URL);
+  if (!settings.hasKey(CommonKeys::kGateUrl)) {
+    settings.setString(CommonKeys::kGateUrl, ARANEA_DEFAULT_GATE_URL);
     Serial.println("[AraneaSettings] Set default gate_url");
   }
 
   // cloud URL
-  if (!settings.hasKey("cloud_url")) {
-    settings.setString("cloud_url", ARANEA_DEFAULT_CLOUD_URL);
+  if (!settings.hasKey(CommonKeys::kCloudUrl)) {
+    settings.setString(CommonKeys::kCloudUrl, ARANEA_DEFAULT_CLOUD_URL);
     Serial.println("[AraneaSettings] Set default cloud_url");
   }
 
   // テナント情報
-  if (!settings.hasKey("tid")) {
-    settings.setString("tid", ARANEA_DEFAULT_TID);
+  if (!settings.hasKey(CommonKeys::kTid)) {
+    settings.setString(CommonKeys::kTid, ARANEA_DEFAULT_TID);
     Serial.println("[AraneaSettings] Set default tid");
   }
-  if (!settings.hasKey("tenant_lacisid")) {
-    settings.setString("tenant_lacisid", ARANEA_DEFAULT_TENANT_LACISID);
-    Serial.println("[AraneaSettings] Set default tenant_lacisid");
+  if (!settings.hasKey(CommonKeys::kTenantLacis)) {
+    settings.setString(CommonKeys::kTenantLacis, ARANEA_DEFAULT_TENANT_LACISID);
+    Serial.println("[AraneaSettings] Set default tenant_lacis");
   }
-  if (!settings.hasKey("tenant_email")) {
-    settings.setString("tenant_email", ARANEA_DEFAULT_TENANT_EMAIL);
+  if (!settings.hasKey(CommonKeys::kTenantEmail)) {
+    settings.setString(CommonKeys::kTenantEmail, ARANEA_DEFAULT_TENANT_EMAIL);
     Serial.println("[AraneaSettings] Set default tenant_email");
   }
-  if (!settings.hasKey("tenant_cic")) {
-    settings.setString("tenant_cic", ARANEA_DEFAULT_TENANT_CIC);
+  if (!settings.hasKey(CommonKeys::kTenantCic)) {
+    settings.setString(CommonKeys::kTenantCic, ARANEA_DEFAULT_TENANT_CIC);
     Serial.println("[AraneaSettings] Set default tenant_cic");
   }
 
   // IS10固有設定（ルーター監視用）
-  if (!settings.hasKey("ssh_timeout")) {
-    settings.setULong("ssh_timeout", 30000);  // 30秒
+  if (!settings.hasKey(CommonKeys::kSshTimeout)) {
+    settings.setULong(CommonKeys::kSshTimeout, 30000);  // 30秒
     Serial.println("[AraneaSettings] Set default ssh_timeout");
   }
-  if (!settings.hasKey("poll_interval")) {
-    settings.setULong("poll_interval", 60000);  // 1分
+  if (!settings.hasKey(CommonKeys::kPollInterval)) {
+    settings.setULong(CommonKeys::kPollInterval, 60000);  // 1分
     Serial.println("[AraneaSettings] Set default poll_interval");
   }
-  if (!settings.hasKey("retry_count")) {
-    settings.setInt("retry_count", 3);
+  if (!settings.hasKey(CommonKeys::kRetryCount)) {
+    settings.setInt(CommonKeys::kRetryCount, 3);
     Serial.println("[AraneaSettings] Set default retry_count");
   }
 

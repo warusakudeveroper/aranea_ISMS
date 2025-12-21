@@ -9,6 +9,7 @@
 #include "NtpManager.h"
 #include "HttpManagerIs10.h"
 #include "StateReporterIs10.h"
+#include "Is10Keys.h"
 #include <ArduinoJson.h>
 
 MqttConfigHandler::MqttConfigHandler() {}
@@ -149,7 +150,7 @@ void MqttConfigHandler::handleConfigMessage(const char* data, int len) {
   if (is10Cfg.containsKey("scanInterval")) {
     int sec = is10Cfg["scanInterval"];
     if (sec >= 60 && sec <= 86400) {
-      settings_->setInt("is10_scan_interval_sec", sec);
+      settings_->setInt(Is10Keys::kScanIntv, sec);
       Serial.printf("[CONFIG] scanInterval=%d sec\n", sec);
     } else {
       Serial.printf("[CONFIG] scanInterval=%d out of range (60-86400), skipped\n", sec);
@@ -159,7 +160,7 @@ void MqttConfigHandler::handleConfigMessage(const char* data, int len) {
   // reportClientList適用
   if (is10Cfg.containsKey("reportClientList")) {
     bool reportClients = is10Cfg["reportClientList"];
-    settings_->setBool("is10_report_clients", reportClients);
+    settings_->setBool(Is10Keys::kReportClnt, reportClients);
     Serial.printf("[CONFIG] reportClientList=%s\n", reportClients ? "true" : "false");
   }
 
