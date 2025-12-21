@@ -6,6 +6,10 @@
  *
  * araneaDeviceGate APIを使用してデバイスをmobes2.0に登録
  * 登録成功時にCICを取得し、NVSに保存
+ *
+ * 【共通モジュール】
+ * このモジュールは全てのAraneaデバイスで共通して使用される。
+ * is10, is04, is02など複数デバイスで再利用可能。
  */
 
 struct AraneaRegisterResult {
@@ -19,8 +23,8 @@ struct AraneaRegisterResult {
 struct TenantPrimaryAuth {
   String lacisId;
   String userId;
-  String pass;
   String cic;
+  // passは廃止（認証はlacisId + userId + cicの3要素）
 };
 
 class AraneaRegister {

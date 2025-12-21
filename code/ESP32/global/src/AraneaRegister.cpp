@@ -29,22 +29,29 @@ AraneaRegisterResult AraneaRegister::registerDevice(
 
   // 既に登録済みの場合はNVSから取得
   if (isRegistered()) {
-    result.ok = true;
-    result.cic_code = getSavedCic();
-    result.stateEndpoint = getSavedStateEndpoint();
-    result.mqttEndpoint = getSavedMqttEndpoint();
-    Serial.println("[ARANEA] Already registered, using saved CIC");
-    return result;
+    String savedCic = getSavedCic();
+    if (savedCic.length() > 0) {
+      result.ok = true;
+      result.cic_code = savedCic;
+      result.stateEndpoint = getSavedStateEndpoint();
+      result.mqttEndpoint = getSavedMqttEndpoint();
+      Serial.println("[ARANEA] Already registered, using saved CIC");
+      Serial.printf("[ARANEA] CIC: %s\n", savedCic.c_str());
+      return result;
+    } else {
+      // CICが空の場合は再登録を試行
+      Serial.println("[ARANEA] Registered flag set but CIC is empty, re-registering...");
+      clearRegistration();
+    }
   }
 
   // JSON構築
   StaticJsonDocument<1024> doc;
 
-  // lacisOath
+  // lacisOath（認証3要素: lacisId + userId + cic）
   JsonObject lacisOath = doc.createNestedObject("lacisOath");
   lacisOath["lacisId"] = tenantAuth_.lacisId;
   lacisOath["userId"] = tenantAuth_.userId;
-  lacisOath["pass"] = tenantAuth_.pass;
   lacisOath["cic"] = tenantAuth_.cic;
   lacisOath["method"] = "register";
 

@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## important!!!
+
+報告は必ず日本語で行うこと
+原則として何かのトラブルがあった際は外的要因や環境要因を疑う前に必ずコードを疑うこと
+
 ## Project Overview
 
 ISMS（情報セキュリティマネジメントシステム）向けIoTデバイス開発プロジェクト。離島・VPN運用を前提とした温湿度監視・接点制御システム。
@@ -50,6 +55,22 @@ is04/is05 ←→ Zero3 (ローカルMQTT/HTTP)
 | HTTPManager | × | ○ | Web UI・API |
 | otaManager | × | ○ | OTA更新 |
 | Operator | ○ | ○ | 状態機械・競合制御 |
+
+### ESP32 Partition Scheme（重要）
+
+- **`huge_app`は絶対に使用禁止** - OTA領域がなくなりリモート更新不可になる
+- フラッシュ容量不足時は **`min_spiffs`** を使用すること（OTA領域を維持）
+- 例: `esp32:esp32:esp32:PartitionScheme=min_spiffs`
+
+### ルーター（is10）に関する注意事項
+
+- **ルーターはWAN側からPINGに応答しない** - これは正常動作。疎通確認にpingは使えない
+- **ルーターはWAN側からポートスキャンに応答しない** - セキュリティ上の正常動作
+- ルーターへの接続確認はSSH接続の成否でのみ判断する
+- SSH接続先はLAN内部（192.168.125.x）からのみアクセス可能
+- **サブネット192.168.125.xへの到達性はある** - ゲートウェイ(192.168.125.1)にはpingが通る
+- **ASUSWRTは反応が非常に遅い** - タイムアウトを十分長く設定すること（60秒以上推奨）
+- **接続できない場合は外的要因に決めつけず、コードの問題を疑うこと**
 
 ### is01 Critical Notes
 

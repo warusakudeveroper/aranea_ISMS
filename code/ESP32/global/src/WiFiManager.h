@@ -15,6 +15,19 @@ class SettingManager;  // 前方宣言
 class WiFiManager {
 public:
   /**
+   * ホスト名を設定
+   * 注意: WiFi接続前に呼び出すこと
+   * @param hostname ホスト名（例: "ar-is10-AABBCC"）
+   */
+  void setHostname(const String& hostname);
+
+  /**
+   * 現在のホスト名を取得
+   * @return 設定されたホスト名
+   */
+  String getHostname() const { return hostname_; }
+
+  /**
    * デフォルトSSIDリスト（cluster1-6）に接続試行
    * @return 接続成功時true
    */
@@ -69,6 +82,9 @@ private:
   static const char* SSID_LIST[SSID_COUNT];
   static const char* WIFI_PASS;
 
+  String hostname_;
   int failCount_ = 0;
   int retryLimit_ = 30;  // デフォルト30回で再起動
+
+  void applyHostname();
 };
