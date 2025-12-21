@@ -15,6 +15,12 @@
 #include <libssh/libssh.h>
 #include <stdarg.h>
 
+// ========================================
+// グローバル変数（SSHタスクからアクセス用）
+// タスクパラメータ渡しは不安定なためグローバル方式を維持
+// ========================================
+static SshPollerIs10* gPoller = nullptr;
+
 SshPollerIs10::SshPollerIs10() {}
 
 SshPollerIs10::~SshPollerIs10() {
@@ -40,6 +46,9 @@ void SshPollerIs10::begin(RouterConfig* routers, int* routerCount, unsigned long
 
   // 乱数シード初期化（ランダム開始インデックス用）
   randomSeed(esp_random());
+
+  // グローバル参照設定（SSHタスクからアクセス用）
+  gPoller = this;
 
   Serial.println("[SSH-POLLER] Initialized");
 }
@@ -241,16 +250,12 @@ void SshPollerIs10::startSshTask(int index) {
   serialPrintf("[SSH-POLLER] Starting SSH for Router %d/%d (actual=%d)\n",
                processedCount_ + 1, *routerCount_, index);
 
-  // タスクパラメータ設定（index固定渡し）
-  taskParams_.poller = this;
-  taskParams_.routerIndex = index;
-
-  // SSHタスク起動
+  // SSHタスク起動（gPoller経由でアクセス、index不使用・currentRouterIndex_を使用）
   BaseType_t xReturned = xTaskCreatePinnedToCore(
     sshTaskFunction,
     "ssh_poll",
     SSH_TASK_STACK_SIZE,
-    &taskParams_,
+    NULL,  // gPoller経由なのでパラメータ不要
     tskIDLE_PRIORITY + 1,
     &sshTaskHandle_,
     1  // Core 1
@@ -266,11 +271,11 @@ void SshPollerIs10::startSshTask(int index) {
 
 // ========================================
 // SSHタスク関数（静的）
+// gPoller経由でクラスインスタンスにアクセス
 // ========================================
 void SshPollerIs10::sshTaskFunction(void* params) {
-  SshTaskParams* p = static_cast<SshTaskParams*>(params);
-  if (p && p->poller) {
-    p->poller->executeSSH(p->routerIndex);
+  if (gPoller) {
+    gPoller->executeSSH(gPoller->currentRouterIndex_);
   }
   vTaskDelete(NULL);
 }
