@@ -1,205 +1,229 @@
-# is01a - 汎用電池式温湿度BLEセンサー 設計書
+# is01a - Temp&HumSensor (Cluster Node) 設計書
 
+**正式名称**: Aranea Temperature & Humidity Sensor - Cluster Node
+**製品コード**: AR-IS01A
 **作成日**: 2025/12/22
 **ベース**: archive_ISMS/ESP32/is01 (ISMS専用版)
-**目的**: ISMS以外のプロジェクトでも使用可能な汎用版
+**目的**: is02a(Master)と連携する電池式温湿度クラスタノード
 
 ---
 
 ## 1. デバイス概要
 
-### 1.1 機能
+### 1.1 機能概要
 
 - **温湿度センサー**: HT-30 (I2C)
 - **BLEアドバタイズ**: 送信のみ（受信しない）
-- **電池駆動**: DeepSleep運用（4分間隔）
-- **初回アクティベーション**: WiFi接続してCIC取得
+- **電池駆動**: DeepSleep運用（デフォルト4分間隔）
+- **省電力ロジック**: 最小限の起動時間でBLE発信後即Sleep
+- **初回アクティベーション**: WiFi→APモード→設定→AraneaDeviceGate登録→CIC取得
 
-### 1.2 ユースケース
+### 1.2 動作概要
+
+is02a(Master)と連携して動作するクラスタノードモデル。本体は基本的にインターバルで自身の温湿度状態をBLEアドバタイズ発信するのみ。is02aがこれを受信してクラウド/ローカルへ中継する。
+
+### 1.3 ユースケース
 
 | 用途 | 説明 |
 |------|------|
 | 温度監視 | 倉庫・冷蔵庫・サーバールーム |
 | 湿度監視 | 文書保管庫・美術品保管 |
 | 環境モニタリング | 農業施設・温室 |
+| 分散センシング | 複数ノードでの広域計測 |
 
-### 1.3 is01（ISMS版）との違い
+### 1.4 is01（ISMS版）との違い
 
 | 項目 | is01 (ISMS版) | is01a (汎用版) |
 |------|--------------|----------------|
 | LacisID/CIC | **必須** | **必須** |
 | AraneaRegister | **必須** | **必須** |
-| 受信先 | is02/is03固定 | BLE受信側で設定 |
-| TID | 固定（市山水産） | 設定可能 |
-| OTA | 不可（電池式） | 不可（電池式） |
-
-**重要**: LacisIDとCICはIoT動作の必須要件。初回起動時にAraneaRegisterで取得する。
+| TID設定 | ハードコード | NVS設定可能 |
+| インターバル設定 | ハードコード(4分) | NVS設定可能(1-60分) |
+| 温度補正設定 | なし | NVS設定可能 |
+| 即時発信(PIN19短押し) | 未実装 | 実装 |
+| 設定モード(PIN長押し) | 未実装 | 実装 |
+| 初回セットアップ | 手動設定 | APモード→Web UI |
 
 ---
 
-## 2. ハードウェア仕様
+## 2. 起動フロー
 
-### 2.1 ESP32-DevKitC GPIO割り当て
+### 2.1 is10同様の起動シーケンス
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    電源投入                                  │
+└─────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│              WiFi設定確認                                    │
+│  wifi_ssid が空？                                           │
+└─────────────────────────────────────────────────────────────┘
+        │                                    │
+        ▼ Yes                                ▼ No
+┌─────────────────────────────────────────────────────────────┐
+│              APモード起動                                    │
+│  SSID: "is01a-XXXX" (MACアドレス末尾)                        │
+│  IP: 192.168.4.1                                            │
+│  Web UI: 設定画面表示                                        │
+└─────────────────────────────────────────────────────────────┘
+        │ 設定保存
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│              WiFi接続                                        │
+└─────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│              AraneaDeviceGate登録                            │
+│  - LacisID生成                                              │
+│  - CIC取得・NVS保存                                          │
+│  - activated=1                                              │
+└─────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│              通常動作モード                                  │
+│  DeepSleep → Wake → 計測 → BLE発信 → DeepSleep              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 ボタン操作
+
+| 操作 | GPIO | 動作 |
+|------|------|------|
+| PIN19 短押し | GPIO19 | 即時BLEアドバタイズ発信 |
+| PIN19 長押し(3秒) | GPIO19 | WiFi接続モードへ移行（設定変更用） |
+| BTN_RESET 長押し(5秒) | GPIO26 | ファクトリーリセット |
+
+### 2.3 WiFi接続モード（PIN長押し時）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              WiFi接続モード                                  │
+│  - 保存済みSSIDに接続                                        │
+│  - Web UI起動（http://[IP]/）                               │
+│  - 設定可能項目:                                             │
+│    - インターバル設定（1-60分）                              │
+│    - 温度補正設定（-5.0〜+5.0℃）                            │
+│    - 湿度補正設定（-10〜+10%）                               │
+│  - 5分間操作なしで自動的にDeepSleepへ                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. ハードウェア仕様
+
+### 3.1 ESP32-DevKitC GPIO割り当て
 
 | GPIO | 機能 | 説明 |
 |------|------|------|
+| 19 | BTN_ACTION | 短押し:即時発信 / 長押し:設定モード |
 | 21 | I2C_SDA | HT-30/OLED SDA |
 | 22 | I2C_SCL | HT-30/OLED SCL |
-| 25 | BTN_WIFI | WiFi再接続（長押し） |
-| 26 | BTN_RESET | ファクトリーリセット（長押し） |
+| 26 | BTN_RESET | ファクトリーリセット（5秒長押し） |
 
-### 2.2 I2Cデバイス
+### 3.2 I2Cデバイス
 
 | デバイス | アドレス | 用途 |
 |---------|---------|------|
 | HT-30 | 0x44 | 温湿度センサー |
 | SSD1306 | 0x3C | OLED表示（128x64） |
 
-### 2.3 電源仕様
+### 3.3 電源仕様
 
 - **電源**: 単3電池 x 2（3V）または18650リチウム電池
 - **消費電力**:
-  - アクティブ: ~80mA
+  - アクティブ: ~80mA（BLE発信中）
   - DeepSleep: ~10μA
-- **動作サイクル**: 4分間隔でWake→計測→BLE送信→Sleep
+- **動作サイクル**: 設定間隔（デフォルト4分）でWake→計測→BLE送信→Sleep
+- **想定電池寿命**: 単3電池 x 2で約6ヶ月（4分間隔時）
 
 ---
 
-## 3. ソフトウェア設計
+## 4. ソフトウェア設計
 
-### 3.1 動作モード
+### 4.1 設計原則（全デバイス共通）
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              FIRST_BOOT (初回起動・アクティベーション)        │
-│  1. WiFi接続                                                 │
-│  2. LacisID生成                                              │
-│  3. AraneaGateway登録 → CIC取得                              │
-│  4. NVS保存（activated=1）                                   │
-│  5. 通常動作へ移行                                           │
-└─────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─────────────────────────────────────────────────────────────┐
-│              NORMAL_OPERATION (通常動作)                     │
-│  1. DeepSleep復帰                                            │
-│  2. I2C初期化（直列処理必須）                                │
-│  3. HT-30計測                                                │
-│  4. BLEアドバタイズ（3秒間）                                 │
-│  5. DeepSleep（4分）                                         │
-└─────────────────────────────────────────────────────────────┘
+重要: ESP32では以下を遵守
+- セマフォとWDTの過剰制御を避ける
+- 監査系関数を入れすぎない（制御と監査で不安定化）
+- 本体プログラムのタイミングとメモリ管理を重視
+- コードのシンプル化
+- 可能な限りシングルタスクで実装
+- パーティション: min_SPIFFS使用（OTA領域確保）
 ```
 
-### 3.2 初回アクティベーション
+### 4.2 通常動作サイクル
 
 ```cpp
-// 初回起動時のみ実行
-if (!settings.getInt("activated", 0)) {
-    // WiFi接続
-    wifi.connectWithSettings(&settings);
+void normalOperationCycle() {
+    // 1. DeepSleep復帰
+    // 2. I2C初期化（直列処理必須）
+    initI2CDevices();
 
-    // LacisID生成
-    myLacisId = lacisGen.generate(PRODUCT_TYPE, PRODUCT_CODE);
-    myMac = lacisGen.getStaMac12Hex();
+    // 3. HT-30計測
+    float temp = sensor.readTemperature() + tempOffset;
+    float hum = sensor.readHumidity() + humOffset;
 
-    // AraneaGateway登録
-    AraneaRegisterResult regResult = araneaReg.registerDevice(
-        tid, DEVICE_TYPE, myLacisId, myMac, PRODUCT_TYPE, PRODUCT_CODE
-    );
+    // 4. BLEアドバタイズ（3秒間）
+    bleAdv.setPayload(myLacisId, myCic, temp, hum, battPct);
+    bleAdv.advertise(3);
 
-    if (regResult.ok) {
-        myCic = regResult.cic_code;
-        settings.setString("cic", myCic);
-        settings.setInt("activated", 1);  // アクティベーション完了
-    }
+    // 5. DeepSleep（設定間隔）
+    esp_deep_sleep(intervalMinutes * 60 * 1000000ULL);
 }
 ```
 
-**重要**: CIC取得失敗でもBLEアドバタイズは必ず出す（is03で検知可能にする）。
-
-### 3.3 I2C初期化（直列処理必須）
+### 4.3 即時発信（PIN19短押し）
 
 ```cpp
-// I2C初期化はコケやすいため直列実行必須
-void initI2CDevices() {
-    Wire.begin(SDA_PIN, SCL_PIN);
-    delay(100);  // I2C安定化待ち
+void onActionButtonShortPress() {
+    // 即時計測・発信
+    float temp = sensor.readTemperature() + tempOffset;
+    float hum = sensor.readHumidity() + humOffset;
 
-    // HT-30初期化
-    if (!ht30.begin()) {
-        Serial.println("HT-30 init failed");
-    }
-    delay(50);
+    bleAdv.setPayload(myLacisId, myCic, temp, hum, battPct);
+    bleAdv.advertise(3);
 
-    // OLED初期化
-    if (!display.begin()) {
-        Serial.println("OLED init failed");
-    }
-    delay(50);
-}
-```
-
-**警告**: DeepSleep復帰後のI2C初期化は順序がシビア。並列処理禁止。
-
-### 3.4 HT-30計測
-
-```cpp
-void readSensor() {
-    if (ht30.readTemperatureHumidity()) {
-        temperature = ht30.getTemperature();
-        humidity = ht30.getHumidity();
-    } else {
-        temperature = NAN;
-        humidity = NAN;
-    }
+    // 通常サイクルに戻る
+    esp_deep_sleep(intervalMinutes * 60 * 1000000ULL);
 }
 ```
 
 ---
 
-## 4. BLE通信仕様
+## 5. BLE通信仕様
 
-### 4.1 アドバタイズパケット（ISMSv1フォーマット）
+### 5.1 ISMSv1フォーマット（40バイト）
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │ Prefix(1) │ LacisID(20) │ CIC(6) │ Temp(5) │ Hum(5) │ Batt(3) │
 └────────────────────────────────────────────────────────────────┘
-Total: 40 bytes
 ```
 
-| フィールド | バイト | 説明 |
-|-----------|--------|------|
-| Prefix | 1 | 固定 "3" |
-| LacisID | 20 | デバイス識別子 |
-| CIC | 6 | 認証コード（0埋め6桁） |
-| Temperature | 5 | 温度（例: "+25.5"） |
-| Humidity | 5 | 湿度（例: "065.0"） |
-| Battery | 3 | 電池残量%（例: "085"） |
-
-### 4.2 アドバタイズ設定
-
-```cpp
-// BLEアドバタイズ設定
-BLEAdvertisementData advData;
-advData.setFlags(0x06);  // LE General Discoverable
-advData.setName(advertiseName);  // ISMSv1フォーマットのペイロード
-
-// 3秒間アドバタイズ
-pAdvertising->start();
-delay(3000);
-pAdvertising->stop();
-```
+| フィールド | バイト | 説明 | 例 |
+|-----------|--------|------|-----|
+| Prefix | 1 | 固定 "3" | "3" |
+| LacisID | 20 | デバイス識別子 | "3001AABBCCDDEEFF0001" |
+| CIC | 6 | 認証コード（0埋め6桁） | "123456" |
+| Temperature | 5 | 温度（符号付き） | "+25.5" or "-05.0" |
+| Humidity | 5 | 湿度 | "065.0" |
+| Battery | 3 | 電池残量% | "085" |
 
 ---
 
-## 5. NVS設定項目
+## 6. NVS設定項目
 
-### 5.1 必須設定（AraneaRegister用）
+### 6.1 必須設定（AraneaDeviceGate用）
 
 | キー | 型 | 説明 |
 |------|-----|------|
-| `gate_url` | string | AraneaGateway URL |
+| `gate_url` | string | AraneaDeviceGate URL |
 | `tid` | string | テナントID |
 | `tenant_lacisid` | string | テナントプライマリのlacisID |
 | `tenant_email` | string | テナントプライマリのEmail |
@@ -208,118 +232,110 @@ pAdvertising->stop();
 | `cic` | string | 自デバイスのCIC（取得後保存） |
 | `activated` | int | アクティベーション完了フラグ（0/1） |
 
-### 5.2 WiFi設定（初回のみ使用）
+### 6.2 WiFi設定
 
 | キー | 型 | デフォルト | 説明 |
 |------|-----|-----------|------|
-| `wifi_ssid` | string | - | WiFi SSID |
-| `wifi_pass` | string | - | WiFi パスワード |
+| `wifi_ssid` | string | "" | WiFi SSID |
+| `wifi_pass` | string | "" | WiFi パスワード |
 
-### 5.3 is01a固有設定
+### 6.3 is01a固有設定
 
 | キー | 型 | デフォルト | 説明 |
 |------|-----|-----------|------|
-| `sleep_minutes` | int | 4 | DeepSleep間隔（分） |
+| `interval_min` | int | 4 | 発信間隔（1-60分） |
 | `ble_adv_sec` | int | 3 | BLEアドバタイズ時間（秒） |
-| `device_name` | string | "is01a" | デバイス名 |
+| `temp_offset` | float | 0.0 | 温度補正値（-5.0〜+5.0℃） |
+| `hum_offset` | float | 0.0 | 湿度補正値（-10〜+10%） |
+| `device_name` | string | "is01a" | デバイス表示名 |
 
 ---
 
-## 6. 起動シーケンス
+## 7. Web UI（APモード/設定モード）
 
-### 6.1 初回起動
+### 7.1 エンドポイント
 
-```
-1. ストラッピングピン安定化
-2. NVS初期化
-3. activated=0を確認 → アクティベーションモードへ
-4. WiFi接続
-5. NTP同期（時刻取得）
-6. LacisID生成（LacisIDGenerator）【必須】
-7. AraneaGateway登録（AraneaRegister → CIC取得）【必須】
-8. NVS保存（cic, activated=1）
-9. 通常動作へ移行
-```
+| パス | メソッド | 説明 |
+|------|---------|------|
+| `/` | GET | 設定画面 |
+| `/api/status` | GET | 現在の状態 |
+| `/api/config` | GET/POST | 設定取得/更新 |
+| `/api/reboot` | POST | 再起動 |
+| `/api/factory_reset` | POST | ファクトリーリセット |
 
-### 6.2 通常起動（DeepSleep復帰）
+### 7.2 設定画面項目
 
 ```
-1. DeepSleep復帰
-2. NVS読み込み（lacisId, cic）
-3. I2C初期化（直列処理）
-4. HT-30計測
-5. BLEアドバタイズ（3秒）
-6. DeepSleep（4分）
-```
+=== WiFi設定 ===
+- SSID
+- パスワード
 
-**重要**: CIC未取得でもBLE広告は必ず出す。ペイロードのCIC部分は"000000"とする。
+=== テナント設定 ===
+- テナントID (TID)
+- AraneaDeviceGate URL
+- テナントプライマリ認証情報
+
+=== センサー設定 ===
+- 発信間隔（1-60分）
+- 温度補正（-5.0〜+5.0℃）
+- 湿度補正（-10〜+10%）
+
+=== デバイス情報 ===
+- LacisID（読み取り専用）
+- CIC（読み取り専用）
+- MACアドレス（読み取り専用）
+- ファームウェアバージョン
+```
 
 ---
 
-## 7. 開発ステップ
-
-### Phase 1: 基本動作
-- [ ] I2C初期化（直列処理）
-- [ ] HT-30計測動作確認
-- [ ] OLED表示
-
-### Phase 2: BLE通信
-- [ ] BLEアドバタイズ実装
-- [ ] ISMSv1フォーマットペイロード構築
-- [ ] 3秒間アドバタイズ確認
-
-### Phase 3: 認証統合
-- [ ] LacisID生成【必須】
-- [ ] AraneaRegister連携【必須】
-- [ ] CIC取得・NVS保存
-
-### Phase 4: 省電力
-- [ ] DeepSleep実装
-- [ ] 4分間隔動作確認
-- [ ] 電池寿命測定
-
----
-
-## 8. global/モジュール使用計画
+## 8. 共通コンポーネント使用
 
 | モジュール | 使用 | 備考 |
 |-----------|------|------|
-| WiFiManager | △ | 初回アクティベーション時のみ |
+| WiFiManager | ○ | APモード/STA切替対応 |
 | SettingManager | ○ | NVS永続化 |
-| DisplayManager | ○ | OLED表示 |
-| NtpManager | △ | 初回アクティベーション時のみ |
-| LacisIDGenerator | **○必須** | lacisID生成（IoT動作に必須） |
-| AraneaRegister | **○必須** | CIC取得（IoT動作に必須） |
+| DisplayManager | ○ | I2C OLED表示 |
+| NtpManager | △ | 設定モード時のみ |
+| LacisIDGenerator | **○必須** | lacisID生成 |
+| AraneaRegister | **○必須** | CIC取得 |
+| AraneaWebUI | ○ | 設定画面 |
 | Operator | ○ | 状態機械 |
 
-**OTA不可**: 電池駆動のためOTAは対応しない。ファームウェア更新はUSB経由。
+**OTA非対応**: 電池駆動のためOTAは実装しない。更新はUSB経由。
 
 ---
 
 ## 9. 注意事項
 
-### 9.1 I2C処理
+### 9.1 I2C処理の直列化（必須）
 
-- **I2C処理は必ず直列実行**（並列禁止）
-- DeepSleep復帰→I2C初期化の順序がシビア
-- 各デバイス初期化間にdelay()を入れる
+```cpp
+// 正しい実装
+void initI2CDevices() {
+    Wire.begin(SDA, SCL);
+    delay(100);  // 安定化待ち
+
+    sensor.begin();  // HT-30
+    delay(50);
+
+    display.begin(); // OLED
+    delay(50);
+}
+// 並列I2C初期化は禁止（失敗の原因）
+```
 
 ### 9.2 CIC未取得時の動作
 
-- CIC未取得でもBLEアドバタイズは**必ず出す**
+- CIC未取得でもBLE広告は**必ず出す**
 - ペイロードのCIC部分は"000000"とする
-- is03/is02で検知可能にするため
-
-### 9.3 電池残量
-
-- ADCで電池電圧を計測
-- 3.0V以下で警告、2.7V以下で停止
+- is02/is03で検知可能にするため
 
 ---
 
 ## 10. 参照
 
 - **is01 (ISMS版)**: `archive_ISMS/ESP32/is01/is01.ino`
-- **is02 (BLE受信側)**: `code/ESP32/is02a/`
+- **is02a (Master)**: `code/ESP32/is02a/`
 - **global モジュール**: `code/ESP32/global/src/`
 - **役割分担ガイド**: `code/ESP32/______MUST_READ_ROLE_DIVISION______.md`
