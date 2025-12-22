@@ -7,8 +7,13 @@
 #include "NtpManager.h"
 #include "ChannelManager.h"
 #include "Is05aKeys.h"
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+
+static const unsigned long HTTP_TIMEOUT_MS = 3000;      // P0: 10s→3sに短縮
+static const int MAX_CONSECUTIVE_FAILURES = 3;          // P0: バックオフ閾値
+static const unsigned long BACKOFF_DURATION_MS = 30000; // P0: 30秒バックオフ
 
 WebhookManager::WebhookManager()
     : settings_(nullptr)
@@ -17,6 +22,8 @@ WebhookManager::WebhookManager()
     , enabled_(false)
     , sentCount_(0)
     , failCount_(0)
+    , consecutiveFailures_(0)
+    , lastFailTime_(0)
     , onSendCallback_(nullptr)
 {
 }
@@ -68,6 +75,18 @@ bool WebhookManager::sendStateChange(int ch, bool active) {
     if (!enabled_) return false;
     if (!channels_) return false;
 
+    // P0: WiFi接続チェック
+    if (!WiFi.isConnected()) {
+        Serial.println("[Webhook] Skipped (WiFi not connected)");
+        return false;
+    }
+
+    // P0: バックオフチェック
+    if (!checkBackoff()) {
+        Serial.println("[Webhook] Skipped (backoff)");
+        return false;
+    }
+
     String timestamp = (ntp_ && ntp_->isSynced())
         ? ntp_->getIso8601()
         : "1970-01-01T00:00:00Z";
@@ -80,6 +99,7 @@ bool WebhookManager::sendStateChange(int ch, bool active) {
         bool ok = sendToUrl(discordUrl_, payload);
         if (ok) successCount++;
         if (onSendCallback_) onSendCallback_(Platform::DISCORD, ok);
+        yield();  // P0: WDT対策
     }
 
     // Slack
@@ -88,6 +108,7 @@ bool WebhookManager::sendStateChange(int ch, bool active) {
         bool ok = sendToUrl(slackUrl_, payload);
         if (ok) successCount++;
         if (onSendCallback_) onSendCallback_(Platform::SLACK, ok);
+        yield();  // P0: WDT対策
     }
 
     // Generic
@@ -96,7 +117,11 @@ bool WebhookManager::sendStateChange(int ch, bool active) {
         bool ok = sendToUrl(genericUrl_, payload);
         if (ok) successCount++;
         if (onSendCallback_) onSendCallback_(Platform::GENERIC, ok);
+        yield();  // P0: WDT対策
     }
+
+    // バックオフ管理
+    updateBackoff(successCount > 0);
 
     return successCount > 0;
 }
@@ -106,11 +131,24 @@ bool WebhookManager::sendHeartbeat() {
     if (!enabled_) return false;
     if (genericUrl_.length() == 0) return false;
 
+    // P0: WiFi接続チェック
+    if (!WiFi.isConnected()) {
+        Serial.println("[Webhook] Heartbeat skipped (WiFi not connected)");
+        return false;
+    }
+
+    // P0: バックオフチェック
+    if (!checkBackoff()) {
+        Serial.println("[Webhook] Heartbeat skipped (backoff)");
+        return false;
+    }
+
     String timestamp = (ntp_ && ntp_->isSynced())
         ? ntp_->getIso8601()
         : "1970-01-01T00:00:00Z";
 
-    JsonDocument doc;
+    // P1: StaticJsonDocumentで動的アロケーション回避
+    StaticJsonDocument<768> doc;
     doc["device_id"] = lacisId_;
     doc["device_name"] = deviceName_;
     doc["event"] = "heartbeat";
@@ -125,9 +163,14 @@ bool WebhookManager::sendHeartbeat() {
         chObj["state"] = channels_->getStateString(ch);
     }
 
+    // P1: String::reserve()でフラグメンテーション軽減
     String json;
+    json.reserve(512);
     serializeJson(doc, json);
-    return sendToUrl(genericUrl_, json);
+
+    bool ok = sendToUrl(genericUrl_, json);
+    updateBackoff(ok);
+    return ok;
 }
 
 String WebhookManager::buildDiscordPayload(int ch, bool active, const String& timestamp) {
@@ -138,7 +181,8 @@ String WebhookManager::buildDiscordPayload(int ch, bool active, const String& ti
     String emoji = active ? "🚨" : "✅";
     int color = active ? 15158332 : 3066993;  // 赤 or 緑
 
-    JsonDocument doc;
+    // P1: StaticJsonDocumentで動的アロケーション回避
+    StaticJsonDocument<512> doc;
     doc["content"] = emoji + " **" + cfg.name + "** が **" + state + "** になりました";
 
     JsonArray embeds = doc.createNestedArray("embeds");
@@ -163,7 +207,9 @@ String WebhookManager::buildDiscordPayload(int ch, bool active, const String& ti
     f3["value"] = timestamp;
     f3["inline"] = false;
 
+    // P1: String::reserve()でフラグメンテーション軽減
     String json;
+    json.reserve(384);
     serializeJson(doc, json);
     return json;
 }
@@ -175,7 +221,8 @@ String WebhookManager::buildSlackPayload(int ch, bool active, const String& time
     String emoji = active ? "🚨" : "✅";
     String color = active ? "danger" : "good";
 
-    JsonDocument doc;
+    // P1: StaticJsonDocumentで動的アロケーション回避
+    StaticJsonDocument<512> doc;
     doc["text"] = emoji + " *" + cfg.name + "* が *" + state + "* になりました";
 
     JsonArray attachments = doc.createNestedArray("attachments");
@@ -199,7 +246,9 @@ String WebhookManager::buildSlackPayload(int ch, bool active, const String& time
     f3["value"] = timestamp;
     f3["short"] = false;
 
+    // P1: String::reserve()でフラグメンテーション軽減
     String json;
+    json.reserve(384);
     serializeJson(doc, json);
     return json;
 }
@@ -208,7 +257,8 @@ String WebhookManager::buildGenericPayload(int ch, bool active, const String& ti
     ChannelManager::ChannelConfig cfg = channels_->getConfig(ch);
     String state = channels_->getStateString(ch);
 
-    JsonDocument doc;
+    // P1: StaticJsonDocumentで動的アロケーション回避
+    StaticJsonDocument<256> doc;
     doc["device_id"] = lacisId_;
     doc["device_name"] = deviceName_;
     doc["event"] = "state_change";
@@ -218,7 +268,9 @@ String WebhookManager::buildGenericPayload(int ch, bool active, const String& ti
     doc["active"] = active;
     doc["timestamp"] = timestamp;
 
+    // P1: String::reserve()でフラグメンテーション軽減
     String json;
+    json.reserve(192);
     serializeJson(doc, json);
     return json;
 }
@@ -229,9 +281,11 @@ bool WebhookManager::sendToUrl(const String& url, const String& payload) {
     HTTPClient http;
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
-    http.setTimeout(10000);
+    http.setTimeout(HTTP_TIMEOUT_MS);  // P0: 10s→3sに短縮
 
     int httpCode = http.POST(payload);
+    yield();  // P0: WDT対策
+
     bool success = (httpCode >= 200 && httpCode < 300);
 
     if (success) {
@@ -248,4 +302,31 @@ bool WebhookManager::sendToUrl(const String& url, const String& payload) {
 
 void WebhookManager::onSendComplete(std::function<void(Platform, bool success)> callback) {
     onSendCallback_ = callback;
+}
+
+// P0: バックオフチェック
+bool WebhookManager::checkBackoff() {
+    if (consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES) {
+        unsigned long now = millis();
+        if ((now - lastFailTime_) < BACKOFF_DURATION_MS) {
+            return false;  // バックオフ中
+        }
+        // バックオフ期間終了、リトライ許可
+        Serial.println("[Webhook] Backoff period ended, retrying...");
+        consecutiveFailures_ = 0;
+    }
+    return true;
+}
+
+// P0: バックオフ状態更新
+void WebhookManager::updateBackoff(bool success) {
+    if (success) {
+        consecutiveFailures_ = 0;
+    } else {
+        consecutiveFailures_++;
+        lastFailTime_ = millis();
+        if (consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES) {
+            Serial.printf("[Webhook] Entering backoff (%d consecutive failures)\n", consecutiveFailures_);
+        }
+    }
 }

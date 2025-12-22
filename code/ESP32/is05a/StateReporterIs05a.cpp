@@ -12,6 +12,9 @@
 
 // 最小送信間隔（連続送信防止）
 static const unsigned long MIN_SEND_INTERVAL_MS = 1000;
+static const unsigned long HTTP_TIMEOUT_MS = 3000;      // P0: 10s→3sに短縮
+static const int MAX_CONSECUTIVE_FAILURES = 3;          // P0: バックオフ閾値
+static const unsigned long BACKOFF_DURATION_MS = 30000; // P0: 30秒バックオフ
 
 StateReporterIs05a::StateReporterIs05a()
     : settings_(nullptr)
@@ -21,6 +24,8 @@ StateReporterIs05a::StateReporterIs05a()
     , failCount_(0)
     , lastResult_("---")
     , lastSendTime_(0)
+    , consecutiveFailures_(0)
+    , lastFailTime_(0)
 {
 }
 
@@ -52,8 +57,26 @@ void StateReporterIs05a::setCloudUrl(const String& url) {
 }
 
 bool StateReporterIs05a::sendStateReport() {
-    // 最小送信間隔チェック
     unsigned long now = millis();
+
+    // P0: WiFi接続チェック（未接続時は即座にスキップ）
+    if (!WiFi.isConnected()) {
+        Serial.println("[StateReporter] Skipped (WiFi not connected)");
+        return false;
+    }
+
+    // P0: バックオフチェック（連続失敗後は30秒待機）
+    if (consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES) {
+        if ((now - lastFailTime_) < BACKOFF_DURATION_MS) {
+            Serial.println("[StateReporter] Skipped (backoff)");
+            return false;
+        }
+        // バックオフ期間終了、リトライ許可
+        Serial.println("[StateReporter] Backoff period ended, retrying...");
+        consecutiveFailures_ = 0;
+    }
+
+    // 最小送信間隔チェック
     if (lastSendTime_ > 0 && (now - lastSendTime_) < MIN_SEND_INTERVAL_MS) {
         return false;
     }
@@ -68,25 +91,34 @@ bool StateReporterIs05a::sendStateReport() {
 
     if (relayPrimaryUrl_.length() > 0) {
         if (postToUrl(relayPrimaryUrl_, localPayload)) successCount++;
+        yield();  // P0: WDT対策
     }
 
     if (relaySecondaryUrl_.length() > 0) {
         if (postToUrl(relaySecondaryUrl_, localPayload)) successCount++;
+        yield();  // P0: WDT対策
     }
 
     // クラウド送信
     if (cloudUrl_.length() > 0 && tid_.length() > 0 && cic_.length() > 0) {
         String cloudPayload = buildCloudPayload();
         if (postToUrl(cloudUrl_, cloudPayload)) successCount++;
+        yield();  // P0: WDT対策
     }
 
-    // 結果更新
+    // 結果更新とバックオフ管理
     if (successCount > 0) {
         sentCount_++;
         lastResult_ = "OK(" + String(successCount) + ")";
+        consecutiveFailures_ = 0;  // 成功時はリセット
     } else {
         failCount_++;
         lastResult_ = "NG";
+        consecutiveFailures_++;
+        lastFailTime_ = now;
+        if (consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES) {
+            Serial.printf("[StateReporter] Entering backoff (%d consecutive failures)\n", consecutiveFailures_);
+        }
     }
 
     Serial.printf("[StateReporter] Done: %d success\n", successCount);
@@ -111,7 +143,9 @@ String StateReporterIs05a::buildLocalPayload() {
     int rssi = WiFi.RSSI();
     String ssid = WiFi.SSID();
 
-    JsonDocument doc;
+    // P1: StaticJsonDocumentで動的アロケーション回避
+    // 8ch分のデータがあるため1024バイト確保
+    StaticJsonDocument<1024> doc;
     doc["observedAt"] = observedAt;
 
     // sensor
@@ -143,7 +177,9 @@ String StateReporterIs05a::buildLocalPayload() {
     gateway["ip"] = ip;
     gateway["rssi"] = rssi;
 
+    // P1: String::reserve()でフラグメンテーション軽減
     String json;
+    json.reserve(768);
     serializeJson(doc, json);
     return json;
 }
@@ -153,7 +189,8 @@ String StateReporterIs05a::buildCloudPayload() {
         ? ntp_->getIso8601()
         : "1970-01-01T00:00:00Z";
 
-    JsonDocument doc;
+    // P1: StaticJsonDocumentで動的アロケーション回避
+    StaticJsonDocument<512> doc;
 
     // auth
     JsonObject auth = doc.createNestedObject("auth");
@@ -174,7 +211,9 @@ String StateReporterIs05a::buildCloudPayload() {
         state[chKey] = channels_->getStateString(ch);
     }
 
+    // P1: String::reserve()でフラグメンテーション軽減
     String json;
+    json.reserve(384);
     serializeJson(doc, json);
     return json;
 }
@@ -185,9 +224,11 @@ bool StateReporterIs05a::postToUrl(const String& url, const String& payload) {
     HTTPClient http;
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
-    http.setTimeout(10000);
+    http.setTimeout(HTTP_TIMEOUT_MS);  // P0: 10s→3sに短縮
 
     int httpCode = http.POST(payload);
+    yield();  // P0: WDT対策
+
     bool success = (httpCode >= 200 && httpCode < 300);
 
     if (success) {

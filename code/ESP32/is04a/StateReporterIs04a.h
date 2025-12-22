@@ -57,6 +57,10 @@ private:
     String lastResult_;
     unsigned long lastSendTime_;
 
+    // バックオフ制御
+    int consecutiveFailures_;
+    unsigned long lastFailTime_;
+
     String buildLocalPayload();
     String buildCloudPayload();
     bool postToUrl(const String& url, const String& payload);

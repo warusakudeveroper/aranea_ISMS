@@ -81,6 +81,10 @@ private:
     int sentCount_;
     int failCount_;
 
+    // バックオフ制御
+    int consecutiveFailures_;
+    unsigned long lastFailTime_;
+
     std::function<void(Platform, bool)> onSendCallback_;
 
     // プラットフォーム固有フォーマット
@@ -90,6 +94,10 @@ private:
 
     // HTTP送信
     bool sendToUrl(const String& url, const String& payload);
+
+    // バックオフチェック
+    bool checkBackoff();
+    void updateBackoff(bool success);
 };
 
 #endif // WEBHOOK_MANAGER_H
