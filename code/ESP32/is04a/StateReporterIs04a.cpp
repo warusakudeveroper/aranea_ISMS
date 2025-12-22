@@ -49,10 +49,11 @@ void StateReporterIs04a::setCloudUrl(const String& url) {
     cloudUrl_ = url;
 }
 
-bool StateReporterIs04a::sendStateReport() {
-    // 最小送信間隔チェック
+bool StateReporterIs04a::sendStateReport(bool force) {
+    // 最小送信間隔チェック（force=trueならスキップ）
     unsigned long now = millis();
-    if (lastSendTime_ > 0 && (now - lastSendTime_) < MIN_SEND_INTERVAL_MS) {
+    if (!force && lastSendTime_ > 0 && (now - lastSendTime_) < MIN_SEND_INTERVAL_MS) {
+        Serial.println("[StateReporter] Skipped (interval limit)");
         return false;
     }
     lastSendTime_ = now;

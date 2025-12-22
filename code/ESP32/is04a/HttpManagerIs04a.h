@@ -44,9 +44,8 @@ private:
     int lastPulseOutput_;
 
     // API ハンドラ
-    void handleStatus();
     void handlePulse();
-    void handleConfig();
+    void handlePulseConfig();
     void handleTriggerConfig();
 };
 

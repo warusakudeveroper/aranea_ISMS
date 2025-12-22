@@ -240,7 +240,8 @@ void onPulseStart(int outputNum, TriggerManager::PulseSource source) {
     }
 
     // パルス開始時も状態レポート送信（アクティブ状態を記録）
-    stateReporter.sendStateReport();
+    // force=true: インターバル制限を無視
+    stateReporter.sendStateReport(true);
 }
 
 // ========================================
@@ -256,7 +257,8 @@ void onPulseEnd(int outputNum) {
     }
 
     // 状態レポート送信
-    stateReporter.sendStateReport();
+    // force=true: インターバル制限を無視（短いパルスでも確実に送信）
+    stateReporter.sendStateReport(true);
 }
 
 // ========================================

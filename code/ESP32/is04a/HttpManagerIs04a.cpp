@@ -37,6 +37,7 @@ void HttpManagerIs04a::registerTypeSpecificEndpoints() {
     // 注意: /api/status と /api/config は AraneaWebUI で登録済み
     // デバイス固有の情報は getTypeSpecificStatus() / getTypeSpecificConfig() で追加
     server_->on("/api/is04a/pulse", HTTP_POST, [this]() { handlePulse(); });
+    server_->on("/api/is04a/config", HTTP_POST, [this]() { handlePulseConfig(); });
     server_->on("/api/is04a/trigger", HTTP_GET, [this]() { handleTriggerConfig(); });
     server_->on("/api/is04a/trigger", HTTP_POST, [this]() { handleTriggerConfig(); });
 }
@@ -171,6 +172,40 @@ void HttpManagerIs04a::handleTriggerConfig() {
     }
 }
 
+void HttpManagerIs04a::handlePulseConfig() {
+    if (!checkAuth()) { requestAuth(); return; }
+
+    if (!server_->hasArg("plain")) {
+        server_->send(400, "application/json", "{\"error\":\"No body\"}");
+        return;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, server_->arg("plain"));
+    if (error) {
+        server_->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    if (doc.containsKey("pulseMs")) {
+        trigger_->setPulseMs(doc["pulseMs"]);
+    }
+    if (doc.containsKey("interlockMs")) {
+        trigger_->setInterlockMs(doc["interlockMs"]);
+    }
+    if (doc.containsKey("debounceMs")) {
+        trigger_->setDebounceMs(doc["debounceMs"]);
+    }
+    if (doc.containsKey("out1Name")) {
+        trigger_->setOutputName(1, doc["out1Name"].as<String>());
+    }
+    if (doc.containsKey("out2Name")) {
+        trigger_->setOutputName(2, doc["out2Name"].as<String>());
+    }
+
+    server_->send(200, "application/json", "{\"ok\":true}");
+}
+
 String HttpManagerIs04a::generateTypeSpecificTabs() {
     return F("<div class=\"tab\" data-tab=\"trigger\" onclick=\"showTab('trigger')\">Trigger</div>");
 }
@@ -224,7 +259,20 @@ String HttpManagerIs04a::generateTypeSpecificJS() {
     js += F("document.getElementById('in2Target').value=ts.in2Target||2;");
     js += F("}");
 
-    // 設定保存（固有APIはないので不可 - 基本設定はAraneaWebUI経由）
+    // パルス設定保存
+    js += F("function saveConfig(){");
+    js += F("let cfg={");
+    js += F("pulseMs:parseInt(document.getElementById('pulseMs').value),");
+    js += F("interlockMs:parseInt(document.getElementById('interlockMs').value),");
+    js += F("debounceMs:parseInt(document.getElementById('debounceMs').value),");
+    js += F("out1Name:document.getElementById('out1Name').value,");
+    js += F("out2Name:document.getElementById('out2Name').value");
+    js += F("};");
+    js += F("fetch('/api/is04a/config',{method:'POST',headers:{'Content-Type':'application/json'},");
+    js += F("body:JSON.stringify(cfg)}).then(r=>r.json()).then(d=>{");
+    js += F("if(d.ok){showToast('Settings saved');}else{showToast('Failed','error');}");
+    js += F("}).catch(e=>showToast('Error','error'));}");
+
     // トリガーアサイン保存
     js += F("function saveTrigger(){");
     js += F("let cfg={");
@@ -312,6 +360,7 @@ String HttpManagerIs04a::generateTypeSpecificTabContents() {
     html += "<input type=\"text\" id=\"out2Name\" value=\"" + trigger_->getOutputName(2) + "\">";
     html += F("</div>");
     html += F("</div>");
+    html += F("<button class=\"btn btn-primary\" onclick=\"saveConfig()\">Save Settings</button>");
     html += F("</div>");
 
     // トリガーアサインカード

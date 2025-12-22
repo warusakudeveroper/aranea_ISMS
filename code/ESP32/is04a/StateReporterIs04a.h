@@ -28,7 +28,8 @@ public:
     void setCloudUrl(const String& url);
 
     // 状態送信
-    bool sendStateReport();
+    // force=true: インターバル制限を無視（パルス開始/終了イベント用）
+    bool sendStateReport(bool force = false);
     bool sendHeartbeat();
 
     // 統計
