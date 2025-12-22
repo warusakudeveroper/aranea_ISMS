@@ -28,6 +28,9 @@ public:
 protected:
     // AraneaWebUI オーバーライド
     void registerTypeSpecificEndpoints() override;
+    void getTypeSpecificStatus(JsonObject& obj) override;
+    void getTypeSpecificConfig(JsonObject& obj) override;
+    String generateTypeSpecificTabs() override;
     String generateTypeSpecificJS() override;
     String generateTypeSpecificTabContents() override;
 

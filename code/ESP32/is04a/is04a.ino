@@ -232,6 +232,15 @@ void updateDisplay() {
 // ========================================
 void onPulseStart(int outputNum, TriggerManager::PulseSource source) {
     Serial.printf("[PULSE] Started: OUT%d, source=%d\n", outputNum, (int)source);
+
+    // 起動猶予期間チェック
+    if (bootTime > 0 && (millis() - bootTime) < (unsigned long)bootGraceMs) {
+        Serial.println("[PULSE] Boot grace period - skipping send");
+        return;
+    }
+
+    // パルス開始時も状態レポート送信（アクティブ状態を記録）
+    stateReporter.sendStateReport();
 }
 
 // ========================================

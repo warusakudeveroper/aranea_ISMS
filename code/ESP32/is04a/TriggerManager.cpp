@@ -73,11 +73,13 @@ void TriggerManager::begin(SettingManager* settings, NtpManager* ntp) {
 
     inputs_[0].begin(in1Pin, IOController::Mode::IO_IN);
     inputs_[0].setDebounceMs(debounceMs_);
-    inputs_[0].setPullup(false);  // INPUT_PULLDOWN（HIGHでアクティブ）
+    inputs_[0].setPullup(false);   // INPUT_PULLDOWN
+    inputs_[0].setInverted(true);  // HIGHでアクティブ（デフォルトはLOW=アクティブ）
 
     inputs_[1].begin(in2Pin, IOController::Mode::IO_IN);
     inputs_[1].setDebounceMs(debounceMs_);
-    inputs_[1].setPullup(false);  // INPUT_PULLDOWN
+    inputs_[1].setPullup(false);   // INPUT_PULLDOWN
+    inputs_[1].setInverted(true);  // HIGHでアクティブ
 
     // 初期状態を取得
     delay(10);
