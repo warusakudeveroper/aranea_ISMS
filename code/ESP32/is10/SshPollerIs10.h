@@ -125,6 +125,14 @@ public:
   String getRestartReason() const { return restartReason_; }
 
   /**
+   * ログ破棄統計（安定性のためにログを捨てた回数）
+   * 異常に多い場合は別問題の兆候
+   */
+  uint32_t getDroppedLogCount() const { return droppedLogCount_; }
+  unsigned long getLastLogDropMs() const { return lastLogDropMs_; }
+  void resetDroppedLogCount() { droppedLogCount_ = 0; lastLogDropMs_ = 0; }
+
+  /**
    * 外部ミューテックス設定（Serial統一用）
    */
   void setSerialMutex(SemaphoreHandle_t mutex) { externalSerialMutex_ = mutex; }
@@ -181,6 +189,10 @@ private:
   // 復旧フラグ
   volatile bool needsRestart_ = false;
   String restartReason_;
+
+  // ログ破棄統計
+  uint32_t droppedLogCount_ = 0;
+  unsigned long lastLogDropMs_ = 0;
 
   // 収集データ（20スロット固定）
   static const int MAX_ROUTER_INFOS = 20;

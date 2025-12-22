@@ -43,6 +43,7 @@ public:
   void setRouterStatus(int totalRouters, int successfulPolls, unsigned long lastPollTime);
   void setMqttStatus(bool connected);
   void setLastStateReport(const String& time, int code);
+  void setDroppedLogStats(uint32_t count, unsigned long lastDropMs);
 
   // ポーリング制御
   void setPollingEnabled(bool enabled);
@@ -78,6 +79,8 @@ private:
   bool mqttConnected_ = false;
   String lastStateReportTime_;
   int lastStateReportCode_ = 0;
+  uint32_t droppedLogCount_ = 0;
+  unsigned long lastLogDropMs_ = 0;
 
   // ポーリング制御状態
   bool pollingEnabled_ = true;

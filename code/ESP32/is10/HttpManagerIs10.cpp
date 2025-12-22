@@ -56,6 +56,11 @@ void HttpManagerIs10::setLastStateReport(const String& time, int code) {
   lastStateReportCode_ = code;
 }
 
+void HttpManagerIs10::setDroppedLogStats(uint32_t count, unsigned long lastDropMs) {
+  droppedLogCount_ = count;
+  lastLogDropMs_ = lastDropMs;
+}
+
 void HttpManagerIs10::setPollingEnabled(bool enabled) {
   pollingEnabled_ = enabled;
   Serial.printf("[HTTP-IS10] Polling %s\n", enabled ? "enabled" : "disabled");
@@ -97,6 +102,10 @@ void HttpManagerIs10::getTypeSpecificStatus(JsonObject& obj) {
   // SSH設定
   obj["sshTimeout"] = settings_->getInt(Is10Keys::kTimeout, 30000);
   obj["scanIntervalSec"] = settings_->getInt(Is10Keys::kInterval, 60);
+
+  // ログ破棄統計（安定性のためログを捨てた回数、異常に多い場合は別問題の兆候）
+  obj["droppedLogs"] = droppedLogCount_;
+  obj["lastLogDropMs"] = lastLogDropMs_;
 }
 
 // ========================================

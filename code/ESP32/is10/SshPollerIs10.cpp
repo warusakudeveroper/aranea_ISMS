@@ -577,8 +577,11 @@ void SshPollerIs10::serialPrintf(const char* format, ...) {
     Serial.print(buf);
 
     if (gotMutex) xSemaphoreGive(mutex);
+  } else {
+    // ミューテックス取得失敗：ログを捨てて統計を更新
+    droppedLogCount_++;
+    lastLogDropMs_ = millis();
   }
-  // ミューテックス取得失敗時はログを捨てる（システム安定性優先）
 
   va_end(args);
 }

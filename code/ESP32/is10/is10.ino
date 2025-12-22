@@ -835,6 +835,9 @@ void setup() {
     Serial.printf("[SSH-POLLER] Cycle complete: %d/%d\n", success, total);
     httpMgr.setRouterStatus(total, success, millis());
 
+    // ログ破棄統計を更新（安定性モニタリング用）
+    httpMgr.setDroppedLogStats(sshPoller.getDroppedLogCount(), sshPoller.getLastLogDropMs());
+
     // CelestialGlobe送信を3秒後に予約（メモリ回復待機）
     // delay()はメインループをブロックするため非使用
     celestialDueAt = millis() + 3000;
