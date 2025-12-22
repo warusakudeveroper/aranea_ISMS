@@ -8,8 +8,13 @@
 #include "SettingManager.h"
 #include "NtpManager.h"
 #include "Is10Keys.h"
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+
+static const unsigned long HTTP_TIMEOUT_MS = 3000;      // P0: 15s→3sに短縮
+static const int MAX_CONSECUTIVE_FAILURES = 3;          // P0: バックオフ閾値
+static const unsigned long BACKOFF_DURATION_MS = 30000; // P0: 30秒バックオフ
 
 CelestialSenderIs10::CelestialSenderIs10() {}
 
@@ -40,6 +45,23 @@ bool CelestialSenderIs10::send() {
   if (!settings_ || !sshPoller_) {
     Serial.println("[CELESTIAL] Not initialized");
     return false;
+  }
+
+  // P0: WiFi接続チェック
+  if (!WiFi.isConnected()) {
+    Serial.println("[CELESTIAL] Skipped (WiFi not connected)");
+    return false;
+  }
+
+  // P0: バックオフチェック
+  unsigned long now = millis();
+  if (consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES) {
+    if ((now - lastFailTime_) < BACKOFF_DURATION_MS) {
+      Serial.println("[CELESTIAL] Skipped (backoff)");
+      return false;
+    }
+    Serial.println("[CELESTIAL] Backoff period ended, retrying...");
+    consecutiveFailures_ = 0;
   }
 
   // エンドポイント取得
@@ -75,8 +97,8 @@ bool CelestialSenderIs10::send() {
     observedAtMs = millis();  // フォールバック（不正確だが送信は可能）
   }
 
-  // JSON構築（最大4KB）
-  DynamicJsonDocument doc(4096);
+  // P1: StaticJsonDocumentで動的アロケーション回避
+  StaticJsonDocument<4096> doc;
 
   // auth
   JsonObject auth = doc.createNestedObject("auth");
@@ -128,7 +150,9 @@ bool CelestialSenderIs10::send() {
     // parentMacはルーターの上流が確実に分かる場合のみ（不明なら空）
   }
 
+  // P1: String::reserve()でフラグメンテーション軽減
   String json;
+  json.reserve(2048);
   serializeJson(doc, json);
 
   Serial.printf("[CELESTIAL] Sending to %s\n", url.c_str());
@@ -139,16 +163,27 @@ bool CelestialSenderIs10::send() {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Celestial-Secret", secret);
-  http.setTimeout(15000);
+  http.setTimeout(HTTP_TIMEOUT_MS);  // P0: 15s→3sに短縮
 
   int httpCode = http.POST(json);
+  yield();  // P0: WDT対策
+
   String response = http.getString();
   http.end();
+  yield();  // P0: WDT対策
 
   bool success = (httpCode >= 200 && httpCode < 300);
+
+  // P0: バックオフ管理
   if (success) {
+    consecutiveFailures_ = 0;
     Serial.printf("[CELESTIAL] OK %d\n", httpCode);
   } else {
+    consecutiveFailures_++;
+    lastFailTime_ = millis();
+    if (consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES) {
+      Serial.printf("[CELESTIAL] Entering backoff (%d consecutive failures)\n", consecutiveFailures_);
+    }
     Serial.printf("[CELESTIAL] NG %d: %s\n", httpCode, response.c_str());
   }
 

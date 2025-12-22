@@ -61,6 +61,10 @@ private:
   String cic_;
   String fid_;
   String source_;
+
+  // バックオフ制御
+  int consecutiveFailures_ = 0;
+  unsigned long lastFailTime_ = 0;
 };
 
 #endif // CELESTIAL_SENDER_IS10_H

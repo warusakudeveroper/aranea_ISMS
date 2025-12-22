@@ -134,7 +134,8 @@ String StateReporterIs10::buildPayload() {
   String deviceName = getDeviceName();
   bool reportFullConfig = settings_ ? settings_->getBool(Is10Keys::kReportFull, false) : false;
 
-  DynamicJsonDocument doc(4096);
+  // P1: StaticJsonDocumentで動的アロケーション回避
+  StaticJsonDocument<4096> doc;
 
   // auth
   JsonObject auth = doc.createNestedObject("auth");
@@ -208,7 +209,9 @@ String StateReporterIs10::buildPayload() {
     }
   }
 
+  // P1: String::reserve()でフラグメンテーション軽減
   String json;
+  json.reserve(2048);
   serializeJson(doc, json);
 
   // ログ出力
