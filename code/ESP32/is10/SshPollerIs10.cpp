@@ -250,13 +250,14 @@ void SshPollerIs10::startSshTask(int index) {
   serialPrintf("[SSH-POLLER] Starting SSH for Router %d/%d (actual=%d)\n",
                processedCount_ + 1, *routerCount_, index);
 
-  // SSHタスク起動（gPoller経由でアクセス、index不使用・currentRouterIndex_を使用）
+  // SSHタスク起動（gPoller経由でアクセス）
+  // 優先度はIDLE（他タスクを巻き込まない、ブロックしても他が回る）
   BaseType_t xReturned = xTaskCreatePinnedToCore(
     sshTaskFunction,
     "ssh_poll",
     SSH_TASK_STACK_SIZE,
     NULL,  // gPoller経由なのでパラメータ不要
-    tskIDLE_PRIORITY + 1,
+    tskIDLE_PRIORITY,  // 優先度を下げて他タスクへの影響を最小化
     &sshTaskHandle_,
     1  // Core 1
   );
@@ -563,13 +564,21 @@ void SshPollerIs10::serialPrintf(const char* format, ...) {
   va_start(args, format);
 
   SemaphoreHandle_t mutex = getSerialMutex();
-  if (mutex) xSemaphoreTake(mutex, portMAX_DELAY);
 
-  char buf[256];
-  vsnprintf(buf, sizeof(buf), format, args);
-  Serial.print(buf);
+  // 無限待ちを避ける：5msでタイムアウト、取れなければログを捨てる
+  bool gotMutex = false;
+  if (mutex) {
+    gotMutex = (xSemaphoreTake(mutex, pdMS_TO_TICKS(5)) == pdTRUE);
+  }
 
-  if (mutex) xSemaphoreGive(mutex);
+  if (gotMutex || !mutex) {
+    char buf[256];
+    vsnprintf(buf, sizeof(buf), format, args);
+    Serial.print(buf);
+
+    if (gotMutex) xSemaphoreGive(mutex);
+  }
+  // ミューテックス取得失敗時はログを捨てる（システム安定性優先）
 
   va_end(args);
 }

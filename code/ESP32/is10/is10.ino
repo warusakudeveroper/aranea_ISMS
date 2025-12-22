@@ -125,17 +125,22 @@ static const char* stageStr(uint32_t stage) {
 // ========================================
 static SemaphoreHandle_t gSerialMutex = nullptr;
 
-// スレッドセーフなSerial出力マクロ
+// スレッドセーフなSerial出力マクロ（無限待ちしない版）
+// 5msでタイムアウト、取れなければログを捨てる（システム安定性優先）
 #define SERIAL_PRINTF(...) do { \
-  if (gSerialMutex) xSemaphoreTake(gSerialMutex, portMAX_DELAY); \
-  Serial.printf(__VA_ARGS__); \
-  if (gSerialMutex) xSemaphoreGive(gSerialMutex); \
+  bool _gotMutex = (!gSerialMutex || xSemaphoreTake(gSerialMutex, pdMS_TO_TICKS(5)) == pdTRUE); \
+  if (_gotMutex) { \
+    Serial.printf(__VA_ARGS__); \
+    if (gSerialMutex) xSemaphoreGive(gSerialMutex); \
+  } \
 } while(0)
 
 #define SERIAL_PRINTLN(msg) do { \
-  if (gSerialMutex) xSemaphoreTake(gSerialMutex, portMAX_DELAY); \
-  Serial.println(msg); \
-  if (gSerialMutex) xSemaphoreGive(gSerialMutex); \
+  bool _gotMutex = (!gSerialMutex || xSemaphoreTake(gSerialMutex, pdMS_TO_TICKS(5)) == pdTRUE); \
+  if (_gotMutex) { \
+    Serial.println(msg); \
+    if (gSerialMutex) xSemaphoreGive(gSerialMutex); \
+  } \
 } while(0)
 
 // ========================================
