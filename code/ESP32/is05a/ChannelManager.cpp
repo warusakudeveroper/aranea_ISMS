@@ -7,6 +7,7 @@
 #include "NtpManager.h"
 #include "Is05aKeys.h"
 #include "AraneaSettings.h"
+#include <ArduinoJson.h>
 
 ChannelManager::ChannelManager()
     : settings_(nullptr)
@@ -221,28 +222,39 @@ void ChannelManager::onChannelChange(std::function<void(int ch, bool active)> ca
 }
 
 String ChannelManager::toJson() const {
-    String json = "{";
+    JsonDocument doc;
     for (int ch = 1; ch <= NUM_CHANNELS; ch++) {
-        if (ch > 1) json += ",";
-        json += "\"ch" + String(ch) + "\":" + getChannelJson(ch);
+        JsonObject chObj = doc.createNestedObject("ch" + String(ch));
+        const ChannelConfig& cfg = configs_[ch - 1];
+        chObj["pin"] = cfg.pin;
+        chObj["name"] = cfg.name;
+        chObj["meaning"] = cfg.meaning;
+        chObj["debounce"] = cfg.debounceMs;
+        chObj["inverted"] = cfg.inverted;
+        chObj["isOutput"] = cfg.isOutput;
+        chObj["state"] = getStateString(ch);
+        chObj["lastUpdatedAt"] = lastUpdatedAt_[ch - 1];
     }
-    json += "}";
+    String json;
+    serializeJson(doc, json);
     return json;
 }
 
 String ChannelManager::getChannelJson(int ch) const {
     if (ch < 1 || ch > NUM_CHANNELS) return "{}";
 
+    JsonDocument doc;
     const ChannelConfig& cfg = configs_[ch - 1];
-    String json = "{";
-    json += "\"pin\":" + String(cfg.pin) + ",";
-    json += "\"name\":\"" + cfg.name + "\",";
-    json += "\"meaning\":\"" + cfg.meaning + "\",";
-    json += "\"debounce\":" + String(cfg.debounceMs) + ",";
-    json += "\"inverted\":" + String(cfg.inverted ? "true" : "false") + ",";
-    json += "\"isOutput\":" + String(cfg.isOutput ? "true" : "false") + ",";
-    json += "\"state\":\"" + getStateString(ch) + "\",";
-    json += "\"lastUpdatedAt\":\"" + lastUpdatedAt_[ch - 1] + "\"";
-    json += "}";
+    doc["pin"] = cfg.pin;
+    doc["name"] = cfg.name;
+    doc["meaning"] = cfg.meaning;
+    doc["debounce"] = cfg.debounceMs;
+    doc["inverted"] = cfg.inverted;
+    doc["isOutput"] = cfg.isOutput;
+    doc["state"] = getStateString(ch);
+    doc["lastUpdatedAt"] = lastUpdatedAt_[ch - 1];
+
+    String json;
+    serializeJson(doc, json);
     return json;
 }

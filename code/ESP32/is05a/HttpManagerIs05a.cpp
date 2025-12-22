@@ -105,6 +105,7 @@ String HttpManagerIs05a::generateTypeSpecificTabContents() {
 
 String HttpManagerIs05a::generateTypeSpecificJS() {
     String js;
+    js += F("<script>");
     js += F("function loadChannels(){fetch('/api/channels').then(r=>r.json()).then(data=>{");
     js += F("let html='<table><tr><th>Ch</th><th>Name</th><th>State</th><th>Mode</th><th>Updated</th></tr>';");
     js += F("data.channels.forEach(ch=>{html+='<tr><td>ch'+ch.ch+'</td><td>'+ch.name+'</td><td>'+ch.state+'</td>';");
@@ -112,8 +113,8 @@ String HttpManagerIs05a::generateTypeSpecificJS() {
     js += F("html+='</table>';document.getElementById('channel-list').innerHTML=html;");
     js += F("data.channels.forEach(ch=>{if(ch.ch===7)document.getElementById('ch7-mode').value=ch.isOutput?'output':'input';");
     js += F("if(ch.ch===8)document.getElementById('ch8-mode').value=ch.isOutput?'output':'input';});});}");
-    js += F("function setChannelMode(ch,mode){fetch('/api/channel/'+ch+'/mode',{method:'POST',");
-    js += F("headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode})})");
+    js += F("function setChannelMode(ch,mode){fetch('/api/channel',{method:'POST',");
+    js += F("headers:{'Content-Type':'application/json'},body:JSON.stringify({ch:ch,mode:mode})})");
     js += F(".then(r=>r.json()).then(data=>{if(data.ok){showMessage('ch'+ch+' mode changed to '+mode);loadChannels();}");
     js += F("else{showMessage('Error: '+data.error,'error');}});}");
     js += F("function sendPulse(ch){fetch('/api/pulse',{method:'POST',headers:{'Content-Type':'application/json'},");
@@ -139,6 +140,7 @@ String HttpManagerIs05a::generateTypeSpecificJS() {
     js += F("var origShowTab=showTab;showTab=function(tab){origShowTab(tab);");
     js += F("if(tab==='channels')loadChannels();if(tab==='webhook')loadWebhookConfig();};");
     js += F("setInterval(function(){if(document.getElementById('channels').style.display!=='none')loadChannels();},2000);");
+    js += F("</script>");
     return js;
 }
 
@@ -184,6 +186,8 @@ void HttpManagerIs05a::getTypeSpecificConfig(JsonObject& obj) {
 }
 
 void HttpManagerIs05a::handleChannels() {
+    if (!checkAuth()) { requestAuth(); return; }
+
     JsonDocument doc;
     JsonArray arr = doc.createNestedArray("channels");
 
@@ -203,6 +207,8 @@ void HttpManagerIs05a::handleChannels() {
 }
 
 void HttpManagerIs05a::handleChannel() {
+    if (!checkAuth()) { requestAuth(); return; }
+
     String chStr = server_->arg("ch");
     int ch = chStr.toInt();
 
@@ -215,6 +221,8 @@ void HttpManagerIs05a::handleChannel() {
 }
 
 void HttpManagerIs05a::handleChannelConfig() {
+    if (!checkAuth()) { requestAuth(); return; }
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, server_->arg("plain"));
 
@@ -251,6 +259,8 @@ void HttpManagerIs05a::handleChannelConfig() {
 }
 
 void HttpManagerIs05a::handlePulse() {
+    if (!checkAuth()) { requestAuth(); return; }
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, server_->arg("plain"));
 
@@ -277,6 +287,8 @@ void HttpManagerIs05a::handlePulse() {
 }
 
 void HttpManagerIs05a::handleWebhookConfig() {
+    if (!checkAuth()) { requestAuth(); return; }
+
     if (server_->method() == HTTP_GET) {
         JsonDocument doc;
         doc["enabled"] = webhooks_->isEnabled();
@@ -308,6 +320,8 @@ void HttpManagerIs05a::handleWebhookConfig() {
 }
 
 void HttpManagerIs05a::handleWebhookTest() {
+    if (!checkAuth()) { requestAuth(); return; }
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, server_->arg("plain"));
 

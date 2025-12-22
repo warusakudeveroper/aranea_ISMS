@@ -8,6 +8,7 @@
 #include "ChannelManager.h"
 #include "Is05aKeys.h"
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
 
 WebhookManager::WebhookManager()
     : settings_(nullptr)
@@ -109,14 +110,23 @@ bool WebhookManager::sendHeartbeat() {
         ? ntp_->getIso8601()
         : "1970-01-01T00:00:00Z";
 
-    String json = "{";
-    json += "\"device_id\":\"" + lacisId_ + "\",";
-    json += "\"device_name\":\"" + deviceName_ + "\",";
-    json += "\"event\":\"heartbeat\",";
-    json += "\"timestamp\":\"" + timestamp + "\",";
-    json += "\"channels\":" + channels_->toJson();
-    json += "}";
+    JsonDocument doc;
+    doc["device_id"] = lacisId_;
+    doc["device_name"] = deviceName_;
+    doc["event"] = "heartbeat";
+    doc["timestamp"] = timestamp;
 
+    // channels情報を追加
+    JsonObject channelsObj = doc.createNestedObject("channels");
+    for (int ch = 1; ch <= 8; ch++) {
+        auto cfg = channels_->getConfig(ch);
+        JsonObject chObj = channelsObj.createNestedObject("ch" + String(ch));
+        chObj["name"] = cfg.name;
+        chObj["state"] = channels_->getStateString(ch);
+    }
+
+    String json;
+    serializeJson(doc, json);
     return sendToUrl(genericUrl_, json);
 }
 
@@ -128,19 +138,33 @@ String WebhookManager::buildDiscordPayload(int ch, bool active, const String& ti
     String emoji = active ? "🚨" : "✅";
     int color = active ? 15158332 : 3066993;  // 赤 or 緑
 
-    String json = "{";
-    json += "\"content\":\"" + emoji + " **" + cfg.name + "** が **" + state + "** になりました\",";
-    json += "\"embeds\":[{";
-    json += "\"title\":\"is05a 状態変化\",";
-    json += "\"fields\":[";
-    json += "{\"name\":\"チャンネル\",\"value\":\"" + cfg.name + " (ch" + String(ch) + ")\",\"inline\":true},";
-    json += "{\"name\":\"状態\",\"value\":\"" + state + "\",\"inline\":true},";
-    json += "{\"name\":\"時刻\",\"value\":\"" + timestamp + "\",\"inline\":false}";
-    json += "],";
-    json += "\"color\":" + String(color);
-    json += "}]";
-    json += "}";
+    JsonDocument doc;
+    doc["content"] = emoji + " **" + cfg.name + "** が **" + state + "** になりました";
 
+    JsonArray embeds = doc.createNestedArray("embeds");
+    JsonObject embed = embeds.createNestedObject();
+    embed["title"] = "is05a 状態変化";
+    embed["color"] = color;
+
+    JsonArray fields = embed.createNestedArray("fields");
+
+    JsonObject f1 = fields.createNestedObject();
+    f1["name"] = "チャンネル";
+    f1["value"] = cfg.name + " (ch" + String(ch) + ")";
+    f1["inline"] = true;
+
+    JsonObject f2 = fields.createNestedObject();
+    f2["name"] = "状態";
+    f2["value"] = state;
+    f2["inline"] = true;
+
+    JsonObject f3 = fields.createNestedObject();
+    f3["name"] = "時刻";
+    f3["value"] = timestamp;
+    f3["inline"] = false;
+
+    String json;
+    serializeJson(doc, json);
     return json;
 }
 
@@ -151,18 +175,32 @@ String WebhookManager::buildSlackPayload(int ch, bool active, const String& time
     String emoji = active ? "🚨" : "✅";
     String color = active ? "danger" : "good";
 
-    String json = "{";
-    json += "\"text\":\"" + emoji + " *" + cfg.name + "* が *" + state + "* になりました\",";
-    json += "\"attachments\":[{";
-    json += "\"color\":\"" + color + "\",";
-    json += "\"fields\":[";
-    json += "{\"title\":\"チャンネル\",\"value\":\"" + cfg.name + " (ch" + String(ch) + ")\",\"short\":true},";
-    json += "{\"title\":\"状態\",\"value\":\"" + state + "\",\"short\":true},";
-    json += "{\"title\":\"時刻\",\"value\":\"" + timestamp + "\",\"short\":false}";
-    json += "]";
-    json += "}]";
-    json += "}";
+    JsonDocument doc;
+    doc["text"] = emoji + " *" + cfg.name + "* が *" + state + "* になりました";
 
+    JsonArray attachments = doc.createNestedArray("attachments");
+    JsonObject attachment = attachments.createNestedObject();
+    attachment["color"] = color;
+
+    JsonArray fields = attachment.createNestedArray("fields");
+
+    JsonObject f1 = fields.createNestedObject();
+    f1["title"] = "チャンネル";
+    f1["value"] = cfg.name + " (ch" + String(ch) + ")";
+    f1["short"] = true;
+
+    JsonObject f2 = fields.createNestedObject();
+    f2["title"] = "状態";
+    f2["value"] = state;
+    f2["short"] = true;
+
+    JsonObject f3 = fields.createNestedObject();
+    f3["title"] = "時刻";
+    f3["value"] = timestamp;
+    f3["short"] = false;
+
+    String json;
+    serializeJson(doc, json);
     return json;
 }
 
@@ -170,17 +208,18 @@ String WebhookManager::buildGenericPayload(int ch, bool active, const String& ti
     ChannelManager::ChannelConfig cfg = channels_->getConfig(ch);
     String state = channels_->getStateString(ch);
 
-    String json = "{";
-    json += "\"device_id\":\"" + lacisId_ + "\",";
-    json += "\"device_name\":\"" + deviceName_ + "\",";
-    json += "\"event\":\"state_change\",";
-    json += "\"channel\":" + String(ch) + ",";
-    json += "\"channel_name\":\"" + cfg.name + "\",";
-    json += "\"state\":\"" + state + "\",";
-    json += "\"active\":" + String(active ? "true" : "false") + ",";
-    json += "\"timestamp\":\"" + timestamp + "\"";
-    json += "}";
+    JsonDocument doc;
+    doc["device_id"] = lacisId_;
+    doc["device_name"] = deviceName_;
+    doc["event"] = "state_change";
+    doc["channel"] = ch;
+    doc["channel_name"] = cfg.name;
+    doc["state"] = state;
+    doc["active"] = active;
+    doc["timestamp"] = timestamp;
 
+    String json;
+    serializeJson(doc, json);
     return json;
 }
 

@@ -94,7 +94,7 @@ private:
     int rawState_;
     int stableState_;
     unsigned long lastSampleMs_;
-    int stableCount_;
+    unsigned long stableStartMs_;  // rawStateが安定し始めた時刻
     bool changed_;
     std::function<void(bool)> onChangeCallback_;
 

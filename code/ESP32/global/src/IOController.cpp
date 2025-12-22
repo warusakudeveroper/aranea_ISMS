@@ -16,7 +16,7 @@ IOController::IOController()
     , rawState_(HIGH)
     , stableState_(HIGH)
     , lastSampleMs_(0)
-    , stableCount_(0)
+    , stableStartMs_(0)
     , changed_(false)
     , onChangeCallback_(nullptr)
     , currentOutput_(false)
@@ -128,9 +128,8 @@ void IOController::transitionToInput() {
     // 4. 状態変数を初期化
     rawState_ = digitalRead(pin_);
     stableState_ = rawState_;
-    stableCount_ = 0;
+    stableStartMs_ = millis();
     changed_ = false;
-    lastSampleMs_ = millis();
 }
 
 void IOController::transitionToOutput() {
@@ -177,19 +176,12 @@ void IOController::sample() {
     if (pin_ < 0) return;
 
     unsigned long now = millis();
-
-    // 1msサンプリング間隔
-    if (now - lastSampleMs_ < 1) return;
-    lastSampleMs_ = now;
-
     int current = digitalRead(pin_);
 
     if (current == rawState_) {
-        // 同じ値が続いている
-        stableCount_++;
-
-        // デバウンス時間経過でstableState更新
-        if (stableCount_ >= debounceMs_ && current != stableState_) {
+        // 同じ値が続いている - 経過時間をチェック
+        if (current != stableState_ && (now - stableStartMs_) >= (unsigned long)debounceMs_) {
+            // デバウンス時間経過でstableState更新
             stableState_ = current;
             changed_ = true;
 
@@ -198,9 +190,9 @@ void IOController::sample() {
             }
         }
     } else {
-        // 値が変わった、カウンタリセット
+        // 値が変わった、開始時刻をリセット
         rawState_ = current;
-        stableCount_ = 0;
+        stableStartMs_ = now;
     }
 }
 

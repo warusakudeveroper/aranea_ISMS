@@ -8,6 +8,7 @@
 #include "ChannelManager.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
 
 // 最小送信間隔（連続送信防止）
 static const unsigned long MIN_SEND_INTERVAL_MS = 1000;
@@ -110,45 +111,40 @@ String StateReporterIs05a::buildLocalPayload() {
     int rssi = WiFi.RSSI();
     String ssid = WiFi.SSID();
 
-    String json = "{";
-
-    // observedAt
-    json += "\"observedAt\":\"" + observedAt + "\",";
+    JsonDocument doc;
+    doc["observedAt"] = observedAt;
 
     // sensor
-    json += "\"sensor\":{";
-    json += "\"lacisId\":\"" + lacisId_ + "\",";
-    json += "\"mac\":\"" + mac_ + "\",";
-    json += "\"productType\":\"005\",";
-    json += "\"productCode\":\"0001\"";
-    json += "},";
+    JsonObject sensor = doc.createNestedObject("sensor");
+    sensor["lacisId"] = lacisId_;
+    sensor["mac"] = mac_;
+    sensor["productType"] = "005";
+    sensor["productCode"] = "0001";
 
     // state
-    json += "\"state\":{";
+    JsonObject state = doc.createNestedObject("state");
     for (int ch = 1; ch <= 8; ch++) {
         String chKey = "ch" + String(ch);
-        json += "\"" + chKey + "\":\"" + channels_->getStateString(ch) + "\",";
-        json += "\"" + chKey + "_lastUpdatedAt\":\"" + channels_->getLastUpdatedAt(ch) + "\",";
+        state[chKey] = channels_->getStateString(ch);
+        state[chKey + "_lastUpdatedAt"] = channels_->getLastUpdatedAt(ch);
     }
-    json += "\"rssi\":\"" + String(rssi) + "\",";
-    json += "\"ipaddr\":\"" + ip + "\",";
-    json += "\"SSID\":\"" + ssid + "\"";
-    json += "},";
+    state["rssi"] = String(rssi);
+    state["ipaddr"] = ip;
+    state["SSID"] = ssid;
 
     // meta
-    json += "\"meta\":{";
-    json += "\"observedAt\":\"" + observedAt + "\",";
-    json += "\"direct\":true";
-    json += "},";
+    JsonObject meta = doc.createNestedObject("meta");
+    meta["observedAt"] = observedAt;
+    meta["direct"] = true;
 
     // gateway
-    json += "\"gateway\":{";
-    json += "\"lacisId\":\"" + lacisId_ + "\",";
-    json += "\"ip\":\"" + ip + "\",";
-    json += "\"rssi\":" + String(rssi);
-    json += "}";
+    JsonObject gateway = doc.createNestedObject("gateway");
+    gateway["lacisId"] = lacisId_;
+    gateway["ip"] = ip;
+    gateway["rssi"] = rssi;
 
-    json += "}";
+    String json;
+    serializeJson(doc, json);
     return json;
 }
 
@@ -157,33 +153,29 @@ String StateReporterIs05a::buildCloudPayload() {
         ? ntp_->getIso8601()
         : "1970-01-01T00:00:00Z";
 
-    String json = "{";
+    JsonDocument doc;
 
     // auth
-    json += "\"auth\":{";
-    json += "\"tid\":\"" + tid_ + "\",";
-    json += "\"lacisId\":\"" + lacisId_ + "\",";
-    json += "\"cic\":\"" + cic_ + "\"";
-    json += "},";
+    JsonObject auth = doc.createNestedObject("auth");
+    auth["tid"] = tid_;
+    auth["lacisId"] = lacisId_;
+    auth["cic"] = cic_;
 
     // report
-    json += "\"report\":{";
-    json += "\"lacisId\":\"" + lacisId_ + "\",";
-    json += "\"type\":\"aranea_ar-is05a\",";
-    json += "\"observedAt\":\"" + observedAt + "\",";
+    JsonObject report = doc.createNestedObject("report");
+    report["lacisId"] = lacisId_;
+    report["type"] = "aranea_ar-is05a";
+    report["observedAt"] = observedAt;
 
     // state
-    json += "\"state\":{";
+    JsonObject state = report.createNestedObject("state");
     for (int ch = 1; ch <= 8; ch++) {
         String chKey = "ch" + String(ch);
-        json += "\"" + chKey + "\":\"" + channels_->getStateString(ch) + "\"";
-        if (ch < 8) json += ",";
+        state[chKey] = channels_->getStateString(ch);
     }
-    json += "}";  // state
 
-    json += "}";  // report
-    json += "}";
-
+    String json;
+    serializeJson(doc, json);
     return json;
 }
 
