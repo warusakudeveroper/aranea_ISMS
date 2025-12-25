@@ -1,0 +1,207 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is05a.json",
+  "title": "ISMS_ar-is05a 8-Channel Detector",
+  "description": "8ch入力検出器（ch7-8はI/O切替可能）",
+  "type": "object",
+
+  "metadata": {
+    "productType": "005",
+    "productCodes": ["0001", "0096"],
+    "displayName": "8-Channel Detector",
+    "capabilities": ["detector", "webhook", "output", "rules"],
+    "semanticTags": ["検出", "窓", "ドア", "Webhook"],
+    "features": [
+      "8ch GPIO入力",
+      "ch7/ch8 出力切替可能",
+      "Webhook通知",
+      "トリガールール",
+      "Web UI",
+      "OTA対応"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["channels"],
+    "properties": {
+      "channels": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "required": ["ch", "active"],
+          "properties": {
+            "ch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "channels": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "properties": {
+            "ch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            },
+            "pin": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "meaning": {
+              "type": "string",
+              "enum": ["open", "close"],
+              "description": "HIGH時の意味"
+            },
+            "debounceMs": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 10000,
+              "default": 50
+            },
+            "isOutput": {
+              "type": "boolean",
+              "default": false,
+              "description": "出力モード (ch7/ch8のみ)"
+            }
+          }
+        }
+      },
+      "webhook": {
+        "type": "object",
+        "properties": {
+          "discord": {
+            "type": "string",
+            "format": "uri"
+          },
+          "slack": {
+            "type": "string",
+            "format": "uri"
+          },
+          "generic": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "rules": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "$ref": "#/definitions/Rule"
+        }
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "setOutput": {
+        "type": "object",
+        "required": ["ch", "active"],
+        "properties": {
+          "ch": {
+            "type": "integer",
+            "enum": [7, 8],
+            "description": "出力チャンネル (7 or 8)"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "pulse": {
+        "type": "object",
+        "required": ["ch"],
+        "properties": {
+          "ch": {
+            "type": "integer",
+            "enum": [7, 8]
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 100,
+            "default": 1000
+          }
+        }
+      }
+    }
+  },
+
+  "definitions": {
+    "Rule": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "srcMask": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "入力チャンネルマスク (bit0=ch1)"
+        },
+        "outMask": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 192,
+          "description": "出力チャンネルマスク (bit6=ch7, bit7=ch8)"
+        },
+        "pulseMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "パルス持続時間 (0=持続)"
+        },
+        "webhookMask": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7,
+          "description": "Webhook送信先 (bit0=discord, bit1=slack, bit2=generic)"
+        },
+        "stateCond": {
+          "type": "integer",
+          "enum": [0, 1, 2],
+          "description": "0=any, 1=open時, 2=close時"
+        },
+        "cooldownMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000,
+          "default": 0,
+          "description": "クールダウン時間"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is10.json",
+  "title": "ISMS_ar-is10 Router Inspector",
+  "description": "ルーター検査デバイス",
+  "type": "object",
+
+  "metadata": {
+    "productType": "010",
+    "productCodes": ["0001", "0002", "0096"],
+    "displayName": "Router Inspector",
+    "capabilities": ["router", "ssh", "monitor"],
+    "semanticTags": ["ルーター", "ネットワーク", "監視"],
+    "features": [
+      "ルーターSSH接続",
+      "接続状態監視",
+      "帯域監視",
+      "Web UI",
+      "OTA対応"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["router"],
+    "properties": {
+      "router": {
+        "type": "object",
+        "properties": {
+          "connected": {
+            "type": "boolean",
+            "description": "SSH接続状態"
+          },
+          "lastCheck": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "uptime": {
+            "type": "integer",
+            "description": "ルーター稼働時間 (秒)"
+          },
+          "wanIp": {
+            "type": "string",
+            "description": "WAN側IPアドレス"
+          },
+          "lanClients": {
+            "type": "integer",
+            "description": "LAN側接続クライアント数"
+          }
+        }
+      },
+      "network": {
+        "type": "object",
+        "properties": {
+          "rxBytes": {
+            "type": "integer",
+            "description": "受信バイト数"
+          },
+          "txBytes": {
+            "type": "integer",
+            "description": "送信バイト数"
+          },
+          "rxRate": {
+            "type": "number",
+            "description": "受信レート (bps)"
+          },
+          "txRate": {
+            "type": "number",
+            "description": "送信レート (bps)"
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "router": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "ルーターIPアドレス"
+          },
+          "port": {
+            "type": "integer",
+            "default": 22
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "checkInterval": {
+        "type": "integer",
+        "minimum": 10000,
+        "maximum": 600000,
+        "default": 60000,
+        "description": "チェック間隔 (ms)"
+      },
+      "reportInterval": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 3600000,
+        "default": 300000,
+        "description": "レポート間隔 (ms)"
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "reconnect": {
+        "type": "object",
+        "properties": {},
+        "description": "SSH再接続"
+      },
+      "reboot": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "確認フラグ (必須)"
+          }
+        },
+        "required": ["confirm"],
+        "description": "ルーター再起動"
+      }
+    }
+  }
+}

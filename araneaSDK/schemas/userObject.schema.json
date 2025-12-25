@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/userObject.json",
+  "title": "araneaDevice userObject",
+  "description": "araneaDeviceのデバイス登録情報スキーマ",
+  "type": "object",
+  "required": ["lacis", "activity", "device"],
+  "properties": {
+    "lacis": {
+      "type": "object",
+      "required": ["type_domain", "type", "tid", "permission", "cic_code", "cic_active"],
+      "properties": {
+        "type_domain": {
+          "type": "string",
+          "const": "araneaDevice"
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^ISMS_ar-[a-zA-Z0-9]+$",
+          "description": "デバイスタイプ (e.g., ISMS_ar-is04a)"
+        },
+        "tid": {
+          "type": "string",
+          "pattern": "^T[0-9]{19}$|^T[0-9]{12}[a-zA-Z0-9]{7}$|^[0-9]{20}$",
+          "description": "テナントID"
+        },
+        "permission": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 100,
+          "default": 10,
+          "description": "権限レベル (デバイスは固定10)"
+        },
+        "cic_code": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$",
+          "description": "6桁認証コード"
+        },
+        "cic_active": {
+          "type": "boolean",
+          "description": "CIC有効フラグ"
+        }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "required": ["created_at", "lastUpdated_at"],
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "作成日時"
+        },
+        "lastUpdated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "最終更新日時"
+        },
+        "Ordination_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "施設割当日時"
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "required": ["macAddress", "productType", "productCode"],
+      "properties": {
+        "macAddress": {
+          "type": "string",
+          "pattern": "^[0-9A-F]{12}$",
+          "description": "MACアドレス (12桁HEX大文字)"
+        },
+        "productType": {
+          "type": "string",
+          "pattern": "^[0-9]{3}$",
+          "description": "製品タイプ (3桁数字)"
+        },
+        "productCode": {
+          "type": "string",
+          "pattern": "^[0-9]{4}$",
+          "description": "製品コード (4桁数字)"
+        }
+      }
+    },
+    "fid": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "施設ID配列"
+    }
+  }
+}

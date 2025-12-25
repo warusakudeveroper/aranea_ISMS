@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is01.json",
+  "title": "ISMS_ar-is01 Temperature & Humidity Sensor",
+  "description": "電池式温湿度センサー（BLEアドバタイズ）",
+  "type": "object",
+
+  "metadata": {
+    "productType": "001",
+    "productCodes": ["0001", "0096"],
+    "displayName": "Temperature & Humidity Sensor",
+    "capabilities": ["temperature", "humidity", "battery"],
+    "semanticTags": ["温度", "湿度", "電池", "BLE"],
+    "features": [
+      "BLE Advertise (送信のみ)",
+      "DeepSleep運用",
+      "CR2032 × 1",
+      "OTA不可"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["Temperature", "Humidity"],
+    "properties": {
+      "Temperature": {
+        "type": "number",
+        "minimum": -20,
+        "maximum": 60,
+        "description": "温度 (°C)"
+      },
+      "Humidity": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "description": "湿度 (%)"
+      },
+      "BatteryLevel": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100,
+        "description": "バッテリー残量 (%)"
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "measureInterval": {
+        "type": "integer",
+        "minimum": 10000,
+        "maximum": 3600000,
+        "default": 60000,
+        "description": "計測間隔 (ms)"
+      }
+    }
+  }
+}

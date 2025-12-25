@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/deviceStateReport.json",
+  "title": "deviceStateReport Request",
+  "description": "デバイス状態レポートのリクエストスキーマ",
+  "type": "object",
+  "required": ["auth", "report"],
+  "properties": {
+    "auth": {
+      "type": "object",
+      "required": ["tid", "lacisId", "cic"],
+      "properties": {
+        "tid": {
+          "type": "string",
+          "pattern": "^T[0-9]{19}$|^T[0-9]{12}[a-zA-Z0-9]{7}$|^[0-9]{20}$",
+          "description": "テナントID"
+        },
+        "lacisId": {
+          "type": "string",
+          "pattern": "^[0-9]{20}$",
+          "description": "LacisID (20桁)"
+        },
+        "cic": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$",
+          "description": "CIC認証コード (6桁)"
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "required": ["type", "state"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "pattern": "^ISMS_ar-[a-zA-Z0-9]+$",
+          "description": "デバイスタイプ"
+        },
+        "state": {
+          "type": "object",
+          "description": "タイプ別状態オブジェクト"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "観測日時 (省略時はサーバー時刻)"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "firmwareVersion": {
+              "type": "string",
+              "description": "ファームウェアバージョン"
+            },
+            "rssi": {
+              "type": "integer",
+              "minimum": -100,
+              "maximum": 0,
+              "description": "WiFi信号強度"
+            },
+            "heap": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "空きヒープメモリ (bytes)"
+            },
+            "uptime": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "稼働時間 (秒)"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "response": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "処理成功フラグ"
+        },
+        "duplicate": {
+          "type": "boolean",
+          "description": "重複検出フラグ"
+        },
+        "dedupHash": {
+          "type": "string",
+          "description": "重複排除ハッシュ"
+        },
+        "bigQueryRowId": {
+          "type": "string",
+          "description": "BigQuery挿入ID"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

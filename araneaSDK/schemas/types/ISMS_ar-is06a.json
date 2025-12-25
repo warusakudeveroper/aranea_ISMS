@@ -1,0 +1,160 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is06a.json",
+  "title": "ISMS_ar-is06a 6-Channel Output Controller",
+  "description": "6ch出力コントローラー（PWM対応）",
+  "type": "object",
+
+  "metadata": {
+    "productType": "006",
+    "productCodes": ["0001", "0096"],
+    "displayName": "6-Channel Output Controller",
+    "capabilities": ["output", "pwm", "trigger"],
+    "semanticTags": ["接点出力", "PWM", "リレー"],
+    "features": [
+      "6ch GPIO出力",
+      "PWM制御対応",
+      "トリガールール",
+      "Web UI",
+      "OTA対応"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["outputs"],
+    "properties": {
+      "outputs": {
+        "type": "array",
+        "minItems": 6,
+        "maxItems": 6,
+        "items": {
+          "type": "object",
+          "required": ["ch", "active"],
+          "properties": {
+            "ch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "pwmValue": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255,
+              "description": "PWM値 (0-255)"
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "outputs": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+          "type": "object",
+          "properties": {
+            "ch": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "pin": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "isPwm": {
+              "type": "boolean",
+              "default": false,
+              "description": "PWMモード"
+            },
+            "pulseMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000,
+              "default": 0,
+              "description": "パルス持続時間 (0=持続)"
+            }
+          }
+        }
+      },
+      "triggers": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "srcLacisId": { "type": "string" },
+            "srcChannel": { "type": "integer" },
+            "dstChannel": { "type": "integer" },
+            "action": {
+              "type": "string",
+              "enum": ["pulse", "on", "off", "toggle"]
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "set": {
+        "type": "object",
+        "required": ["ch"],
+        "properties": {
+          "ch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "pwmValue": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      },
+      "pulse": {
+        "type": "object",
+        "required": ["ch"],
+        "properties": {
+          "ch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 100,
+            "default": 1000
+          }
+        }
+      },
+      "allOff": {
+        "type": "object",
+        "properties": {},
+        "description": "全チャンネルOFF"
+      }
+    }
+  }
+}

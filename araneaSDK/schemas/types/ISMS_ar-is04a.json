@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is04a.json",
+  "title": "ISMS_ar-is04a Window & Door Controller",
+  "description": "2ch物理入力 + 2ch接点出力コントローラー",
+  "type": "object",
+
+  "metadata": {
+    "productType": "004",
+    "productCodes": ["0001", "0096"],
+    "displayName": "Window & Door Controller",
+    "capabilities": ["output", "input", "pulse", "trigger"],
+    "semanticTags": ["窓", "ドア", "接点出力", "物理入力"],
+    "features": [
+      "2ch GPIO入力 (デバウンス付き)",
+      "2ch GPIO出力 (パルス/持続)",
+      "トリガーアサイン",
+      "インターロック機能",
+      "Web UI",
+      "OTA対応"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["output1", "output2"],
+    "properties": {
+      "output1": {
+        "type": "object",
+        "properties": {
+          "active": { "type": "boolean" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["active"]
+      },
+      "output2": {
+        "type": "object",
+        "properties": {
+          "active": { "type": "boolean" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["active"]
+      },
+      "input1": {
+        "type": "object",
+        "properties": {
+          "active": { "type": "boolean" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "input2": {
+        "type": "object",
+        "properties": {
+          "active": { "type": "boolean" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "pulseMs": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 60000,
+        "default": 3000,
+        "description": "パルス持続時間 (ms)"
+      },
+      "interlockMs": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10000,
+        "default": 200,
+        "description": "インターロック時間 (ms)"
+      },
+      "debounceMs": {
+        "type": "integer",
+        "minimum": 5,
+        "maximum": 10000,
+        "default": 50,
+        "description": "デバウンス時間 (ms)"
+      },
+      "input1Pin": {
+        "type": "integer",
+        "default": 5
+      },
+      "input2Pin": {
+        "type": "integer",
+        "default": 18
+      },
+      "output1Pin": {
+        "type": "integer",
+        "default": 12
+      },
+      "output2Pin": {
+        "type": "integer",
+        "default": 14
+      },
+      "triggerAssign": {
+        "type": "object",
+        "properties": {
+          "input1": {
+            "type": "integer",
+            "enum": [0, 1, 2],
+            "description": "0=無効, 1=output1, 2=output2"
+          },
+          "input2": {
+            "type": "integer",
+            "enum": [0, 1, 2],
+            "description": "0=無効, 1=output1, 2=output2"
+          }
+        }
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "pulse": {
+        "type": "object",
+        "required": ["output"],
+        "properties": {
+          "output": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "対象出力チャンネル"
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 100,
+            "description": "パルス持続時間 (省略時はconfigのpulseMs)"
+          }
+        }
+      },
+      "set": {
+        "type": "object",
+        "required": ["output", "active"],
+        "properties": {
+          "output": {
+            "type": "integer",
+            "enum": [1, 2]
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}
