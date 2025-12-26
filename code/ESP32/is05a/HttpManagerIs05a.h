@@ -13,6 +13,7 @@
 
 class ChannelManager;
 class WebhookManager;
+class RuleManager;
 
 class HttpManagerIs05a : public AraneaWebUI {
 public:
@@ -22,7 +23,7 @@ public:
      * 初期化（拡張版）
      */
     void begin(SettingManager* settings, ChannelManager* channels,
-               WebhookManager* webhooks, int port = 80);
+               WebhookManager* webhooks, RuleManager* rules, int port = 80);
 
     /**
      * チャンネルステータス更新（OLED用）
@@ -45,9 +46,14 @@ protected:
     void registerTypeSpecificEndpoints() override;
     void getTypeSpecificConfig(JsonObject& obj) override;
 
+    // SpeedDial
+    String generateTypeSpecificSpeedDial() override;
+    bool applyTypeSpecificSpeedDial(const String& section, const std::vector<String>& lines) override;
+
 private:
     ChannelManager* channels_;
     WebhookManager* webhooks_;
+    RuleManager* rules_;
 
     // ステータス
     int lastChangedChannel_;
@@ -63,6 +69,9 @@ private:
     void handlePulse();
     void handleWebhookConfig();
     void handleWebhookTest();
+    void handleRules();
+    void handleRuleSave();
+    void handleRuleDelete();
 };
 
 #endif // HTTP_MANAGER_IS05A_H

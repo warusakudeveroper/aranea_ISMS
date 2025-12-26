@@ -40,6 +40,22 @@ void AraneaWebUI::begin(SettingManager* settings, int port) {
   server_->on("/api/system/settings", HTTP_POST, [this]() { handleSaveSystem(); });
   server_->on("/api/system/reboot", HTTP_POST, [this]() { handleReboot(); });
   server_->on("/api/system/factory-reset", HTTP_POST, [this]() { handleFactoryReset(); });
+
+  // SpeedDial API
+  server_->on("/api/speeddial", HTTP_GET, [this]() { handleSpeedDialGet(); });
+  server_->on("/api/speeddial", HTTP_POST, [this]() { handleSpeedDialPost(); });
+
+  // WiFi操作API
+  server_->on("/api/wifi/list", HTTP_GET, [this]() { handleWifiList(); });
+  server_->on("/api/wifi/add", HTTP_POST, [this]() { handleWifiAdd(); });
+  server_->on("/api/wifi/delete", HTTP_POST, [this]() { handleWifiDelete(); });
+  server_->on("/api/wifi/move", HTTP_POST, [this]() { handleWifiMove(); });
+  server_->on("/api/wifi/connect", HTTP_POST, [this]() { handleWifiConnect(); });
+  server_->on("/api/wifi/scan", HTTP_POST, [this]() { handleWifiScan(); });
+  server_->on("/api/wifi/scan/result", HTTP_GET, [this]() { handleWifiScanResult(); });
+  server_->on("/api/wifi/reset", HTTP_POST, [this]() { handleWifiReset(); });
+  server_->on("/api/wifi/auto", HTTP_POST, [this]() { handleWifiAuto(); });
+
   server_->onNotFound([this]() { handleNotFound(); });
 
   // 派生クラスの独自エンドポイント登録
@@ -555,6 +571,588 @@ void AraneaWebUI::handleFactoryReset() {
 // ========================================
 void AraneaWebUI::handleNotFound() {
   server_->send(404, "application/json", "{\"ok\":false,\"error\":\"Not Found\"}");
+}
+
+// ========================================
+// SpeedDial API - GET
+// ========================================
+void AraneaWebUI::handleSpeedDialGet() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  String text = generateSpeedDialText();
+  server_->send(200, "text/plain; charset=utf-8", text);
+}
+
+// ========================================
+// SpeedDial API - POST
+// ========================================
+void AraneaWebUI::handleSpeedDialPost() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  String body = server_->arg("plain");
+  std::vector<String> errors;
+
+  // INIパース
+  String currentSection = "";
+  std::vector<String> currentLines;
+
+  int start = 0;
+  while (start < (int)body.length()) {
+    int end = body.indexOf('\n', start);
+    if (end < 0) end = body.length();
+
+    String line = body.substring(start, end);
+    line.trim();
+    start = end + 1;
+
+    // 空行・コメントスキップ
+    if (line.length() == 0 || line[0] == '#' || line[0] == ';') continue;
+
+    // セクションヘッダ
+    if (line[0] == '[' && line.indexOf(']') > 0) {
+      // 前のセクションを適用
+      if (currentSection.length() > 0 && currentLines.size() > 0) {
+        if (!applySpeedDialSection(currentSection, currentLines)) {
+          errors.push_back("Section [" + currentSection + "] apply failed");
+        }
+      }
+
+      currentSection = line.substring(1, line.indexOf(']'));
+      currentLines.clear();
+      continue;
+    }
+
+    // key=value行
+    if (line.indexOf('=') > 0) {
+      currentLines.push_back(line);
+    }
+  }
+
+  // 最後のセクションを適用
+  if (currentSection.length() > 0 && currentLines.size() > 0) {
+    if (!applySpeedDialSection(currentSection, currentLines)) {
+      errors.push_back("Section [" + currentSection + "] apply failed");
+    }
+  }
+
+  if (settingsChangedCallback_) settingsChangedCallback_();
+
+  DynamicJsonDocument doc(512);
+  doc["ok"] = errors.size() == 0;
+  if (errors.size() > 0) {
+    JsonArray errArr = doc.createNestedArray("errors");
+    for (const auto& e : errors) errArr.add(e);
+  }
+
+  String response;
+  serializeJson(doc, response);
+  server_->send(errors.size() == 0 ? 200 : 400, "application/json", response);
+}
+
+// ========================================
+// SpeedDial INIテキスト生成
+// ========================================
+String AraneaWebUI::generateSpeedDialText() {
+  String text = "";
+
+  // [Device] セクション（読み取り専用情報）
+  text += "[Device]\n";
+  text += "type=" + deviceInfo_.deviceType + "\n";
+  text += "lacisId=" + deviceInfo_.lacisId + "\n";
+  text += "cic=" + deviceInfo_.cic + "\n";
+  text += "mac=" + deviceInfo_.mac + "\n";
+  text += "version=" + deviceInfo_.firmwareVersion + "\n";
+  text += "uiVersion=" + String(ARANEA_UI_VERSION) + "\n";
+  text += "\n";
+
+  // [WiFi] セクション（6スロット）
+  text += "[WiFi]\n";
+  for (int i = 0; i < 6; i++) {
+    String ssid = settings_->getString(("wifi_ssid" + String(i + 1)).c_str(), "");
+    if (ssid.length() > 0) {
+      text += "ssid" + String(i + 1) + "=" + ssid + "\n";
+      text += "pass" + String(i + 1) + "=********\n";
+    }
+  }
+  text += "hostname=" + settings_->getString("hostname", deviceInfo_.hostname) + "\n";
+  text += "\n";
+
+  // [NTP] セクション
+  text += "[NTP]\n";
+  text += "server=" + settings_->getString("ntp_server", "pool.ntp.org") + "\n";
+  text += "\n";
+
+  // [Cloud] セクション
+  text += "[Cloud]\n";
+  text += "gateUrl=" + settings_->getString("gate_url", "") + "\n";
+  text += "stateReportUrl=" + settings_->getString("state_report_url", "") + "\n";
+  text += "relayPrimary=" + settings_->getString("relay_pri", "") + "\n";
+  text += "relaySecondary=" + settings_->getString("relay_sec", "") + "\n";
+  text += "\n";
+
+  // [Tenant] セクション
+  text += "[Tenant]\n";
+  text += "tid=" + settings_->getString("tid", "") + "\n";
+  text += "fid=" + settings_->getString("fid", "") + "\n";
+  text += "lacisId=" + settings_->getString("tenant_lacisid", "") + "\n";
+  text += "email=" + settings_->getString("tenant_email", "") + "\n";
+  text += "cic=" + settings_->getString("tenant_cic", "") + "\n";
+  text += "\n";
+
+  // [System] セクション
+  text += "[System]\n";
+  text += "deviceName=" + settings_->getString("device_name", "") + "\n";
+  text += "rebootEnabled=" + String(settings_->getBool("reboot_enabled", false) ? "true" : "false") + "\n";
+  text += "rebootTime=" + settings_->getString("reboot_time", "03:00") + "\n";
+  text += "\n";
+
+  // デバイス固有セクション（派生クラスで実装）
+  text += generateTypeSpecificSpeedDial();
+
+  return text;
+}
+
+// ========================================
+// SpeedDialセクション適用
+// ========================================
+bool AraneaWebUI::applySpeedDialSection(const String& section, const std::vector<String>& lines) {
+  // key=value をパースするラムダ
+  auto parseLine = [](const String& line, String& key, String& value) -> bool {
+    int eq = line.indexOf('=');
+    if (eq <= 0) return false;
+    key = line.substring(0, eq);
+    value = line.substring(eq + 1);
+    key.trim();
+    value.trim();
+    return true;
+  };
+
+  if (section == "Device") {
+    // 読み取り専用、無視
+    return true;
+  }
+
+  if (section == "WiFi") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+
+      // ssid1-6, pass1-6, hostname
+      for (int i = 1; i <= 6; i++) {
+        if (key == "ssid" + String(i)) {
+          settings_->setString(("wifi_ssid" + String(i)).c_str(), value);
+        } else if (key == "pass" + String(i)) {
+          if (value.length() > 0 && value != "********") {
+            settings_->setString(("wifi_pass" + String(i)).c_str(), value);
+          }
+        }
+      }
+      if (key == "hostname") {
+        settings_->setString("hostname", value);
+      }
+    }
+    return true;
+  }
+
+  if (section == "NTP") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+      if (key == "server") {
+        settings_->setString("ntp_server", value);
+      }
+    }
+    return true;
+  }
+
+  if (section == "Cloud") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+      if (key == "gateUrl") settings_->setString("gate_url", value);
+      else if (key == "stateReportUrl") settings_->setString("state_report_url", value);
+      else if (key == "relayPrimary") settings_->setString("relay_pri", value);
+      else if (key == "relaySecondary") settings_->setString("relay_sec", value);
+    }
+    return true;
+  }
+
+  if (section == "Tenant") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+
+      // バリデーション付き保存
+      if (key == "tid") {
+        if (value.length() > 0 && !validateTid(value)) {
+          Serial.printf("[WebUI] Invalid TID: %s\n", value.c_str());
+          continue;
+        }
+        settings_->setString("tid", value);
+      }
+      else if (key == "fid") {
+        if (value.length() > 0 && !validateFid(value)) {
+          Serial.printf("[WebUI] Invalid FID: %s\n", value.c_str());
+          continue;
+        }
+        settings_->setString("fid", value);
+      }
+      else if (key == "lacisId") {
+        if (value.length() > 0 && !validateLacisId(value)) {
+          Serial.printf("[WebUI] Invalid lacisId: %s\n", value.c_str());
+          continue;
+        }
+        settings_->setString("tenant_lacisid", value);
+      }
+      else if (key == "email") settings_->setString("tenant_email", value);
+      else if (key == "cic") settings_->setString("tenant_cic", value);
+    }
+    return true;
+  }
+
+  if (section == "System") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+
+      if (key == "deviceName") {
+        String oldName = settings_->getString("device_name", "");
+        if (oldName != value) {
+          settings_->setString("device_name", value);
+          if (deviceNameChangedCallback_) deviceNameChangedCallback_();
+        }
+      }
+      else if (key == "rebootEnabled") {
+        settings_->setBool("reboot_enabled", value == "true" || value == "1");
+      }
+      else if (key == "rebootTime") {
+        settings_->setString("reboot_time", value);
+      }
+    }
+    return true;
+  }
+
+  // デバイス固有セクション（派生クラスで処理）
+  return applyTypeSpecificSpeedDial(section, lines);
+}
+
+// ========================================
+// WiFi API - リスト取得
+// ========================================
+void AraneaWebUI::handleWifiList() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  DynamicJsonDocument doc(1024);
+  doc["ok"] = true;
+  JsonArray arr = doc.createNestedArray("wifi");
+
+  for (int i = 0; i < 6; i++) {
+    String ssid = settings_->getString(("wifi_ssid" + String(i + 1)).c_str(), "");
+    String pass = settings_->getString(("wifi_pass" + String(i + 1)).c_str(), "");
+
+    JsonObject obj = arr.createNestedObject();
+    obj["slot"] = i + 1;
+    obj["ssid"] = ssid;
+    obj["hasPassword"] = pass.length() > 0;
+  }
+
+  String response;
+  serializeJson(doc, response);
+  server_->send(200, "application/json", response);
+}
+
+// ========================================
+// WiFi API - 追加
+// ========================================
+void AraneaWebUI::handleWifiAdd() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, server_->arg("plain"));
+  if (err) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  String ssid = doc["ssid"] | "";
+  String pass = doc["password"] | "";
+  int slot = doc["slot"] | 0;
+
+  if (ssid.length() == 0) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"SSID required\"}");
+    return;
+  }
+
+  // スロット指定がなければ空きスロットを探す
+  if (slot <= 0 || slot > 6) {
+    for (int i = 1; i <= 6; i++) {
+      String existing = settings_->getString(("wifi_ssid" + String(i)).c_str(), "");
+      if (existing.length() == 0) {
+        slot = i;
+        break;
+      }
+    }
+  }
+
+  if (slot <= 0 || slot > 6) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No empty slot\"}");
+    return;
+  }
+
+  settings_->setString(("wifi_ssid" + String(slot)).c_str(), ssid);
+  settings_->setString(("wifi_pass" + String(slot)).c_str(), pass);
+
+  if (settingsChangedCallback_) settingsChangedCallback_();
+
+  DynamicJsonDocument resp(128);
+  resp["ok"] = true;
+  resp["slot"] = slot;
+  String response;
+  serializeJson(resp, response);
+  server_->send(200, "application/json", response);
+}
+
+// ========================================
+// WiFi API - 削除
+// ========================================
+void AraneaWebUI::handleWifiDelete() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, server_->arg("plain"));
+  if (err) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  int slot = doc["slot"] | 0;
+  if (slot < 1 || slot > 6) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid slot (1-6)\"}");
+    return;
+  }
+
+  settings_->setString(("wifi_ssid" + String(slot)).c_str(), "");
+  settings_->setString(("wifi_pass" + String(slot)).c_str(), "");
+
+  if (settingsChangedCallback_) settingsChangedCallback_();
+  server_->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ========================================
+// WiFi API - 順序移動
+// ========================================
+void AraneaWebUI::handleWifiMove() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, server_->arg("plain"));
+  if (err) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  int from = doc["from"] | 0;
+  int to = doc["to"] | 0;
+
+  if (from < 1 || from > 6 || to < 1 || to > 6 || from == to) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid from/to (1-6)\"}");
+    return;
+  }
+
+  // スワップ
+  String ssidFrom = settings_->getString(("wifi_ssid" + String(from)).c_str(), "");
+  String passFrom = settings_->getString(("wifi_pass" + String(from)).c_str(), "");
+  String ssidTo = settings_->getString(("wifi_ssid" + String(to)).c_str(), "");
+  String passTo = settings_->getString(("wifi_pass" + String(to)).c_str(), "");
+
+  settings_->setString(("wifi_ssid" + String(from)).c_str(), ssidTo);
+  settings_->setString(("wifi_pass" + String(from)).c_str(), passTo);
+  settings_->setString(("wifi_ssid" + String(to)).c_str(), ssidFrom);
+  settings_->setString(("wifi_pass" + String(to)).c_str(), passFrom);
+
+  if (settingsChangedCallback_) settingsChangedCallback_();
+  server_->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ========================================
+// WiFi API - 接続
+// ========================================
+void AraneaWebUI::handleWifiConnect() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, server_->arg("plain"));
+  if (err) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  String ssid = doc["ssid"] | "";
+  String pass = doc["password"] | "";
+
+  if (ssid.length() == 0) {
+    // スロット番号で接続
+    int slot = doc["slot"] | 0;
+    if (slot >= 1 && slot <= 6) {
+      ssid = settings_->getString(("wifi_ssid" + String(slot)).c_str(), "");
+      pass = settings_->getString(("wifi_pass" + String(slot)).c_str(), "");
+    }
+  }
+
+  if (ssid.length() == 0) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"SSID required\"}");
+    return;
+  }
+
+  // レスポンスを先に返す
+  server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Connecting...\"}");
+  delay(100);
+
+  // WiFi接続開始
+  WiFi.disconnect();
+  delay(100);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  Serial.printf("[WebUI] WiFi connecting to: %s\n", ssid.c_str());
+}
+
+// ========================================
+// WiFi API - スキャン開始
+// ========================================
+void AraneaWebUI::handleWifiScan() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  if (wifiScanInProgress_) {
+    server_->send(200, "application/json", "{\"ok\":true,\"status\":\"scanning\"}");
+    return;
+  }
+
+  WiFi.scanDelete();
+  WiFi.scanNetworks(true);  // async scan
+  wifiScanInProgress_ = true;
+  wifiScanStartTime_ = millis();
+
+  server_->send(200, "application/json", "{\"ok\":true,\"status\":\"started\"}");
+}
+
+// ========================================
+// WiFi API - スキャン結果取得
+// ========================================
+void AraneaWebUI::handleWifiScanResult() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  int n = WiFi.scanComplete();
+
+  if (n == WIFI_SCAN_RUNNING) {
+    server_->send(200, "application/json", "{\"ok\":true,\"status\":\"scanning\"}");
+    return;
+  }
+
+  wifiScanInProgress_ = false;
+
+  if (n == WIFI_SCAN_FAILED || n < 0) {
+    server_->send(200, "application/json", "{\"ok\":true,\"status\":\"failed\",\"networks\":[]}");
+    return;
+  }
+
+  DynamicJsonDocument doc(4096);
+  doc["ok"] = true;
+  doc["status"] = "complete";
+  JsonArray arr = doc.createNestedArray("networks");
+
+  for (int i = 0; i < n && i < 20; i++) {  // 最大20件
+    JsonObject net = arr.createNestedObject();
+    net["ssid"] = WiFi.SSID(i);
+    net["rssi"] = WiFi.RSSI(i);
+    net["channel"] = WiFi.channel(i);
+    net["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+  }
+
+  WiFi.scanDelete();
+
+  String response;
+  serializeJson(doc, response);
+  server_->send(200, "application/json", response);
+}
+
+// ========================================
+// WiFi API - リセット
+// ========================================
+void AraneaWebUI::handleWifiReset() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  // 全スロットクリア
+  for (int i = 1; i <= 6; i++) {
+    settings_->setString(("wifi_ssid" + String(i)).c_str(), "");
+    settings_->setString(("wifi_pass" + String(i)).c_str(), "");
+  }
+
+  // デフォルトを設定（cluster1-6）
+  settings_->setString("wifi_ssid1", "cluster1");
+  settings_->setString("wifi_pass1", "isms12345@");
+  settings_->setString("wifi_ssid2", "cluster2");
+  settings_->setString("wifi_pass2", "isms12345@");
+  settings_->setString("wifi_ssid3", "cluster3");
+  settings_->setString("wifi_pass3", "isms12345@");
+  settings_->setString("wifi_ssid4", "cluster4");
+  settings_->setString("wifi_pass4", "isms12345@");
+  settings_->setString("wifi_ssid5", "cluster5");
+  settings_->setString("wifi_pass5", "isms12345@");
+  settings_->setString("wifi_ssid6", "cluster6");
+  settings_->setString("wifi_pass6", "isms12345@");
+
+  if (settingsChangedCallback_) settingsChangedCallback_();
+  server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Reset to cluster1-6\"}");
+}
+
+// ========================================
+// WiFi API - 自動接続トグル
+// ========================================
+void AraneaWebUI::handleWifiAuto() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  if (!server_->hasArg("plain")) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+    return;
+  }
+
+  StaticJsonDocument<64> doc;
+  DeserializationError err = deserializeJson(doc, server_->arg("plain"));
+  if (err) {
+    server_->send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  bool autoConnect = doc["enabled"] | true;
+  settings_->setBool("wifi_auto", autoConnect);
+
+  if (settingsChangedCallback_) settingsChangedCallback_();
+  server_->send(200, "application/json", "{\"ok\":true}");
 }
 
 // ========================================

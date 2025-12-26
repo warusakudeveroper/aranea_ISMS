@@ -17,10 +17,11 @@
 #include <Arduino.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
+#include <vector>
 #include "SettingManager.h"
 
 // UI/APIバージョン
-#define ARANEA_UI_VERSION "1.0.0"
+#define ARANEA_UI_VERSION "1.5.0"
 
 // ========================================
 // デバイス情報構造体（Statusタブ用）
@@ -158,6 +159,21 @@ protected:
    */
   virtual void getTypeSpecificConfig(JsonObject& obj) {}
 
+  /**
+   * デバイス固有のSpeedDialセクション生成
+   * 派生クラスでオーバーライドして独自セクションを追加
+   * @return INI形式の固有セクション文字列
+   */
+  virtual String generateTypeSpecificSpeedDial() { return ""; }
+
+  /**
+   * デバイス固有のSpeedDialセクション適用
+   * @param section セクション名（例: "Inspector", "Channels"）
+   * @param lines セクション内の行（key=value形式）
+   * @return 適用成功ならtrue
+   */
+  virtual bool applyTypeSpecificSpeedDial(const String& section, const std::vector<String>& lines) { return false; }
+
   // ========================================
   // 共通ハンドラ
   // ========================================
@@ -172,6 +188,23 @@ protected:
   void handleReboot();
   void handleFactoryReset();
   void handleNotFound();
+
+  // SpeedDial API
+  void handleSpeedDialGet();
+  void handleSpeedDialPost();
+  String generateSpeedDialText();
+  bool applySpeedDialSection(const String& section, const std::vector<String>& lines);
+
+  // WiFi操作API
+  void handleWifiList();
+  void handleWifiAdd();
+  void handleWifiDelete();
+  void handleWifiMove();
+  void handleWifiConnect();
+  void handleWifiScan();
+  void handleWifiScanResult();
+  void handleWifiReset();
+  void handleWifiAuto();
 
   // ========================================
   // HTML/CSS/JS 生成
@@ -199,6 +232,10 @@ protected:
   void (*settingsChangedCallback_)() = nullptr;
   void (*rebootCallback_)() = nullptr;
   void (*deviceNameChangedCallback_)() = nullptr;
+
+  // WiFiスキャン状態
+  bool wifiScanInProgress_ = false;
+  unsigned long wifiScanStartTime_ = 0;
 
   // CIC認証用
   bool validateCIC(const String& cic);

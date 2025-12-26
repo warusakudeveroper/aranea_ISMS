@@ -767,3 +767,86 @@ void HttpManagerIs10::handleImportConfig() {
   server_->send(200, "application/json", response);
   Serial.printf("[HTTP-IS10] Config imported: %d sections, %d routers\n", importedCount, *routerCount_);
 }
+
+// ========================================
+// SpeedDial - is10固有セクション生成
+// ========================================
+String HttpManagerIs10::generateTypeSpecificSpeedDial() {
+  String text = "";
+
+  // [Inspector] セクション
+  text += "[Inspector]\n";
+  text += "endpoint=" + settings_->getString(Is10Keys::kEndpoint, "") + "\n";
+  text += "celestialSecret=********\n";  // 常にマスク
+  text += "scanIntervalSec=" + String(settings_->getInt(Is10Keys::kInterval, 60)) + "\n";
+  text += "reportClients=" + String(settings_->getBool(Is10Keys::kReportClnt, true) ? "true" : "false") + "\n";
+  text += "sshTimeout=" + String(settings_->getInt(Is10Keys::kTimeout, 30000)) + "\n";
+  text += "retryCount=" + String(settings_->getInt(Is10Keys::kRetry, 2)) + "\n";
+  text += "routerInterval=" + String(settings_->getInt(Is10Keys::kRtrIntv, 30000)) + "\n";
+  text += "\n";
+
+  // [Routers] セクション（読み取り専用サマリ）
+  text += "; [Routers] - " + String(*routerCount_) + " configured\n";
+  text += "; Configure via Web UI or /api/is10/router\n";
+  for (int i = 0; i < *routerCount_ && i < 10; i++) {
+    String osType = (routers_[i].osType == RouterOsType::ASUSWRT) ? "ASUSWRT" : "OpenWrt";
+    text += "; " + routers_[i].rid + " = " + routers_[i].ipAddr + ":" + String(routers_[i].sshPort);
+    text += " (" + osType + ")" + (routers_[i].enabled ? "" : " [disabled]") + "\n";
+  }
+  if (*routerCount_ > 10) {
+    text += "; ... and " + String(*routerCount_ - 10) + " more\n";
+  }
+
+  return text;
+}
+
+// ========================================
+// SpeedDial - is10固有セクション適用
+// ========================================
+bool HttpManagerIs10::applyTypeSpecificSpeedDial(const String& section, const std::vector<String>& lines) {
+  // key=value をパースするラムダ
+  auto parseLine = [](const String& line, String& key, String& value) -> bool {
+    int eq = line.indexOf('=');
+    if (eq <= 0) return false;
+    key = line.substring(0, eq);
+    value = line.substring(eq + 1);
+    key.trim();
+    value.trim();
+    return true;
+  };
+
+  if (section == "Inspector") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+
+      if (key == "endpoint") {
+        settings_->setString(Is10Keys::kEndpoint, value);
+      } else if (key == "celestialSecret") {
+        if (value.length() > 0 && value != "********") {
+          settings_->setString(Is10Keys::kSecret, value);
+        }
+      } else if (key == "scanIntervalSec") {
+        int sec = value.toInt();
+        if (sec >= 60 && sec <= 86400) {
+          settings_->setInt(Is10Keys::kInterval, sec);
+        }
+      } else if (key == "reportClients") {
+        settings_->setBool(Is10Keys::kReportClnt, value == "true" || value == "1");
+      } else if (key == "sshTimeout") {
+        settings_->setInt(Is10Keys::kTimeout, value.toInt());
+      } else if (key == "retryCount") {
+        settings_->setInt(Is10Keys::kRetry, value.toInt());
+      } else if (key == "routerInterval") {
+        settings_->setInt(Is10Keys::kRtrIntv, value.toInt());
+      }
+    }
+    return true;
+  }
+
+  // Routersセクションは読み取り専用（コメント形式）
+  // 設定変更はWeb UIまたはAPIで行う
+
+  // 未知のセクションは無視
+  return true;
+}

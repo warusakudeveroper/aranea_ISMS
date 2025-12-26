@@ -67,6 +67,10 @@ protected:
   String generateTypeSpecificJS() override;
   void registerTypeSpecificEndpoints() override;
 
+  // SpeedDial
+  String generateTypeSpecificSpeedDial() override;
+  bool applyTypeSpecificSpeedDial(const String& section, const std::vector<String>& lines) override;
+
 private:
   // 外部ルーター配列への参照
   RouterConfig* routers_ = nullptr;
