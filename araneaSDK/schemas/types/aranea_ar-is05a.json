@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is05a.json",
-  "title": "ISMS_ar-is05a 8-Channel Detector",
+  "$id": "https://aranea.sdk/schemas/types/aranea_ar-is05a.json",
+  "title": "aranea_ar-is05a 8-Channel Detector",
   "description": "8ch入力検出器（ch7-8はI/O切替可能）",
   "type": "object",
 

@@ -180,12 +180,17 @@ araneaDeviceGate リクエスト
 ## 6. リクエスト形式
 
 ### 登録リクエスト
+テナントプライマリ認証は `lacisId + userId + CIC` の3要素のみ（パスワード入力は廃止済み）。
+
+> **Type名について**:
+> - 正式名称: `aranea_ar-{device}` 形式（新規開発はこちらを使用）
+> - 旧名称: `ISMS_ar-{device}` 形式（後方互換のため引き続きサポート）
+
 ```json
 {
   "lacisOath": {
     "lacisId": "テナントプライマリのlacisId",
     "userId": "認証メールアドレス",
-    "pass": "パスワード",
     "cic": "テナントプライマリのCIC",
     "method": "register"
   },
@@ -193,7 +198,7 @@ araneaDeviceGate リクエスト
     "lacisID": "デバイスのlacisId",
     "tid": "テナントID",
     "typeDomain": "araneaDevice",
-    "type": "ar-is10"
+    "type": "aranea_ar-is10"
   },
   "deviceMeta": {
     "macAddress": "MACアドレス（12文字）",

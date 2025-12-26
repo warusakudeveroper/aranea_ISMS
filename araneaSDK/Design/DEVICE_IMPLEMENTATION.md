@@ -4,6 +4,10 @@
 
 ESP32デバイスでaraneaDevice機能を実装するためのガイドです。
 
+> ⚠️ **重要**: 本ドキュメントは新規開発向けです。
+> 運用中のISMSデバイス（`ISMS_ar-*`）については後方互換性が維持されています。
+> 詳細は [MOBES_COMPATIBILITY_REQUEST.md](../../docs/common/MOBES_COMPATIBILITY_REQUEST.md) を参照。
+
 ---
 
 ## 2. Required Modules
@@ -61,7 +65,9 @@ ESP32デバイスでaraneaDevice機能を実装するためのガイドです。
 
 namespace aranea {
   // Device Identity
-  constexpr const char* DEVICE_TYPE = "ar-is04a";
+  // 正式Type名: "aranea_ar-{device}" 形式（新規開発はこちらを使用）
+  // 旧Type名: "ISMS_ar-{device}" 形式（後方互換のため引き続きサポート）
+  constexpr const char* DEVICE_TYPE = "aranea_ar-is04a";
   constexpr const char* MODEL_NAME = "Window Controller";
   constexpr const char* PRODUCT_TYPE = "004";
   constexpr const char* PRODUCT_CODE = "0001";
@@ -76,11 +82,11 @@ namespace aranea {
   constexpr const char* DEFAULT_TENANT_EMAIL = "info+ichiyama@neki.tech";
   constexpr const char* DEFAULT_TENANT_CIC = "263238";
 
-  // Endpoints
+  // Endpoints (asia-northeast1 リージョン)
   constexpr const char* DEFAULT_GATE_URL =
-    "https://us-central1-mobesorder.cloudfunctions.net/araneaDeviceGate";
+    "https://asia-northeast1-mobesorder.cloudfunctions.net/araneaDeviceGate";
   constexpr const char* DEFAULT_STATE_URL =
-    "https://us-central1-mobesorder.cloudfunctions.net/deviceStateReport";
+    "https://asia-northeast1-mobesorder.cloudfunctions.net/deviceStateReport";
 
   // Local Relay
   constexpr const char* DEFAULT_RELAY_PRIMARY = "192.168.96.201";
@@ -192,7 +198,7 @@ void registerDevice() {
     lacisId,
     aranea::DEFAULT_TID,
     "araneaDevice",
-    String("ISMS_") + aranea::DEVICE_TYPE
+    aranea::DEVICE_TYPE  // "aranea_ar-is04a" など、プレフィックス込みで定義済み
   );
 
   reg.setDeviceMeta(
@@ -252,7 +258,7 @@ void loop() {
 String buildStatePayload() {
   StaticJsonDocument<512> doc;
 
-  doc["type"] = String("ISMS_") + aranea::DEVICE_TYPE;
+  doc["type"] = aranea::DEVICE_TYPE;  // "aranea_ar-is04a" など
 
   JsonObject state = doc.createNestedObject("state");
   // デバイス固有の状態を設定
@@ -378,16 +384,19 @@ void HttpManagerIs04a::registerTypeSpecificEndpoints() {
 
 ```cpp
 MqttManager mqtt;
+String tid;  // テナントID
 
 void setup() {
+  tid = settings.getString("tid", aranea::DEFAULT_TID);
   String mqttEndpoint = settings.getString("mqttEndpoint", "");
   if (mqttEndpoint.length() > 0) {
     mqtt.begin(mqttEndpoint, lacisId, settings.getString("cic", ""));
 
     mqtt.onConnected([]() {
       // コマンドトピック購読
-      mqtt.subscribe("aranea/" + lacisId + "/cmd");
-      mqtt.subscribe("aranea/" + lacisId + "/config");
+      // 形式: aranea/{tid}/{lacisId}/{topic}
+      mqtt.subscribe("aranea/" + tid + "/" + lacisId + "/command");
+      mqtt.subscribe("aranea/" + tid + "/" + lacisId + "/config");
     });
 
     mqtt.onMessage([](const String& topic, const String& payload) {
@@ -418,8 +427,8 @@ void handleMqttMessage(const String& topic, const String& payload) {
       trigger_->startPulse(output, duration, TriggerManager::PulseSource::CLOUD);
     }
 
-    // 実行結果を送信
-    String resultTopic = "aranea/" + lacisId + "/event";
+    // 実行結果を送信 (ack トピックへ)
+    String resultTopic = "aranea/" + tid + "/" + lacisId + "/ack";
     StaticJsonDocument<256> result;
     result["commandId"] = doc["commandId"];
     result["status"] = "executed";

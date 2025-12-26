@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is01.json",
-  "title": "ISMS_ar-is01 Temperature & Humidity Sensor",
+  "$id": "https://aranea.sdk/schemas/types/aranea_ar-is01.json",
+  "title": "aranea_ar-is01 Temperature & Humidity Sensor",
   "description": "電池式温湿度センサー（BLEアドバタイズ）",
   "type": "object",
 

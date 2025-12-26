@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://aranea.sdk/schemas/types/ISMS_ar-is06a.json",
-  "title": "ISMS_ar-is06a 6-Channel Output Controller",
+  "$id": "https://aranea.sdk/schemas/types/aranea_ar-is06a.json",
+  "title": "aranea_ar-is06a 6-Channel Output Controller",
   "description": "6ch出力コントローラー（PWM対応）",
   "type": "object",
 

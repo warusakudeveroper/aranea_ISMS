@@ -10,12 +10,11 @@ schemas/
 ├── userObject.schema.json          # デバイス登録情報
 ├── deviceStateReport.schema.json   # 状態レポートリクエスト
 └── types/
-    ├── ISMS_ar-is01.json           # 温湿度センサー
-    ├── ISMS_ar-is04a.json          # 接点コントローラー
-    ├── ISMS_ar-is05a.json          # 8ch検出器
-    ├── ISMS_ar-is06a.json          # 6ch出力
-    ├── ISMS_ar-is10.json           # ルーター検査
-    └── ISMS_ar-is20s.json          # ネットワーク監視
+    ├── aranea_ar-is01.json         # 温湿度センサー
+    ├── aranea_ar-is04a.json        # 接点コントローラー
+    ├── aranea_ar-is05a.json        # 8ch検出器
+    ├── aranea_ar-is06a.json        # 6ch出力
+    └── aranea_ar-is10.json         # ルーター検査
 ```
 
 ## 使用方法
@@ -24,7 +23,7 @@ schemas/
 
 ```javascript
 const Ajv = require('ajv');
-const schema = require('./types/ISMS_ar-is04a.json');
+const schema = require('./types/aranea_ar-is04a.json');
 
 const ajv = new Ajv();
 const validate = ajv.compile(schema.stateSchema);
@@ -88,12 +87,11 @@ bool validateIs04aState(const JsonObject& state) {
 
 | ProductType | Type | Description |
 |-------------|------|-------------|
-| 001 | ISMS_ar-is01 | 電池式温湿度センサー |
-| 004 | ISMS_ar-is04a | 2ch接点コントローラー |
-| 005 | ISMS_ar-is05a | 8ch検出器 |
-| 006 | ISMS_ar-is06a | 6ch出力 |
-| 010 | ISMS_ar-is10 | ルーター検査 |
-| 020 | ISMS_ar-is20s | ネットワーク監視 |
+| 001 | aranea_ar-is01 | 電池式温湿度センサー |
+| 004 | aranea_ar-is04a | 2ch接点コントローラー |
+| 005 | aranea_ar-is05a | 8ch検出器 |
+| 006 | aranea_ar-is06a | 6ch出力 |
+| 010 | aranea_ar-is10 | ルーター検査 |
 
 ## 関連ドキュメント
 
