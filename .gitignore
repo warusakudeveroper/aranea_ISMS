@@ -14,3 +14,10 @@ build/
 *.tmp
 *.log
 Temp/
+
+# Large binary files
+code/orangePi/discimage/
+
+# Environment variables (credentials)
+.env
+araneaSDK/.env
