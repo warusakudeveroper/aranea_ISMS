@@ -8,7 +8,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
-static const unsigned long HTTP_TIMEOUT_MS = 3000;      // P0: 10s→3sに短縮
+static const unsigned long HTTP_TIMEOUT_MS = 15000;     // HTTPS SSL handshakeに時間がかかるため15秒
 static const int MAX_CONSECUTIVE_FAILURES = 3;          // P0: バックオフ閾値
 static const unsigned long BACKOFF_DURATION_MS = 30000; // P0: 30秒バックオフ
 

@@ -40,6 +40,7 @@ void AraneaWebUI::begin(SettingManager* settings, int port) {
   server_->on("/api/system/settings", HTTP_POST, [this]() { handleSaveSystem(); });
   server_->on("/api/system/reboot", HTTP_POST, [this]() { handleReboot(); });
   server_->on("/api/system/factory-reset", HTTP_POST, [this]() { handleFactoryReset(); });
+  server_->on("/api/system/clear-registration", HTTP_POST, [this]() { handleClearRegistration(); });
 
   // SpeedDial API
   server_->on("/api/speeddial", HTTP_GET, [this]() { handleSpeedDialGet(); });
@@ -94,6 +95,10 @@ void AraneaWebUI::onRebootRequest(void (*callback)()) {
 
 void AraneaWebUI::onDeviceNameChanged(void (*callback)()) {
   deviceNameChangedCallback_ = callback;
+}
+
+void AraneaWebUI::onClearRegistration(void (*callback)()) {
+  clearRegistrationCallback_ = callback;
 }
 
 // ========================================
@@ -186,6 +191,7 @@ void AraneaWebUI::handleStatus() {
   system["heapLargest"] = sys.heapLargest;
   system["cpuFreq"] = sys.cpuFreq;
   system["flashSize"] = sys.flashSize;
+  system["chipTemp"] = sys.chipTemp;
 
   // ファームウェア情報
   JsonObject firmware = doc.createNestedObject("firmware");
@@ -564,6 +570,22 @@ void AraneaWebUI::handleFactoryReset() {
 
   delay(100);
   ESP.restart();
+}
+
+// ========================================
+// 登録クリア（再登録用）
+// ========================================
+void AraneaWebUI::handleClearRegistration() {
+  if (!checkAuth()) { requestAuth(); return; }
+
+  Serial.println("[WebUI] Clear registration requested");
+
+  if (clearRegistrationCallback_) {
+    clearRegistrationCallback_();
+    server_->send(200, "application/json", "{\"ok\":true,\"message\":\"Registration cleared. Reboot to re-register.\"}");
+  } else {
+    server_->send(500, "application/json", "{\"ok\":false,\"error\":\"Clear registration callback not set\"}");
+  }
 }
 
 // ========================================
@@ -1190,6 +1212,7 @@ AraneaSystemStatus AraneaWebUI::getSystemStatus() {
   status.heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
   status.cpuFreq = ESP.getCpuFreqMHz();
   status.flashSize = ESP.getFlashChipSize();
+  status.chipTemp = temperatureRead();  // Internal sensor (±5°C)
 
   return status;
 }
@@ -1357,6 +1380,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .wifi-pair{display:flex;gap:8px;margin-bottom:8px;align-items:flex-end}
 .wifi-pair .form-group{margin-bottom:0}
 .wifi-pair .num{font-size:12px;color:var(--text-muted);min-width:20px;padding-bottom:10px}
+.wifi-pair .scan-pick{padding:4px 8px;font-size:11px;cursor:pointer;background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px}
+.wifi-pair .scan-pick:hover{background:var(--accent);color:#fff}
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:2000;display:flex;align-items:center;justify-content:center}
+.modal-content{background:var(--bg-card);border-radius:8px;width:90%;max-width:400px;box-shadow:0 4px 20px rgba(0,0,0,.2)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--border);font-weight:600}
+.modal-header button{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)}
+.scan-item{padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.scan-item:hover{background:var(--bg-secondary)}
+.scan-item .ssid{font-weight:500}
+.scan-item .info{font-size:12px;color:var(--text-muted)}
 @media(max-width:600px){.form-row{flex-direction:column}.tabs{gap:0}.tab{padding:8px 12px;font-size:12px}}
 </style>
 )CSS";
@@ -1411,13 +1444,44 @@ function render(){
   // Type specific
   if(typeof renderTypeSpecific==='function')renderTypeSpecific();
 }
+let scanSlot=-1;
+let scanNets=[];
 function renderWifi(){
   const c=document.getElementById('wifi-list');
   c.innerHTML='';
   const w=cfg.network?.wifi||[];
   for(let i=0;i<6;i++){
-    c.innerHTML+=`<div class="wifi-pair"><span class="num">${i+1}</span><div class="form-group" style="flex:2"><input type="text" id="w-ssid${i}" value="${w[i]?.ssid||''}" placeholder="SSID"></div><div class="form-group" style="flex:2"><input type="password" id="w-pass${i}" placeholder="Password"></div></div>`;
+    c.innerHTML+=`<div class="wifi-pair"><span class="num">${i+1}</span><div class="form-group" style="flex:2"><input type="text" id="w-ssid${i}" value="${w[i]?.ssid||''}" placeholder="SSID"></div><div class="form-group" style="flex:2"><input type="password" id="w-pass${i}" placeholder="Password"></div><button class="scan-pick" onclick="openScanForSlot(${i})">&#x25BC;</button></div>`;
   }
+}
+async function scanWifi(){
+  const btn=document.getElementById('scan-btn');
+  btn.textContent='Scanning...';
+  btn.disabled=true;
+  await post('/api/wifi/scan',{});
+  setTimeout(pollScanResult,1000);
+}
+async function pollScanResult(){
+  const r=await fetch('/api/wifi/scan/result');
+  const d=await r.json();
+  if(d.status==='scanning'){setTimeout(pollScanResult,1000);return;}
+  const btn=document.getElementById('scan-btn');
+  btn.textContent='Scan';btn.disabled=false;
+  if(d.status==='complete'){scanNets=d.networks||[];showScanModal();}
+  else{toast('Scan failed');scanNets=[];}
+}
+function openScanForSlot(i){scanSlot=i;if(scanNets.length>0)showScanModal();else scanWifi();}
+function showScanModal(){
+  const m=document.getElementById('scan-modal');
+  const r=document.getElementById('scan-results');
+  if(scanNets.length===0){r.innerHTML='<div style="padding:16px;text-align:center;color:var(--text-muted)">No networks found</div>';}
+  else{r.innerHTML=scanNets.map(n=>`<div class="scan-item" onclick="selectSsid('${n.ssid.replace(/'/g,"\\'")}')"><div><div class="ssid">${n.ssid}</div><div class="info">${n.secure?'🔒':'🔓'} Ch${n.channel}</div></div><div class="info">${n.rssi} dBm</div></div>`).join('');}
+  m.style.display='flex';
+}
+function closeScanModal(){document.getElementById('scan-modal').style.display='none';}
+function selectSsid(ssid){
+  if(scanSlot>=0&&scanSlot<6){document.getElementById('w-ssid'+scanSlot).value=ssid;document.getElementById('w-pass'+scanSlot).focus();}
+  closeScanModal();
 }
 function showTab(n){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -1466,6 +1530,7 @@ async function refreshStatus(){
     document.getElementById('s-ntp').textContent=s.system?.ntpTime||'-';
     document.getElementById('s-uptime').textContent=s.system?.uptimeHuman||'-';
     document.getElementById('s-heap').textContent=((s.system?.heap||0)/1024).toFixed(1)+' KB';
+    document.getElementById('s-temp').textContent=(s.system?.chipTemp||0).toFixed(1)+' °C';
     if(typeof refreshTypeSpecificStatus==='function')refreshTypeSpecificStatus(s);
   }catch(e){}
 }
@@ -1556,6 +1621,7 @@ String AraneaWebUI::generateHTML() {
 <div class="status-item"><div class="label">NTP Time</div><div class="value" id="s-ntp">-</div></div>
 <div class="status-item"><div class="label">Uptime</div><div class="value" id="s-uptime">-</div></div>
 <div class="status-item"><div class="label">Free Heap</div><div class="value" id="s-heap">-</div></div>
+<div class="status-item"><div class="label">Chip Temp</div><div class="value" id="s-temp">-</div></div>
 </div>
 </div>
 </div>
@@ -1563,13 +1629,20 @@ String AraneaWebUI::generateHTML() {
 <!-- Network Tab -->
 <div id="tab-network" class="tab-content">
 <div class="card">
-<div class="card-title">WiFi Settings (STA Mode)</div>
+<div class="card-title" style="display:flex;justify-content:space-between;align-items:center">WiFi Settings (STA Mode)<button class="btn btn-sm" onclick="scanWifi()" id="scan-btn">Scan</button></div>
 <div id="wifi-list"></div>
 <div class="form-row" style="margin-top:12px">
 <div class="form-group"><label>Hostname</label><input type="text" id="n-hostname"></div>
 <div class="form-group"><label>NTP Server</label><input type="text" id="n-ntp"></div>
 </div>
 <button class="btn btn-primary" onclick="saveNetwork()">Save Network</button>
+</div>
+<!-- WiFi Scan Modal -->
+<div id="scan-modal" class="modal" style="display:none">
+<div class="modal-content">
+<div class="modal-header"><span>Available Networks</span><button onclick="closeScanModal()">&times;</button></div>
+<div id="scan-results" style="max-height:300px;overflow-y:auto"></div>
+</div>
 </div>
 <div class="card">
 <div class="card-title">AP Mode Settings</div>

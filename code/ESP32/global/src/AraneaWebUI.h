@@ -21,7 +21,7 @@
 #include "SettingManager.h"
 
 // UI/APIバージョン
-#define ARANEA_UI_VERSION "1.5.0"
+#define ARANEA_UI_VERSION "1.6.0"
 
 // ========================================
 // デバイス情報構造体（Statusタブ用）
@@ -63,6 +63,7 @@ struct AraneaSystemStatus {
   size_t heapLargest;
   int cpuFreq;            // MHz
   size_t flashSize;
+  float chipTemp;         // °C (internal sensor, ±5°C accuracy)
 };
 
 // ========================================
@@ -120,6 +121,11 @@ public:
    * deviceName変更コールバック（deviceStateReport即時送信用）
    */
   void onDeviceNameChanged(void (*callback)());
+
+  /**
+   * 登録クリアコールバック（再登録用）
+   */
+  void onClearRegistration(void (*callback)());
 
 protected:
   // ========================================
@@ -187,6 +193,7 @@ protected:
   void handleSaveSystem();
   void handleReboot();
   void handleFactoryReset();
+  void handleClearRegistration();
   void handleNotFound();
 
   // SpeedDial API
@@ -219,7 +226,7 @@ protected:
   // ========================================
   AraneaNetworkStatus getNetworkStatus();
   AraneaSystemStatus getSystemStatus();
-  AraneaCloudStatus getCloudStatus();
+  virtual AraneaCloudStatus getCloudStatus();
   String formatUptime(unsigned long seconds);
 
   // ========================================
@@ -232,6 +239,7 @@ protected:
   void (*settingsChangedCallback_)() = nullptr;
   void (*rebootCallback_)() = nullptr;
   void (*deviceNameChangedCallback_)() = nullptr;
+  void (*clearRegistrationCallback_)() = nullptr;
 
   // WiFiスキャン状態
   bool wifiScanInProgress_ = false;

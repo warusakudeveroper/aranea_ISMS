@@ -37,7 +37,14 @@ public:
    */
   void setLastBatchTime(const String& time);
 
+  /**
+   * MQTT接続状態更新
+   */
+  void setMqttConnected(bool connected) { mqttConnected_ = connected; }
+
 protected:
+  // AraneaWebUI オーバーライド
+  AraneaCloudStatus getCloudStatus() override;
   // ========================================
   // AraneaWebUI オーバーライド
   // ========================================
@@ -65,6 +72,7 @@ private:
   int relaySuccessCount_;
   int relayFailCount_;
   String lastBatchTime_;
+  bool mqttConnected_;
 
   // APIハンドラ
   void handleNodes();

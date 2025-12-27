@@ -36,7 +36,6 @@ araneaDeviceは2つのプロビジョニングモードをサポートする:
 #define ARANEA_DEFAULT_TENANT_LACISID "テナントプライマリのlacisId"
 #define ARANEA_DEFAULT_TENANT_EMAIL "テナントプライマリのEmail"
 #define ARANEA_DEFAULT_TENANT_CIC "テナントプライマリのCIC"
-#define ARANEA_DEFAULT_TENANT_PASS "テナントプライマリのパスワード"
 
 #define ARANEA_DEFAULT_WIFI_SSID_1 "施設AのSSID1"
 #define ARANEA_DEFAULT_WIFI_PASS "施設AのWiFiパスワード"
@@ -76,7 +75,6 @@ araneaDeviceは2つのプロビジョニングモードをサポートする:
    - テナントプライマリ認証情報
      - lacisId
      - Email
-     - Password
      - CIC
 
 6. 保存 → デバイス再起動
@@ -94,7 +92,6 @@ araneaDeviceは2つのプロビジョニングモードをサポートする:
 | テナント | FID | 施設ID |
 | 認証 | テナントプライマリlacisId | 認証に使用するlacisId |
 | 認証 | テナントプライマリEmail | 認証Email |
-| 認証 | テナントプライマリPassword | 認証パスワード |
 | 認証 | テナントプライマリCIC | 認証CIC |
 
 ---
@@ -118,7 +115,6 @@ myFid = settings.getString("fid", ARANEA_DEFAULT_FID);
 TenantPrimaryAuth tenantAuth;
 tenantAuth.lacisId = settings.getString("tenant_lacisid", ARANEA_DEFAULT_TENANT_LACISID);
 tenantAuth.userId = settings.getString("tenant_email", ARANEA_DEFAULT_TENANT_EMAIL);
-tenantAuth.pass = settings.getString("tenant_pass", ARANEA_DEFAULT_TENANT_PASS);
 tenantAuth.cic = settings.getString("tenant_cic", ARANEA_DEFAULT_TENANT_CIC);
 ```
 

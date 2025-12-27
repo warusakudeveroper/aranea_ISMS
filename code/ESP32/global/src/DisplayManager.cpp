@@ -30,7 +30,7 @@ bool DisplayManager::begin() {
 
   if (!found) {
     Serial.println("[DISPLAY] No OLED found, display disabled");
-    Wire.end();  // I2Cを終了してリソース解放
+    // 注意: Wire.end()は呼ばない（他のI2Cデバイス用にバスを維持）
     return false;
   }
 

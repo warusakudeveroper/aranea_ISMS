@@ -7,6 +7,7 @@
 #include "StateReporterIs10.h"
 #include "SettingManager.h"
 #include "AraneaRegister.h"
+#include "AraneaSettings.h"
 #include "NtpManager.h"
 #include "MqttManager.h"
 #include "SshPollerIs10.h"
@@ -126,8 +127,8 @@ String StateReporterIs10::buildPayload() {
 
   String stateEndpoint = araneaReg_->getSavedStateEndpoint();
   if (stateEndpoint.length() == 0) {
-    Serial.println("[STATE-IS10] No stateEndpoint available");
-    return "";
+    // Gate APIがstateEndpointを返さない場合はデフォルト使用
+    stateEndpoint = ARANEA_DEFAULT_CLOUD_URL;
   }
 
   String observedAt = (ntp_ && ntp_->isSynced()) ? ntp_->getIso8601() : "1970-01-01T00:00:00Z";

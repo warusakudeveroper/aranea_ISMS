@@ -121,6 +121,7 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 <div class="tab" data-tab="cloud" onclick="showTab('cloud')">Cloud</div>
 <div class="tab" data-tab="tenant" onclick="showTab('tenant')">Tenant</div>
 <div class="tab" data-tab="system" onclick="showTab('system')">System</div>
+<div class="tab" data-tab="speeddial" onclick="showTab('speeddial')">SpeedDial</div>
 </div>
 
 <!-- Status Tab -->
@@ -262,22 +263,49 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 <!-- Network Tab -->
 <div id="tab-network" class="tab-content">
 <div class="card">
-<div class="card-title">WiFi Settings</div>
+<div class="card-title">WiFi接続状態</div>
 <div class="status-grid">
-<div class="status-item"><div class="label">Status</div><div class="value" id="wifi-status">-</div></div>
+<div class="status-item"><div class="label">STATUS</div><div class="value" id="wifi-status">-</div></div>
 <div class="status-item"><div class="label">SSID</div><div class="value" id="wifi-ssid">-</div></div>
-<div class="status-item"><div class="label">Signal</div><div class="value" id="wifi-signal">-</div></div>
+<div class="status-item"><div class="label">SIGNAL</div><div class="value" id="wifi-signal">-</div></div>
 <div class="status-item"><div class="label">IP</div><div class="value" id="wifi-ip">-</div></div>
 </div>
-<div class="form-row" style="margin-top:12px">
+<p style="font-size:12px;color:var(--text-muted);margin:12px 0 8px">一時接続（設定リストに保存しません）</p>
+<div class="form-row">
 <div class="form-group"><label>SSID</label><input type="text" id="wifi-new-ssid" placeholder="ネットワーク名"></div>
 <div class="form-group"><label>Password</label><input type="password" id="wifi-new-pass" placeholder="パスワード"></div>
 </div>
 <div class="btn-group">
-<button class="btn btn-primary" onclick="connectWifi()">Connect</button>
+<button class="btn" onclick="connectWifi()">一時接続</button>
 <button class="btn" onclick="scanWifi()">Scan Networks</button>
 </div>
 <div id="wifi-networks" style="margin-top:8px;font-size:12px;color:var(--text-muted)"></div>
+</div>
+<div class="card">
+<div class="card-title">WiFi設定一覧 (最大6件・優先順位順)</div>
+<p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+保存されたWiFi設定を上から順に接続を試行します。<br>
+遠隔地でのAP交換時も旧SSIDを残しておけば切り替え可能です。
+</p>
+<div style="overflow:auto;max-height:250px">
+<table id="wifi-configs-table">
+<thead><tr><th style="width:40px">#</th><th>SSID</th><th style="width:100px">Password</th><th style="width:140px">操作</th></tr></thead>
+<tbody id="wifi-configs-body"><tr><td colspan="4" style="color:var(--text-muted)">loading...</td></tr></tbody>
+</table>
+</div>
+<div class="btn-group" style="margin-top:12px">
+<button class="btn btn-primary" onclick="autoConnectWifi()">Auto Connect</button>
+<button class="btn btn-danger" onclick="resetWifiConfigs()">Reset to Default</button>
+<button class="btn" onclick="refreshWifiConfigs()">Refresh</button>
+</div>
+<div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:6px">
+<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">新しいWiFi設定をリストに追加</p>
+<div class="form-row">
+<div class="form-group"><label>SSID</label><input type="text" id="wifi-cfg-ssid" placeholder="追加するSSID"></div>
+<div class="form-group"><label>Password</label><input type="password" id="wifi-cfg-pass" placeholder="パスワード"></div>
+</div>
+<button class="btn btn-primary" onclick="addWifiConfig()">リストに追加</button>
+</div>
 </div>
 <div class="card">
 <div class="card-title">NTP / Time Settings</div>
@@ -435,6 +463,58 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 <div class="live-box" id="logs" style="max-height:300px">loading...</div>
 </div>
 </div>
+
+<!-- SpeedDial Tab -->
+<div id="tab-speeddial" class="tab-content">
+<div class="card">
+<div class="card-title">SpeedDial 設定一括管理</div>
+<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+管理者から送られた設定テキストを貼り付けて一括適用できます。<br>
+現在の設定をコピーして編集し、貼り付けることも可能です。
+</p>
+<div style="margin-bottom:16px">
+<label style="font-weight:600;display:block;margin-bottom:6px">現在の設定</label>
+<div style="position:relative">
+<textarea id="sd-current" readonly style="width:100%;height:200px;font-family:monospace;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;resize:vertical">(読み込み中...)</textarea>
+<button class="btn btn-sm" onclick="copySpeedDial()" style="position:absolute;top:8px;right:8px">📋 Copy</button>
+</div>
+<button class="btn" onclick="refreshSpeedDial()" style="margin-top:8px">🔄 Refresh</button>
+</div>
+<div>
+<label style="font-weight:600;display:block;margin-bottom:6px">設定を貼り付けて適用</label>
+<textarea id="sd-input" placeholder="ここに設定テキストを貼り付け..." style="width:100%;height:200px;font-family:monospace;font-size:12px;border:1px solid var(--border);border-radius:6px;padding:10px;resize:vertical"></textarea>
+<div class="btn-group" style="margin-top:8px">
+<button class="btn btn-primary" onclick="applySpeedDial()">✅ 適用</button>
+<button class="btn" onclick="document.getElementById('sd-input').value=''">🗑️ クリア</button>
+</div>
+<div id="sd-result" style="margin-top:12px;padding:10px;border-radius:6px;display:none"></div>
+</div>
+</div>
+<div class="card">
+<div class="card-title">SpeedDial フォーマット説明</div>
+<pre style="font-size:11px;background:var(--bg);padding:10px;border-radius:6px;overflow:auto;white-space:pre-wrap">[WiFi]
+wifi1=SSID名,パスワード
+wifi2=SSID名2,パスワード2
+
+[NTP]
+server=ntp.nict.jp
+timezone=Asia/Tokyo
+
+[Capture]
+enabled=true
+dry_run=true
+iface=end0
+
+[Post]
+url=https://example.com/api
+gzip=true</pre>
+<p style="font-size:11px;color:var(--text-muted);margin-top:8px">
+※ 変更したいセクションのみ含めれば部分更新可能<br>
+※ WiFiは wifi1,wifi2...の順で優先度が高い
+</p>
+</div>
+</div>
+
 </div>
 <div id="toast" class="toast"></div>
 
@@ -1109,6 +1189,103 @@ async function connectWifi(){{
   }}catch(e){{toast('Error: '+e);}}
 }}
 
+// ========== WiFi Config CRUD Functions ==========
+let wifiMaxConfigs=6;
+
+async function refreshWifiConfigs(){{
+  try{{
+    const r=await fetch('/api/wifi/configs');
+    const d=await r.json();
+    if(!d.ok)return;
+    wifiMaxConfigs=d.max_configs||6;
+    const tbody=document.getElementById('wifi-configs-body');
+    tbody.innerHTML='';
+    if(!d.configs||d.configs.length===0){{
+      tbody.innerHTML='<tr><td colspan="4" style="color:var(--text-muted)">No WiFi configs</td></tr>';
+      return;
+    }}
+    d.configs.forEach((c,i)=>{{
+      const row=tbody.insertRow();
+      const upBtn=i>0?'<button class="btn btn-sm" onclick="moveWifiConfig('+i+','+(i-1)+')">↑</button>':'';
+      const downBtn=i<d.configs.length-1?'<button class="btn btn-sm" onclick="moveWifiConfig('+i+','+(i+1)+')">↓</button>':'';
+      row.innerHTML='<td>'+(i+1)+'</td><td>'+c.ssid+'</td><td>'+c.password+'</td><td>'+upBtn+downBtn+'<button class="btn btn-sm btn-danger" onclick="deleteWifiConfig('+i+')">Del</button></td>';
+    }});
+  }}catch(e){{console.error('wifi configs error',e);}}
+}}
+
+async function addWifiConfig(){{
+  const ssid=document.getElementById('wifi-cfg-ssid').value;
+  const pass=document.getElementById('wifi-cfg-pass').value;
+  if(!ssid){{toast('SSIDを入力してください');return;}}
+  try{{
+    const r=await fetch('/api/wifi/configs',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{ssid,password:pass}})}});
+    const d=await r.json();
+    if(d.ok){{
+      toast('WiFi設定を追加しました');
+      document.getElementById('wifi-cfg-ssid').value='';
+      document.getElementById('wifi-cfg-pass').value='';
+      refreshWifiConfigs();
+    }}else{{
+      toast('追加失敗: '+(d.error||''));
+    }}
+  }}catch(e){{toast('Error: '+e);}}
+}}
+
+async function deleteWifiConfig(index){{
+  if(!confirm('この WiFi 設定を削除しますか?'))return;
+  try{{
+    const r=await fetch('/api/wifi/configs/'+index,{{method:'DELETE'}});
+    const d=await r.json();
+    if(d.ok){{
+      toast('WiFi設定を削除しました');
+      refreshWifiConfigs();
+    }}else{{
+      toast('削除失敗: '+(d.error||''));
+    }}
+  }}catch(e){{toast('Error: '+e);}}
+}}
+
+async function moveWifiConfig(oldIdx,newIdx){{
+  try{{
+    const r=await fetch('/api/wifi/configs/reorder',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{old_index:oldIdx,new_index:newIdx}})}});
+    const d=await r.json();
+    if(d.ok){{
+      refreshWifiConfigs();
+    }}else{{
+      toast('並べ替え失敗: '+(d.error||''));
+    }}
+  }}catch(e){{toast('Error: '+e);}}
+}}
+
+async function resetWifiConfigs(){{
+  if(!confirm('WiFi設定をデフォルト(cluster1-6)にリセットしますか?'))return;
+  try{{
+    const r=await fetch('/api/wifi/configs/reset',{{method:'POST'}});
+    const d=await r.json();
+    if(d.ok){{
+      toast('WiFi設定をリセットしました');
+      refreshWifiConfigs();
+    }}else{{
+      toast('リセット失敗: '+(d.error||''));
+    }}
+  }}catch(e){{toast('Error: '+e);}}
+}}
+
+async function autoConnectWifi(){{
+  toast('保存されたSSIDを順番に試行中...');
+  try{{
+    const r=await fetch('/api/wifi/auto-connect',{{method:'POST'}});
+    const d=await r.json();
+    if(d.ok){{
+      toast(d.message||'接続成功');
+      refreshWifi();
+      refreshHardware();
+    }}else{{
+      toast('接続失敗: '+(d.error||''));
+    }}
+  }}catch(e){{toast('Error: '+e);}}
+}}
+
 // ========== NTP Functions ==========
 async function refreshNtp(){{
   try{{
@@ -1274,6 +1451,75 @@ async function importCache(event){{
   event.target.value='';
 }}
 
+// ===== SpeedDial Functions =====
+async function refreshSpeedDial(){{
+  try{{
+    const r=await fetch('/api/speeddial');
+    const d=await r.json();
+    if(d.ok){{
+      document.getElementById('sd-current').value=d.text;
+    }}else{{
+      document.getElementById('sd-current').value='Error: '+(d.error||'Failed to load');
+    }}
+  }}catch(e){{
+    document.getElementById('sd-current').value='Error: '+e;
+  }}
+}}
+
+function copySpeedDial(){{
+  const text=document.getElementById('sd-current').value;
+  navigator.clipboard.writeText(text).then(()=>{{
+    toast('設定をクリップボードにコピーしました');
+  }}).catch(e=>{{
+    // Fallback for older browsers
+    const ta=document.getElementById('sd-current');
+    ta.select();
+    document.execCommand('copy');
+    toast('設定をコピーしました');
+  }});
+}}
+
+async function applySpeedDial(){{
+  const text=document.getElementById('sd-input').value.trim();
+  if(!text){{
+    toast('貼り付けるテキストがありません');
+    return;
+  }}
+  const resultEl=document.getElementById('sd-result');
+  try{{
+    const r=await fetch('/api/speeddial',{{
+      method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{text:text}})
+    }});
+    const d=await r.json();
+    resultEl.style.display='block';
+    if(d.ok){{
+      resultEl.style.background='#d4edda';
+      resultEl.style.color='#155724';
+      resultEl.innerHTML='<b>✅ 適用完了</b><br>'+d.applied.join('<br>');
+      toast('設定を適用しました');
+      refreshSpeedDial();
+      refreshWifiConfigs();
+      refreshNtp();
+    }}else{{
+      resultEl.style.background='#f8d7da';
+      resultEl.style.color='#721c24';
+      let msg='<b>⚠️ エラーあり</b>';
+      if(d.applied&&d.applied.length>0)msg+='<br>適用済み: '+d.applied.join(', ');
+      if(d.errors)msg+='<br>エラー: '+d.errors.join(', ');
+      resultEl.innerHTML=msg;
+      toast('一部エラーが発生しました');
+    }}
+  }}catch(e){{
+    resultEl.style.display='block';
+    resultEl.style.background='#f8d7da';
+    resultEl.style.color='#721c24';
+    resultEl.innerHTML='<b>❌ 通信エラー</b><br>'+e;
+    toast('通信エラー: '+e);
+  }}
+}}
+
 window.onload=()=>{{
   load();
   refreshStatus();
@@ -1286,8 +1532,10 @@ window.onload=()=>{{
   refreshThreatStatus();
   refreshHardware();
   refreshWifi();
+  refreshWifiConfigs();
   refreshNtp();
   refreshSync();
+  refreshSpeedDial();
   setInterval(refreshStatus,5000);
   setInterval(refreshCaptureStatus,5000);
   setInterval(refreshCaptureEvents,3000);

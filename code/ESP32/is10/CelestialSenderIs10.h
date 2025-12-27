@@ -65,6 +65,9 @@ private:
   // バックオフ制御
   int consecutiveFailures_ = 0;
   unsigned long lastFailTime_ = 0;
+
+  // MACアドレスをコロン区切り形式に変換
+  String formatMacWithColons(const String& mac);
 };
 
 #endif // CELESTIAL_SENDER_IS10_H

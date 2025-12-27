@@ -45,6 +45,16 @@ namespace Is02aKeys {
   NVS_KEY(kRelayUrl,    "is02a_relay");    // 11文字: is03aリレー先URL
   NVS_KEY(kRelayUrl2,   "is02a_relay2");   // 12文字: 冗長化リレー先URL
 
+  // --- ステータスレポート設定 ---
+  NVS_KEY(kReportIntv,  "is02a_report");   // 12文字: ステータスレポート間隔(秒)
+
+  // --- リブートスケジューラ ---
+  NVS_KEY(kRebootHour,  "is02a_rbhour");   // 12文字: リブート時刻(時) -1=無効
+  NVS_KEY(kRebootMin,   "is02a_rbmin");    // 11文字: リブート時刻(分)
+
+  // --- ノード蓄積設定（オンメモリ限定）---
+  NVS_KEY(kMaxNodes,    "is02a_maxnode");  // 13文字: 最大ノード保持数
+
   // --- SSOT設定 ---
   NVS_KEY(kSchema,      "is02a_schema");   // 12文字: schemaVersion
   NVS_KEY(kHash,        "is02a_hash");     // 10文字: configHash

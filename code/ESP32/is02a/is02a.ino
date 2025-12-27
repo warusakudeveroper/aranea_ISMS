@@ -19,6 +19,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SHT31.h>
+#include <ArduinoJson.h>
 
 // Aranea Global Modules
 #include "AraneaGlobalImporter.h"
@@ -26,7 +27,7 @@
 // ========================================
 // 定数
 // ========================================
-static const char* DEVICE_TYPE = "AR-IS02A";
+static const char* DEVICE_TYPE = "ISMS_ar-is02";
 static const char* PRODUCT_TYPE = "002";
 static const char* PRODUCT_CODE = "0096";
 static const char* FIRMWARE_VERSION = "1.0.0";
@@ -56,6 +57,7 @@ HttpOtaManager ota;
 BleReceiver bleReceiver;
 HttpManagerIs02a httpMgr;
 StateReporterIs02a stateReporter;
+MqttManager mqtt;
 
 // HT-30センサー（SHT31互換、I2Cアドレス0x44）
 SHT31 sht(0x44);
@@ -77,11 +79,19 @@ unsigned long lastSelfMeasure = 0;
 unsigned long lastDisplayUpdate = 0;
 
 bool isSending = false;
+bool mqttConnected = false;
+String myTid;
+String cmdTopic;
+String ackTopic;
+
+// MQTTコマンド遅延処理用
+String pendingMqttCmd = "";
+String pendingMqttPayload = "";
 
 // ========================================
 // 設定値（NVSから読み込み）
 // ========================================
-int batchIntervalSec = 30;
+int batchIntervalSec = 300;  // デフォルト5分
 int selfMeasureIntervalSec = 60;
 float tempOffset = 0.0;
 float humOffset = 0.0;
@@ -90,7 +100,12 @@ float humOffset = 0.0;
 // 自己計測
 // ========================================
 void measureSelf() {
-  if (!sensorReady) return;
+  if (!sensorReady) {
+    // センサーなし：NANを維持
+    stateReporter.setSelfSensorData(NAN, NAN, false);
+    httpMgr.setSelfSensorData(NAN, NAN);
+    return;
+  }
 
   if (sht.read()) {
     selfTempC = sht.getTemperature() + tempOffset;
@@ -112,6 +127,9 @@ void measureSelf() {
 // ========================================
 // バッチ送信
 // ========================================
+static int mqttSuccessCount = 0;
+static int mqttFailCount = 0;
+
 void sendBatch() {
   isSending = true;
   updateDisplay();
@@ -122,18 +140,39 @@ void sendBatch() {
   int nodeCount = bleReceiver.getValidNodeCount();
   Serial.printf("[BATCH] Sending (self + %d nodes)...\n", nodeCount);
 
-  bool ok = stateReporter.sendBatchToRelay();
+  // ペイロード構築
+  String payload = stateReporter.buildPayload();
+
+  // 1. MQTT送信（優先）
+  bool mqttOk = false;
+  if (mqttConnected && payload.length() > 10) {
+    String stateTopic = "aranea/" + myTid + "/" + myLacisId + "/state";
+    int msgId = mqtt.publish(stateTopic, payload, 1, false);
+    mqttOk = (msgId >= 0);
+    if (mqttOk) {
+      mqttSuccessCount++;
+      Serial.printf("[BATCH] MQTT publish OK (msgId=%d)\n", msgId);
+    } else {
+      mqttFailCount++;
+      Serial.println("[BATCH] MQTT publish failed");
+    }
+  }
+
+  // 2. HTTPリレー送信（フォールバック or 並行）
+  bool relayOk = stateReporter.sendBatchToRelay();
 
   isSending = false;
 
+  bool ok = mqttOk || relayOk;
   if (ok) {
     Serial.println("[BATCH] Sent successfully");
+    stateReporter.setLastBatchTimeNow();
   } else {
-    Serial.println("[BATCH] Send failed");
+    Serial.println("[BATCH] Send failed (both MQTT and relay)");
   }
 
   // 統計更新
-  httpMgr.setSendStatus(0, 0,
+  httpMgr.setSendStatus(mqttSuccessCount, mqttFailCount,
     stateReporter.getRelaySuccessCount(),
     stateReporter.getRelayFailCount());
   httpMgr.setLastBatchTime(stateReporter.getLastBatchTime());
@@ -171,10 +210,133 @@ void updateDisplay() {
 }
 
 // ========================================
+// MQTTコマンドハンドラ（遅延処理）
+// ========================================
+// イベントハンドラ内でpublishするとスタック問題が起きるため
+// コマンドを保留して loop() で処理する
+
+void handleMqttCommand(const String& topic, const char* data, int len) {
+  Serial.printf("[MQTT] Received: %s\n", data);
+  // 保留変数にコピー（loop()で処理）
+  pendingMqttPayload = String(data);
+}
+
+// 実際のコマンド処理（loop()から呼び出す）
+void processPendingMqttCommand() {
+  if (pendingMqttPayload.length() == 0) return;
+
+  String payload = pendingMqttPayload;
+  pendingMqttPayload = "";  // クリア
+
+  // JSON解析
+  DynamicJsonDocument doc(512);
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.printf("[MQTT] JSON parse error: %s\n", err.c_str());
+    return;
+  }
+
+  // action または type フィールドをサポート（SDK互換）
+  String action = doc["action"] | "";
+  if (action.length() == 0) {
+    action = doc["type"] | "";
+  }
+  Serial.printf("[MQTT] Processing action: %s\n", action.c_str());
+
+  if (action == "setConfig") {
+    // 設定変更コマンド
+    String key = doc["key"] | "";
+    String value = doc["value"] | "";
+
+    if (key.length() == 0) {
+      Serial.println("[MQTT] Missing key");
+      return;
+    }
+
+    // NVS保存（値の型に応じて）
+    bool saved = false;
+    if (value == "true" || value == "false") {
+      settings.setBool(key.c_str(), value == "true");
+      saved = true;
+    } else if (value.indexOf('.') >= 0) {
+      settings.setString(key.c_str(), value);
+      saved = true;
+    } else {
+      bool isNum = true;
+      for (unsigned int i = 0; i < value.length(); i++) {
+        char c = value.charAt(i);
+        if (i == 0 && c == '-') continue;
+        if (!isDigit(c)) { isNum = false; break; }
+      }
+      if (isNum && value.length() > 0) {
+        settings.setInt(key.c_str(), value.toInt());
+      } else {
+        settings.setString(key.c_str(), value);
+      }
+      saved = true;
+    }
+
+    if (saved) {
+      Serial.printf("[MQTT] Config saved: %s = %s\n", key.c_str(), value.c_str());
+      reloadSettings();
+
+      DynamicJsonDocument ack(256);
+      ack["ok"] = true;
+      ack["action"] = "setConfig";
+      ack["key"] = key;
+      ack["value"] = value;
+      String ackPayload;
+      serializeJson(ack, ackPayload);
+      mqtt.publish(ackTopic, ackPayload);
+    }
+  } else if (action == "getConfig") {
+    String key = doc["key"] | "";
+    String value = settings.getString(key.c_str(), "");
+
+    DynamicJsonDocument ack(256);
+    ack["ok"] = true;
+    ack["action"] = "getConfig";
+    ack["key"] = key;
+    ack["value"] = value;
+    String ackPayload;
+    serializeJson(ack, ackPayload);
+    mqtt.publish(ackTopic, ackPayload);
+  } else if (action == "reboot") {
+    Serial.println("[MQTT] Reboot requested");
+    DynamicJsonDocument ack(128);
+    ack["ok"] = true;
+    ack["action"] = "reboot";
+    String ackPayload;
+    serializeJson(ack, ackPayload);
+    mqtt.publish(ackTopic, ackPayload);
+    delay(500);
+    ESP.restart();
+  } else if (action == "status") {
+    DynamicJsonDocument ack(512);
+    ack["ok"] = true;
+    ack["action"] = "status";
+    ack["lacisId"] = myLacisId;
+    ack["cic"] = myCic;
+    ack["ip"] = myIp;
+    ack["uptime"] = millis() / 1000;
+    ack["nodes"] = bleReceiver.getValidNodeCount();
+    ack["rssi"] = WiFi.RSSI();
+    if (!isnan(selfTempC)) ack["temp"] = selfTempC;
+    if (!isnan(selfHumPct)) ack["hum"] = selfHumPct;
+    String ackPayload;
+    serializeJson(ack, ackPayload);
+    mqtt.publish(ackTopic, ackPayload);
+    Serial.println("[MQTT] Status response sent");
+  } else {
+    Serial.printf("[MQTT] Unknown action: %s\n", action.c_str());
+  }
+}
+
+// ========================================
 // 設定再読み込み
 // ========================================
 void reloadSettings() {
-  batchIntervalSec = settings.getInt(Is02aKeys::kBatchIntv, 30);
+  batchIntervalSec = settings.getInt(Is02aKeys::kBatchIntv, 300);
   selfMeasureIntervalSec = settings.getInt(Is02aKeys::kSelfIntv, 60);
   tempOffset = settings.getString(Is02aKeys::kTempOffset, "0.0").toFloat();
   humOffset = settings.getString(Is02aKeys::kHumOffset, "0.0").toFloat();
@@ -202,6 +364,11 @@ void setup() {
   delay(100);
   Serial.println("\n[BOOT] is02a starting...");
 
+  // 0. GPIO5をHIGHに設定（I2C用MOSFET有効化）
+  pinMode(5, OUTPUT);
+  digitalWrite(5, HIGH);
+  delay(50);  // MOSFET安定待ち
+
   // Operator初期化
   op.setMode(OperatorMode::PROVISION);
 
@@ -212,28 +379,60 @@ void setup() {
   AraneaSettings::init();
   AraneaSettings::initDefaults(settings);
 
-  // 3. DisplayManager
+  // 3. I2C初期化（DisplayとSensorで共有）
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  if (!display.begin()) {
-    Serial.println("[ERROR] Display init failed");
-  }
-  display.showBoot("Booting...");
+  Wire.setClock(100000);
+  delay(100);  // I2C安定待ち
 
-  // 4. HT-30センサー初期化
-  delay(100);
-  sht.begin();
-  delay(50);
-  if (sht.read()) {
-    sensorReady = true;
-    selfTempC = sht.getTemperature();
-    selfHumPct = sht.getHumidity();
-    Serial.printf("[SENSOR] HT-30 ready: %.1f°C, %.1f%%\n", selfTempC, selfHumPct);
+  // I2Cスキャン（デバッグ用）
+  Serial.println("[I2C] Scanning...");
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("[I2C] Found device at 0x%02X\n", addr);
+    }
+    if (addr % 16 == 0) yield();  // WDT対策
+  }
+  Serial.println("[I2C] Scan complete");
+
+  // 4. DisplayManager（I2C共有、失敗してもI2Cバス維持）
+  if (!display.begin()) {
+    Serial.println("[WARN] Display init failed, continuing without OLED");
+  } else {
+    display.showBoot("Booting...");
+  }
+
+  // 5. HT-30センサー初期化（SHT31互換、I2Cアドレス0x44）
+  // I2Cスキャンで0x44が見つかった場合のみ初期化試行
+  bool sensorFound = false;
+  Wire.beginTransmission(0x44);
+  if (Wire.endTransmission() == 0) {
+    sensorFound = true;
+  }
+
+  if (sensorFound) {
+    delay(100);  // I2Cバス安定待ち
+    sht.begin();
+    delay(50);
+    if (sht.read()) {
+      sensorReady = true;
+      selfTempC = sht.getTemperature();
+      selfHumPct = sht.getHumidity();
+      Serial.printf("[SENSOR] HT-30 ready: %.1f°C, %.1f%%\n", selfTempC, selfHumPct);
+    } else {
+      sensorReady = false;
+      selfTempC = NAN;
+      selfHumPct = NAN;
+      Serial.println("[SENSOR] HT-30 read failed");
+    }
   } else {
     sensorReady = false;
-    Serial.println("[SENSOR] HT-30 not found");
+    selfTempC = NAN;
+    selfHumPct = NAN;
+    Serial.println("[SENSOR] No sensor (headless mode)");
   }
 
-  // 5. WiFi接続（NVS設定を使用）
+  // 6. WiFi接続（NVS設定を使用）
   display.showConnecting("WiFi...", 0);
   String hostname = "is02a-" + WiFi.macAddress().substring(12);
   hostname.replace(":", "");
@@ -271,9 +470,9 @@ void setup() {
   tenantAuth.cic = settings.getString("tenant_cic", AraneaSettings::getTenantCic());
   araneaReg.setTenantPrimary(tenantAuth);
 
-  String tid = settings.getString("tid", AraneaSettings::getTid());
+  myTid = settings.getString("tid", AraneaSettings::getTid());
   AraneaRegisterResult regResult = araneaReg.registerDevice(
-    tid, DEVICE_TYPE, myLacisId, myMac, PRODUCT_TYPE, PRODUCT_CODE
+    myTid, DEVICE_TYPE, myLacisId, myMac, PRODUCT_TYPE, PRODUCT_CODE
   );
 
   if (regResult.ok) {
@@ -297,7 +496,7 @@ void setup() {
 
   // 10. StateReporter初期化
   stateReporter.begin(&settings, &ntp, &bleReceiver);
-  stateReporter.setAuth(tid, myLacisId, myCic);
+  stateReporter.setAuth(myTid, myLacisId, myCic);
   stateReporter.setMac(myMac);
   stateReporter.setIp(myIp);
 
@@ -337,7 +536,46 @@ void setup() {
     display.showBoot("OTA: " + String(progress) + "%");
   });
 
-  // 14. 通常動作モードへ移行
+  // 14. MQTT初期化（オンライン設定変更用）
+  display.showBoot("MQTT init...");
+  String mqttBroker = settings.getString(Is02aKeys::kMqttBroker, AraneaSettings::getMqttBroker());
+  if (mqttBroker.length() > 0 && myCic.length() > 0) {
+    // トピック設定（is04互換形式: aranea/{tid}/{lacisId}/xxx）
+    cmdTopic = "aranea/" + myTid + "/" + myLacisId + "/command";
+    ackTopic = "aranea/" + myTid + "/" + myLacisId + "/ack";
+
+    // コールバック設定
+    mqtt.onConnected([&]() {
+      Serial.println("[MQTT] Connected, subscribing...");
+      mqttConnected = true;
+      httpMgr.setMqttConnected(true);
+      mqtt.subscribe(cmdTopic, 1);
+    });
+
+    mqtt.onDisconnected([&]() {
+      Serial.println("[MQTT] Disconnected");
+      mqttConnected = false;
+      httpMgr.setMqttConnected(false);
+    });
+
+    mqtt.onMessage(handleMqttCommand);
+
+    mqtt.onError([](const String& error) {
+      Serial.printf("[MQTT] Error: %s\n", error.c_str());
+    });
+
+    // 接続開始（lacisId + cicで認証）
+    if (mqtt.begin(mqttBroker, myLacisId, myCic)) {
+      Serial.printf("[MQTT] Connecting to %s\n", mqttBroker.c_str());
+      Serial.printf("[MQTT] Topic: %s\n", cmdTopic.c_str());
+    } else {
+      Serial.println("[MQTT] Init failed");
+    }
+  } else {
+    Serial.println("[MQTT] Skipped (no broker or CIC)");
+  }
+
+  // 15. 通常動作モードへ移行
   op.setMode(OperatorMode::RUN);
 
   // 初期表示
@@ -345,10 +583,15 @@ void setup() {
   lastBatchSend = now;
   lastSelfMeasure = now;
   lastDisplayUpdate = now;
-  updateDisplay();
 
   Serial.println("[BOOT] Ready");
-  Serial.printf("[BOOT] Web UI: http://%s/\n", myIp.c_str());
+  Serial.print("[BOOT] Web UI: http://");
+  Serial.print(myIp);
+  Serial.println("/");
+  Serial.flush();
+
+  // 初期表示（Ready後に実行）
+  updateDisplay();
 }
 
 // ========================================
@@ -359,6 +602,12 @@ void loop() {
 
   // Web UI処理
   httpMgr.handle();
+
+  // MQTT処理（再接続チェック含む）
+  mqtt.handle();
+
+  // 保留中MQTTコマンド処理
+  processPendingMqttCommand();
 
   // 自己計測（60秒間隔）
   if (now - lastSelfMeasure >= (unsigned long)selfMeasureIntervalSec * 1000) {

@@ -26,19 +26,27 @@ class SettingManager;
 // ========================================
 // デフォルト設定（施設展開時に編集）
 // ========================================
-#define ARANEA_DEFAULT_TID "T2025120608261484221"
-#define ARANEA_DEFAULT_FID "9000"
-#define ARANEA_DEFAULT_TENANT_LACISID "12767487939173857894"
-#define ARANEA_DEFAULT_TENANT_EMAIL "info+ichiyama@neki.tech"
-#define ARANEA_DEFAULT_TENANT_CIC "263238"
+#define ARANEA_DEFAULT_TID "T2025120621041161827"
+#define ARANEA_DEFAULT_FID "0099"
+#define ARANEA_DEFAULT_TENANT_LACISID "18217487937895888001"
+#define ARANEA_DEFAULT_TENANT_EMAIL "soejim@mijeos.com"
+#define ARANEA_DEFAULT_TENANT_CIC "204965"
 
 // ========================================
-// WiFiデフォルト設定
+// WiFiデフォルト設定（SSIDとパスワードはペア）
 // ========================================
-#define ARANEA_DEFAULT_WIFI_SSID_1 "cluster1"
-#define ARANEA_DEFAULT_WIFI_SSID_2 "cluster2"
-#define ARANEA_DEFAULT_WIFI_SSID_3 "cluster3"
-#define ARANEA_DEFAULT_WIFI_PASS "isms12345@"
+#define ARANEA_DEFAULT_WIFI_SSID_1 "H_to_facility"
+#define ARANEA_DEFAULT_WIFI_PASS_1 "a,9E%JJDQ&kj"
+#define ARANEA_DEFAULT_WIFI_SSID_2 ""
+#define ARANEA_DEFAULT_WIFI_PASS_2 ""
+#define ARANEA_DEFAULT_WIFI_SSID_3 ""
+#define ARANEA_DEFAULT_WIFI_PASS_3 ""
+#define ARANEA_DEFAULT_WIFI_SSID_4 ""
+#define ARANEA_DEFAULT_WIFI_PASS_4 ""
+#define ARANEA_DEFAULT_WIFI_SSID_5 ""
+#define ARANEA_DEFAULT_WIFI_PASS_5 ""
+#define ARANEA_DEFAULT_WIFI_SSID_6 ""
+#define ARANEA_DEFAULT_WIFI_PASS_6 ""
 
 // ========================================
 // エンドポイント設定
@@ -77,7 +85,23 @@ class SettingManager;
 // ========================================
 // バッチ送信設定
 // ========================================
-#define IS02A_DEFAULT_BATCH_INTERVAL 30 // バッチ送信間隔（秒）
+#define IS02A_DEFAULT_BATCH_INTERVAL 300 // バッチ送信間隔（秒）5分
+
+// ========================================
+// ステータスレポート設定
+// ========================================
+#define IS02A_DEFAULT_REPORT_INTERVAL 300  // ステータスレポート間隔（秒）
+
+// ========================================
+// リブートスケジューラ設定
+// ========================================
+#define IS02A_DEFAULT_REBOOT_HOUR -1    // リブート時刻（時）-1=無効
+#define IS02A_DEFAULT_REBOOT_MIN 0      // リブート時刻（分）
+
+// ========================================
+// ノード蓄積設定（オンメモリ限定 - SPIFFS禁止）
+// ========================================
+#define IS02A_DEFAULT_MAX_NODES 32      // 最大ノード保持数（メモリ考慮）
 
 /**
  * AraneaSettings - 静的設定クラス
@@ -118,6 +142,16 @@ public:
 
   // バッチ送信設定
   static int getBatchIntervalSec();
+
+  // ステータスレポート設定
+  static int getReportIntervalSec();
+
+  // リブートスケジューラ設定
+  static int getRebootHour();
+  static int getRebootMin();
+
+  // ノード蓄積設定
+  static int getMaxNodes();
 
 private:
   static bool _initialized;

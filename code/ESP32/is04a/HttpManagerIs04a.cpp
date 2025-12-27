@@ -95,7 +95,7 @@ void HttpManagerIs04a::handlePulse() {
     int durationMs = trigger_->getPulseMs();
 
     if (server_->hasArg("plain")) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(256);
         DeserializationError error = deserializeJson(doc, server_->arg("plain"));
         if (!error) {
             outputNum = doc["output"] | 1;
@@ -119,7 +119,7 @@ void HttpManagerIs04a::handlePulse() {
     // パルス実行
     bool success = trigger_->startPulse(outputNum, durationMs, TriggerManager::PulseSource::HTTP);
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(256);
     doc["ok"] = success;
     doc["output"] = outputNum;
     doc["duration"] = durationMs;
@@ -141,7 +141,7 @@ void HttpManagerIs04a::handleTriggerConfig() {
     if (!checkAuth()) { requestAuth(); return; }
 
     if (server_->method() == HTTP_GET) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(128);
         doc["in1Target"] = trigger_->getTriggerAssign(1);
         doc["in2Target"] = trigger_->getTriggerAssign(2);
 
@@ -154,7 +154,7 @@ void HttpManagerIs04a::handleTriggerConfig() {
             return;
         }
 
-        JsonDocument doc;
+        DynamicJsonDocument doc(256);
         DeserializationError error = deserializeJson(doc, server_->arg("plain"));
         if (error) {
             server_->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
@@ -180,7 +180,7 @@ void HttpManagerIs04a::handlePulseConfig() {
         return;
     }
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(512);
     DeserializationError error = deserializeJson(doc, server_->arg("plain"));
     if (error) {
         server_->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");

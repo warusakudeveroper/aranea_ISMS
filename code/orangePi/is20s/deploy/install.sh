@@ -114,8 +114,23 @@ chmod -R 755 "$GLOBAL_DIR"
 chmod 777 "$DATA_DIR/capture_logs"
 log_info "Permissions set"
 
+# Configure polkit for NetworkManager (WiFi control)
+log_info "[8/11] Configuring polkit for WiFi control..."
+mkdir -p /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/10-network-manager.rules << 'EOF'
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager") === 0 &&
+        subject.user === "mijeosadmin") {
+        return polkit.Result.YES;
+    }
+});
+EOF
+chmod 644 /etc/polkit-1/rules.d/10-network-manager.rules
+systemctl restart polkit 2>/dev/null || true
+log_info "polkit configured for NetworkManager access"
+
 # Create Python virtual environment
-log_info "[8/10] Creating Python virtual environment..."
+log_info "[9/11] Creating Python virtual environment..."
 cd "$APP_DIR"
 sudo -u "$APP_USER" python3 -m venv .venv
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/pip" install --upgrade pip -q
@@ -123,7 +138,7 @@ sudo -u "$APP_USER" "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.t
 log_info "Python environment ready"
 
 # Create default config files
-log_info "[9/10] Creating default configurations..."
+log_info "[10/11] Creating default configurations..."
 if [ ! -f "$DATA_DIR/watch_config.json" ]; then
     cat > "$DATA_DIR/watch_config.json" << 'EOF'
 {
@@ -160,10 +175,25 @@ if [ ! -f "$DATA_DIR/watch_config.json" ]; then
 EOF
     chown "$APP_USER:$APP_USER" "$DATA_DIR/watch_config.json"
 fi
+
+# Create default WiFi configs
+if [ ! -f "$DATA_DIR/wifi_configs.json" ]; then
+    cat > "$DATA_DIR/wifi_configs.json" << 'EOF'
+[
+  {"ssid": "cluster1", "password": "isms12345@", "priority": 0},
+  {"ssid": "cluster2", "password": "isms12345@", "priority": 1},
+  {"ssid": "cluster3", "password": "isms12345@", "priority": 2},
+  {"ssid": "cluster4", "password": "isms12345@", "priority": 3},
+  {"ssid": "cluster5", "password": "isms12345@", "priority": 4},
+  {"ssid": "cluster6", "password": "isms12345@", "priority": 5}
+]
+EOF
+    chown "$APP_USER:$APP_USER" "$DATA_DIR/wifi_configs.json"
+fi
 log_info "Configuration files ready"
 
 # Install and start systemd service
-log_info "[10/10] Installing systemd service..."
+log_info "[11/11] Installing systemd service..."
 cp "$SCRIPT_DIR/is20s.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"

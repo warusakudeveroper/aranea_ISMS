@@ -336,7 +336,7 @@ void setup() {
         myTid = settings.getString("tid", ARANEA_DEFAULT_TID);
         myFid = settings.getString("fid", ARANEA_DEFAULT_FID);
 
-        String gateUrl = AraneaSettings::getGateUrl();
+        String gateUrl = settings.getString("gate_url", ARANEA_DEFAULT_GATE_URL);
         araneaReg.begin(gateUrl);
 
         TenantPrimaryAuth tenantAuth;
@@ -383,10 +383,10 @@ void setup() {
     stateReporter.setAuth(myTid, myLacisId, myCic);
     stateReporter.setMac(myMac);
     stateReporter.setRelayUrls(
-        AraneaSettings::getRelayPrimary(),
-        AraneaSettings::getRelaySecondary()
+        settings.getString("relay_pri", ARANEA_DEFAULT_RELAY_PRIMARY),
+        settings.getString("relay_sec", ARANEA_DEFAULT_RELAY_SECONDARY)
     );
-    stateReporter.setCloudUrl(AraneaSettings::getCloudUrl());
+    stateReporter.setCloudUrl(settings.getString("cloud_url", ARANEA_DEFAULT_CLOUD_URL));
 
     // HttpManager初期化
     httpMgr.begin(&settings, &trigger, 80);

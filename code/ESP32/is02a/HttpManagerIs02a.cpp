@@ -17,7 +17,14 @@ HttpManagerIs02a::HttpManagerIs02a()
     , relaySuccessCount_(0)
     , relayFailCount_(0)
     , lastBatchTime_("---")
+    , mqttConnected_(false)
 {
+}
+
+AraneaCloudStatus HttpManagerIs02a::getCloudStatus() {
+  AraneaCloudStatus status = AraneaWebUI::getCloudStatus();
+  status.mqttConnected = mqttConnected_;
+  return status;
 }
 
 void HttpManagerIs02a::begin(SettingManager* settings, BleReceiver* bleReceiver, int port) {
@@ -95,7 +102,20 @@ String HttpManagerIs02a::generateTypeSpecificTabContents() {
   html += F("<input type=\"number\" id=\"self-interval\" min=\"10\" max=\"300\"></div>");
   html += F("<div class=\"form-group\"><label>Batch Send Interval (sec):</label>");
   html += F("<input type=\"number\" id=\"batch-interval\" min=\"10\" max=\"300\"></div>");
-  html += F("<button type=\"submit\">Save Sensor Settings</button>");
+  html += F("<h4>BLE Settings</h4>");
+  html += F("<div class=\"form-group\"><label>BLE Scan Duration (sec):</label>");
+  html += F("<input type=\"number\" id=\"ble-scan-sec\" min=\"1\" max=\"30\"></div>");
+  html += F("<div class=\"form-group\"><label>Max Nodes (memory only):</label>");
+  html += F("<input type=\"number\" id=\"max-nodes\" min=\"8\" max=\"64\"></div>");
+  html += F("<h4>Reporting</h4>");
+  html += F("<div class=\"form-group\"><label>Status Report Interval (sec):</label>");
+  html += F("<input type=\"number\" id=\"report-interval\" min=\"60\" max=\"3600\"></div>");
+  html += F("<h4>Reboot Scheduler</h4>");
+  html += F("<div class=\"form-group\"><label>Reboot Hour (-1=disabled):</label>");
+  html += F("<input type=\"number\" id=\"reboot-hour\" min=\"-1\" max=\"23\"></div>");
+  html += F("<div class=\"form-group\"><label>Reboot Minute:</label>");
+  html += F("<input type=\"number\" id=\"reboot-min\" min=\"0\" max=\"59\"></div>");
+  html += F("<button type=\"submit\">Save Settings</button>");
   html += F("</form></div>");
 
   // MQTT Tab
@@ -149,7 +169,12 @@ String HttpManagerIs02a::generateTypeSpecificJS() {
   js += F("document.getElementById('temp-offset').value=data.tempOffset||0;");
   js += F("document.getElementById('hum-offset').value=data.humOffset||0;");
   js += F("document.getElementById('self-interval').value=data.selfInterval||60;");
-  js += F("document.getElementById('batch-interval').value=data.batchInterval||30;});}");
+  js += F("document.getElementById('batch-interval').value=data.batchInterval||30;");
+  js += F("document.getElementById('ble-scan-sec').value=data.bleScanSec||5;");
+  js += F("document.getElementById('max-nodes').value=data.maxNodes||32;");
+  js += F("document.getElementById('report-interval').value=data.reportInterval||300;");
+  js += F("document.getElementById('reboot-hour').value=data.rebootHour||-1;");
+  js += F("document.getElementById('reboot-min').value=data.rebootMin||0;});}");
 
   // センサー設定保存
   js += F("document.getElementById('sensor-form').addEventListener('submit',function(e){e.preventDefault();");
@@ -157,8 +182,13 @@ String HttpManagerIs02a::generateTypeSpecificJS() {
   js += F("body:JSON.stringify({tempOffset:parseFloat(document.getElementById('temp-offset').value)||0,");
   js += F("humOffset:parseFloat(document.getElementById('hum-offset').value)||0,");
   js += F("selfInterval:parseInt(document.getElementById('self-interval').value)||60,");
-  js += F("batchInterval:parseInt(document.getElementById('batch-interval').value)||30})})");
-  js += F(".then(r=>r.json()).then(data=>{if(data.ok){showMessage('Sensor settings saved');}");
+  js += F("batchInterval:parseInt(document.getElementById('batch-interval').value)||30,");
+  js += F("bleScanSec:parseInt(document.getElementById('ble-scan-sec').value)||5,");
+  js += F("maxNodes:parseInt(document.getElementById('max-nodes').value)||32,");
+  js += F("reportInterval:parseInt(document.getElementById('report-interval').value)||300,");
+  js += F("rebootHour:parseInt(document.getElementById('reboot-hour').value)||-1,");
+  js += F("rebootMin:parseInt(document.getElementById('reboot-min').value)||0})})");
+  js += F(".then(r=>r.json()).then(data=>{if(data.ok){showMessage('Settings saved');}");
   js += F("else{showMessage('Error saving settings','error');}});});");
 
   // MQTT設定読み込み
@@ -241,7 +271,7 @@ void HttpManagerIs02a::getTypeSpecificConfig(JsonObject& obj) {
   obj["tempOffset"] = settings_->getString(Is02aKeys::kTempOffset, "0.0").toFloat();
   obj["humOffset"] = settings_->getString(Is02aKeys::kHumOffset, "0.0").toFloat();
   obj["selfInterval"] = settings_->getInt(Is02aKeys::kSelfIntv, 60);
-  obj["batchInterval"] = settings_->getInt(Is02aKeys::kBatchIntv, 30);
+  obj["batchInterval"] = settings_->getInt(Is02aKeys::kBatchIntv, 300);
 
   // MQTT設定
   obj["mqttBroker"] = settings_->getString(Is02aKeys::kMqttBroker, "");
@@ -298,11 +328,16 @@ void HttpManagerIs02a::handleSensorConfig() {
   if (!checkAuth()) { requestAuth(); return; }
 
   if (server_->method() == HTTP_GET) {
-    DynamicJsonDocument doc(256);
+    DynamicJsonDocument doc(512);
     doc["tempOffset"] = settings_->getString(Is02aKeys::kTempOffset, "0.0").toFloat();
     doc["humOffset"] = settings_->getString(Is02aKeys::kHumOffset, "0.0").toFloat();
     doc["selfInterval"] = settings_->getInt(Is02aKeys::kSelfIntv, 60);
-    doc["batchInterval"] = settings_->getInt(Is02aKeys::kBatchIntv, 30);
+    doc["batchInterval"] = settings_->getInt(Is02aKeys::kBatchIntv, 300);
+    doc["bleScanSec"] = settings_->getInt(Is02aKeys::kBleScanSec, 5);
+    doc["maxNodes"] = settings_->getInt(Is02aKeys::kMaxNodes, 32);
+    doc["reportInterval"] = settings_->getInt(Is02aKeys::kReportIntv, 300);
+    doc["rebootHour"] = settings_->getInt(Is02aKeys::kRebootHour, -1);
+    doc["rebootMin"] = settings_->getInt(Is02aKeys::kRebootMin, 0);
 
     String json;
     serializeJson(doc, json);
@@ -311,7 +346,7 @@ void HttpManagerIs02a::handleSensorConfig() {
   }
 
   // POST
-  DynamicJsonDocument doc(256);
+  DynamicJsonDocument doc(512);
   DeserializationError error = deserializeJson(doc, server_->arg("plain"));
 
   if (error) {
@@ -330,6 +365,21 @@ void HttpManagerIs02a::handleSensorConfig() {
   }
   if (doc.containsKey("batchInterval")) {
     settings_->setInt(Is02aKeys::kBatchIntv, doc["batchInterval"]);
+  }
+  if (doc.containsKey("bleScanSec")) {
+    settings_->setInt(Is02aKeys::kBleScanSec, doc["bleScanSec"]);
+  }
+  if (doc.containsKey("maxNodes")) {
+    settings_->setInt(Is02aKeys::kMaxNodes, doc["maxNodes"]);
+  }
+  if (doc.containsKey("reportInterval")) {
+    settings_->setInt(Is02aKeys::kReportIntv, doc["reportInterval"]);
+  }
+  if (doc.containsKey("rebootHour")) {
+    settings_->setInt(Is02aKeys::kRebootHour, doc["rebootHour"]);
+  }
+  if (doc.containsKey("rebootMin")) {
+    settings_->setInt(Is02aKeys::kRebootMin, doc["rebootMin"]);
   }
 
   server_->send(200, "application/json", "{\"ok\":true}");
@@ -427,7 +477,20 @@ String HttpManagerIs02a::generateTypeSpecificSpeedDial() {
   text += "tempOffset=" + settings_->getString(Is02aKeys::kTempOffset, "0.0") + "\n";
   text += "humOffset=" + settings_->getString(Is02aKeys::kHumOffset, "0.0") + "\n";
   text += "selfInterval=" + String(settings_->getInt(Is02aKeys::kSelfIntv, 60)) + "\n";
-  text += "batchInterval=" + String(settings_->getInt(Is02aKeys::kBatchIntv, 30)) + "\n";
+  text += "batchInterval=" + String(settings_->getInt(Is02aKeys::kBatchIntv, 300)) + "\n";
+  text += "\n";
+
+  // [BLE] セクション
+  text += "[BLE]\n";
+  text += "scanSec=" + String(settings_->getInt(Is02aKeys::kBleScanSec, 5)) + "\n";
+  text += "maxNodes=" + String(settings_->getInt(Is02aKeys::kMaxNodes, 32)) + "\n";
+  text += "\n";
+
+  // [Reporting] セクション
+  text += "[Reporting]\n";
+  text += "reportInterval=" + String(settings_->getInt(Is02aKeys::kReportIntv, 300)) + "\n";
+  text += "rebootHour=" + String(settings_->getInt(Is02aKeys::kRebootHour, -1)) + "\n";
+  text += "rebootMin=" + String(settings_->getInt(Is02aKeys::kRebootMin, 0)) + "\n";
   text += "\n";
 
   // [MQTT] セクション
@@ -475,6 +538,36 @@ bool HttpManagerIs02a::applyTypeSpecificSpeedDial(const String& section, const s
         settings_->setInt(Is02aKeys::kSelfIntv, value.toInt());
       } else if (key == "batchInterval") {
         settings_->setInt(Is02aKeys::kBatchIntv, value.toInt());
+      }
+    }
+    return true;
+  }
+
+  if (section == "BLE") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+
+      if (key == "scanSec") {
+        settings_->setInt(Is02aKeys::kBleScanSec, value.toInt());
+      } else if (key == "maxNodes") {
+        settings_->setInt(Is02aKeys::kMaxNodes, value.toInt());
+      }
+    }
+    return true;
+  }
+
+  if (section == "Reporting") {
+    for (const auto& line : lines) {
+      String key, value;
+      if (!parseLine(line, key, value)) continue;
+
+      if (key == "reportInterval") {
+        settings_->setInt(Is02aKeys::kReportIntv, value.toInt());
+      } else if (key == "rebootHour") {
+        settings_->setInt(Is02aKeys::kRebootHour, value.toInt());
+      } else if (key == "rebootMin") {
+        settings_->setInt(Is02aKeys::kRebootMin, value.toInt());
       }
     }
     return true;

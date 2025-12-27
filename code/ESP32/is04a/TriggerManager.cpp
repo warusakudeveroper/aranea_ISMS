@@ -330,7 +330,7 @@ String TriggerManager::getTimestamp() const {
 }
 
 String TriggerManager::toJson() const {
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
 
     // 入力
     JsonObject inputs = doc.createNestedObject("inputs");

@@ -189,9 +189,8 @@ void HttpManager::handleTenantPost() {
   if (server_->hasArg("tenant_cic")) {
     settings_->setString("tenant_cic", server_->arg("tenant_cic"));
   }
-  if (server_->hasArg("tenant_pass")) {
-    settings_->setString("tenant_pass", server_->arg("tenant_pass"));
-  }
+  // テナントパスワード認証は廃止（lacisId + email + CIC の3要素のみ）
+  settings_->remove("tenant_pass");
   if (server_->hasArg("gate_url")) {
     settings_->setString("gate_url", server_->arg("gate_url"));
   }
@@ -654,7 +653,6 @@ String HttpManager::generateTenantPage() {
   String tenantLacisId = settings_->getString("tenant_lacisid", "");
   String tenantEmail = settings_->getString("tenant_email", "");
   String tenantCic = settings_->getString("tenant_cic", "");
-  String tenantPass = settings_->getString("tenant_pass", "");
   String gateUrl = settings_->getString("gate_url", "");
   String saved = server_->arg("saved") == "1" ? "<p style='color:#4caf50'>Tenant settings saved! Reboot to apply.</p>" : "";
 
@@ -703,10 +701,7 @@ a{color:#e94560}
 <input type='text' name='tenant_cic' value=')";
   html += tenantCic;
   html += R"('>
-<label>Tenant Password</label>
-<input type='password' name='tenant_pass' value=')";
-  html += tenantPass;
-  html += R"('>
+<p class='hint'>認証は lacisId + Email + CIC の3要素。パスワード入力は不要です。</p>
 </div>
 <div class='card'>
 <h3>Cloud Endpoint</h3>

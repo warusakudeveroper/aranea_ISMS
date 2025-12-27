@@ -696,10 +696,22 @@ void setup() {
     sendStateReport();
   });
 
+  // 登録クリアコールバック（再登録用）
+  httpMgr.onClearRegistration([]() {
+    Serial.println("[WebUI] Clearing registration...");
+    araneaReg.clearRegistration();
+    Serial.println("[WebUI] Registration cleared. Reboot to re-register.");
+  });
+
   // ========================================
   // StateReporter初期化（送信機能:global + 構築:is10固有）
   // ========================================
   String stateEndpoint = araneaReg.getSavedStateEndpoint();
+  if (stateEndpoint.length() == 0) {
+    // Gate APIがstateEndpointを返さない場合はデフォルト使用
+    stateEndpoint = ARANEA_DEFAULT_CLOUD_URL;
+    Serial.println("[STATE] Using default stateEndpoint (Gate API did not provide)");
+  }
   stateReporter.begin(stateEndpoint);
   stateReporter.setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
 

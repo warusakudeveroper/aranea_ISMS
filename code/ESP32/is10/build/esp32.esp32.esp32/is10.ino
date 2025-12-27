@@ -125,6 +125,11 @@ static const char* stageStr(uint32_t stage) {
 #include "HttpOtaManager.h"
 #include "Operator.h"
 #include "SshClient.h"
+#include "SshPollerIs10.h"
+#include "StateReporter.h"
+#include "StateReporterIs10.h"
+#include "CelestialSenderIs10.h"
+#include "MqttConfigHandler.h"
 
 // FreeRTOS for stack monitoring
 #include "freertos/FreeRTOS.h"
@@ -208,25 +213,7 @@ static const unsigned long AP_MODE_TIMEOUT_MS = 300000;       // APモード5分
 
 // ルーター型はRouterTypes.hで定義
 // MAX_ROUTERS, RouterOsType, RouterConfig
-
-// ========================================
-// ルーター情報構造体（取得データ）
-// ========================================
-struct RouterInfo {
-  String rid;
-  String lacisId;       // ルーターのLacisID（MACから生成）- 送信しない
-  String routerMac;     // ルーターのMAC（大文字12HEX）- clients[].apMac用
-  String wanIp;
-  String lanIp;
-  String ssid24;        // 2.4GHz SSID
-  String ssid50;        // 5.0GHz SSID
-  String ssidMix;       // 混合SSID
-  int clientCount;
-  String vendorInfo;
-  String modelName;
-  unsigned long lastUpdate;
-  bool online;
-};
+// RouterInfoはSshPollerIs10.hで定義
 
 // ========================================
 // グローバル設定構造体
@@ -255,6 +242,11 @@ HttpManagerIs10 httpMgr;
 OtaManager ota;
 HttpOtaManager httpOta;
 Operator op;
+SshPollerIs10 sshPoller;
+StateReporter stateReporter;
+StateReporterIs10 stateReporterIs10;
+CelestialSenderIs10 celestialSender;
+MqttConfigHandler mqttConfigHandler;
 
 // 自機情報
 String myLacisId;
@@ -270,40 +262,12 @@ RouterConfig routers[MAX_ROUTERS];
 int routerCount = 0;
 
 // 状態
-int currentRouterIndex = 0;
 bool apModeActive = false;
 unsigned long apModeStartTime = 0;
-unsigned long lastRouterPoll = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long btnWifiPressTime = 0;
 unsigned long btnResetPressTime = 0;
 String lastPollResult = "---";
-int successCount = 0;
-int failCount = 0;
-
-// HTTPS用のグローバルSecureClient（TLSバッファ再利用でメモリ節約）
-// DISABLED: LibSSH-ESP32 TLS競合テストのため無効化
-// WiFiClientSecure secureClient;
-// bool secureClientInitialized = false;
-
-// SSH用のグローバルクライアント（メモリフラグメンテーション防止）
-SshClient* globalSshClient = nullptr;
-
-// SSH完了後のクリーンアップをメインループで行うためのフラグ
-// SSHタスク内から ssh_finalize() を呼ぶとクラッシュするため、
-// メインループのコンテキストで呼び出す
-volatile bool sshCleanupNeeded = false;
-TaskHandle_t sshTaskHandle = nullptr;
-
-// フラグベースSSH制御（ミニマル版アプローチ）
-volatile bool sshInProgress = false;
-volatile bool sshDone = false;
-volatile bool sshSuccess = false;
-unsigned long sshTaskStartTime = 0;  // タスク開始時刻（ウォッチドッグ用）
-
-// SSHタスクウォッチドッグ: libssh timeout * 2 + バッファ
-// libssh timeout = 30秒、ウォッチドッグ = 90秒
-static const unsigned long SSH_TASK_WATCHDOG_MS = 90000;
 
 // ========================================
 // MQTT関連（共通モジュール使用）
@@ -312,253 +276,10 @@ MqttManager mqtt;
 String mqttWsUrl;
 
 // ========================================
-// MQTT config双方向同期（SSOT）
-// ========================================
-int savedSchemaVersion = 0;        // NVS保存済みschemaVersion
-String savedConfigHash = "";       // サーバ発行のconfigHash（is10は計算不要）
-String lastConfigAppliedAt = "";   // ISO8601形式
-String lastConfigApplyError = "";  // 最後のエラーメッセージ（空=成功）
-
-// ========================================
 // deviceStateReport / heartbeat関連
 // ========================================
 static const unsigned long HEARTBEAT_INTERVAL_MS = 60000;  // 60秒間隔
-unsigned long lastHeartbeat = 0;
-bool initialStateReportSent = false;
-
-// ========================================
-// CelestialGlobe送信用ルーター情報配列
-// SSHタスクで取得した情報を格納
-// ========================================
-static RouterInfo collectedRouterInfo[MAX_ROUTERS];
-static int collectedRouterCount = 0;
-
-// ========================================
-// SSH専用タスク用構造体（32KB スタック）
-// LibSSH-ESP32公式exampleに従い、SSH操作を専用タスクで実行
-// ========================================
-static const uint32_t SSH_TASK_STACK_SIZE = 32768;  // 32KB (heapLargest制約に対応)
-
-struct SshTaskParams {
-  const RouterConfig* router;
-  RouterInfo* info;
-  bool success;
-  SemaphoreHandle_t doneSem;
-};
-
-// SSH専用タスク関数（ミニマル版アプローチ - フラグベース）
-// グローバル変数を直接参照し、セマフォではなくフラグで完了通知
-// CelestialGlobe送信用にcollectedRouterInfo[]に結果を格納
-//
-// 修正版 v1.2.1:
-// - connectedOk/dataOk の2段階成功判定（接続完了を優先）
-// - libssh_begin()/ssh_finalize()はsetup()で1回のみ呼び出し
-// - タイムアウトはglobalConfig.sshTimeoutを使用
-// - SERIAL_PRINTFでスレッドセーフ出力
-void sshTaskFunction(void* pvParameters) {
-  int idx = currentRouterIndex;
-  RouterConfig& router = routers[idx];
-
-  // 2段階成功判定フラグ
-  bool connectedOk = false;  // SSH認証成功
-  bool dataOk = false;       // データ取得成功
-
-  SERIAL_PRINTF("[SSH] Router %d/%d: %s (%s)\n", idx + 1, routerCount, router.rid.c_str(), router.ipAddr.c_str());
-
-  // collectedRouterInfo初期化
-  RouterInfo& info = collectedRouterInfo[idx];
-  info.rid = router.rid;
-  info.routerMac = "";  // SSH で取得
-  info.wanIp = "";
-  info.lanIp = "";
-  info.ssid24 = "";
-  info.ssid50 = "";
-  info.clientCount = 0;
-  info.online = false;
-  info.lastUpdate = millis();
-
-  // libssh_begin() はsetup()で1回だけ呼び出し済み（削除）
-
-  ssh_session session = ssh_new();
-  if (session == NULL) {
-    SERIAL_PRINTLN("[SSH] Failed to create session");
-    // ssh_finalize() は呼び出さない（グローバル状態を保持）
-    sshSuccess = false;
-    sshDone = true;
-    vTaskDelete(NULL);
-    return;
-  }
-
-  ssh_options_set(session, SSH_OPTIONS_HOST, router.ipAddr.c_str());
-  unsigned int port = router.sshPort;
-  ssh_options_set(session, SSH_OPTIONS_PORT, &port);
-  ssh_options_set(session, SSH_OPTIONS_USER, router.username.c_str());
-  // タイムアウトをglobalConfigから取得（秒単位）
-  long timeout = globalConfig.sshTimeout / 1000;
-  ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &timeout);
-
-  int rc = ssh_connect(session);
-  if (rc != SSH_OK) {
-    SERIAL_PRINTF("[SSH] Connect failed: %s\n", ssh_get_error(session));
-    ssh_free(session);
-    // ssh_finalize() は呼び出さない
-    sshSuccess = false;
-    sshDone = true;
-    vTaskDelete(NULL);
-    return;
-  }
-
-  rc = ssh_userauth_password(session, NULL, router.password.c_str());
-  if (rc != SSH_AUTH_SUCCESS) {
-    SERIAL_PRINTF("[SSH] Auth failed: %s\n", ssh_get_error(session));
-    ssh_disconnect(session);
-    ssh_free(session);
-    // ssh_finalize() は呼び出さない
-    sshSuccess = false;
-    sshDone = true;
-    vTaskDelete(NULL);
-    return;
-  }
-
-  // SSH認証成功 = connectedOk
-  connectedOk = true;
-  info.online = true;
-  SERIAL_PRINTLN("[SSH] Auth success (connectedOk=true)");
-
-  ssh_channel channel = ssh_channel_new(session);
-
-  if (channel) {
-    if (ssh_channel_open_session(channel) == SSH_OK) {
-      // WAN IP取得
-      if (ssh_channel_request_exec(channel, "nvram get wan0_ipaddr") == SSH_OK) {
-        char buf[256];
-        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-        if (n > 0) {
-          buf[n] = '\0';
-          // String生成を最小化
-          char wanBuf[64];
-          strncpy(wanBuf, buf, sizeof(wanBuf) - 1);
-          wanBuf[sizeof(wanBuf) - 1] = '\0';
-          // trim処理
-          char* p = wanBuf;
-          while (*p && isspace(*p)) p++;
-          char* end = p + strlen(p) - 1;
-          while (end > p && isspace(*end)) *end-- = '\0';
-          info.wanIp = p;
-          SERIAL_PRINTF("[SSH] WAN: %s\n", p);
-          dataOk = true;  // データ取得成功
-        }
-      }
-      ssh_channel_send_eof(channel);
-      ssh_channel_close(channel);
-    }
-    ssh_channel_free(channel);  // open_session失敗時もfree
-    channel = nullptr;
-  }
-
-  // 追加コマンド: LAN IP
-  channel = ssh_channel_new(session);
-  if (channel) {
-    if (ssh_channel_open_session(channel) == SSH_OK) {
-      if (ssh_channel_request_exec(channel, "nvram get lan_ipaddr") == SSH_OK) {
-        char buf[256];
-        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-        if (n > 0) {
-          buf[n] = '\0';
-          char* p = buf;
-          while (*p && isspace(*p)) p++;
-          char* end = p + strlen(p) - 1;
-          while (end > p && isspace(*end)) *end-- = '\0';
-          info.lanIp = p;
-        }
-      }
-      ssh_channel_send_eof(channel);
-      ssh_channel_close(channel);
-    }
-    ssh_channel_free(channel);
-    channel = nullptr;
-  }
-
-  // 追加コマンド: 2.4GHz SSID
-  channel = ssh_channel_new(session);
-  if (channel) {
-    if (ssh_channel_open_session(channel) == SSH_OK) {
-      if (ssh_channel_request_exec(channel, "nvram get wl0_ssid") == SSH_OK) {
-        char buf[256];
-        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-        if (n > 0) {
-          buf[n] = '\0';
-          char* p = buf;
-          while (*p && isspace(*p)) p++;
-          char* end = p + strlen(p) - 1;
-          while (end > p && isspace(*end)) *end-- = '\0';
-          info.ssid24 = p;
-        }
-      }
-      ssh_channel_send_eof(channel);
-      ssh_channel_close(channel);
-    }
-    ssh_channel_free(channel);
-    channel = nullptr;
-  }
-
-  // 追加コマンド: 5GHz SSID
-  channel = ssh_channel_new(session);
-  if (channel) {
-    if (ssh_channel_open_session(channel) == SSH_OK) {
-      if (ssh_channel_request_exec(channel, "nvram get wl1_ssid") == SSH_OK) {
-        char buf[256];
-        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-        if (n > 0) {
-          buf[n] = '\0';
-          char* p = buf;
-          while (*p && isspace(*p)) p++;
-          char* end = p + strlen(p) - 1;
-          while (end > p && isspace(*end)) *end-- = '\0';
-          info.ssid50 = p;
-        }
-      }
-      ssh_channel_send_eof(channel);
-      ssh_channel_close(channel);
-    }
-    ssh_channel_free(channel);
-    channel = nullptr;
-  }
-
-  // 追加コマンド: クライアント数（DHCPリース）
-  channel = ssh_channel_new(session);
-  if (channel) {
-    if (ssh_channel_open_session(channel) == SSH_OK) {
-      if (ssh_channel_request_exec(channel, "cat /var/lib/misc/dnsmasq.leases 2>/dev/null | wc -l") == SSH_OK) {
-        char buf[64];
-        int n = ssh_channel_read(channel, buf, sizeof(buf) - 1, 0);
-        if (n > 0) {
-          buf[n] = '\0';
-          info.clientCount = atoi(buf);
-        }
-      }
-      ssh_channel_send_eof(channel);
-      ssh_channel_close(channel);
-    }
-    ssh_channel_free(channel);
-    channel = nullptr;
-  }
-
-  ssh_disconnect(session);
-  ssh_free(session);
-  // ssh_finalize() は呼び出さない（グローバル状態を保持）
-
-  info.lastUpdate = millis();
-
-  // 成功判定: connectedOk（SSH認証成功）を優先
-  // dataOk が false でも connectedOk が true なら完走扱い
-  sshSuccess = connectedOk;
-  SERIAL_PRINTF("[SSH] Done: connectedOk=%d, dataOk=%d, sshSuccess=%d\n",
-                connectedOk, dataOk, sshSuccess);
-
-  sshDone = true;
-  vTaskDelete(NULL);
-}
+// SSOT変数はStateReporterIs10が管理
 
 // ========================================
 // 前方宣言
@@ -567,10 +288,6 @@ void loadIs10Config();
 void saveIs10Config();
 void startAPMode();
 void stopAPMode();
-bool startSshTask(int index);
-bool executeSSHCommands(const RouterConfig& router, RouterInfo& info);
-// bool postRouterInfo(const RouterInfo& info);  // DISABLED for TLS isolation test
-String generateRouterLacisId(const String& mac);
 
 // ========================================
 // APモードSSID生成
@@ -653,614 +370,18 @@ void stopAPMode() {
   apModeActive = false;
 }
 
+// SSH/StateReport関連関数はモジュールに移動済み
+
 // ========================================
-// ルーターLacisID生成
+// stateReport送信ヘルパー（StateReporter経由）
 // ========================================
-String generateRouterLacisId(const String& mac) {
-  // MACアドレスからLacisIDを生成
-  // フォーマット: [prefix][productType][MAC12桁][productCode]
-  String cleanMac = mac;
-  cleanMac.replace(":", "");
-  cleanMac.replace("-", "");
-  cleanMac.toUpperCase();
-
-  if (cleanMac.length() != 12) {
-    return "";
-  }
-
-  String prefix = globalConfig.lacisIdPrefix;
-  String ptype = globalConfig.routerProductType;
-  String pcode = globalConfig.routerProductCode;
-
-  // 仮のLacisID（ProductType/Codeが未設定の場合）
-  if (ptype.length() == 0) ptype = "000";
-  if (pcode.length() == 0) pcode = "0000";
-
-  return prefix + ptype + cleanMac + pcode;
+bool sendStateReport() {
+  String payload = stateReporterIs10.buildPayload();
+  if (payload.length() == 0) return false;
+  return stateReporter.sendReport(payload);
 }
 
-// ========================================
-// 出力パース用ヘルパー関数
-// ========================================
-String parseIpFromIfconfig(const String& output) {
-  // "inet addr:192.168.1.1" または "inet 192.168.1.1" を抽出
-  int pos = output.indexOf("inet ");
-  if (pos < 0) pos = output.indexOf("inet:");
-  if (pos < 0) return "";
-
-  String sub = output.substring(pos + 5);
-  sub.replace("addr:", "");
-  sub.trim();
-
-  int spacePos = sub.indexOf(' ');
-  if (spacePos > 0) {
-    sub = sub.substring(0, spacePos);
-  }
-  return sub;
-}
-
-String parseSsidFromUci(const String& output, const String& band) {
-  // "wireless.wlan0.ssid='MySSID'" を抽出
-  String search = band + ".ssid='";
-  int pos = output.indexOf(search);
-  if (pos < 0) {
-    search = band + ".ssid=";
-    pos = output.indexOf(search);
-  }
-  if (pos < 0) return "";
-
-  int start = pos + search.length();
-  int end = output.indexOf("'", start);
-  if (end < 0) end = output.indexOf("\n", start);
-  if (end < 0) end = output.length();
-
-  return output.substring(start, end);
-}
-
-int parseClientCount(const String& output) {
-  // DHCPリースの行数をカウント
-  int count = 0;
-  int pos = 0;
-  while ((pos = output.indexOf('\n', pos)) >= 0) {
-    count++;
-    pos++;
-  }
-  return count;
-}
-
-// ========================================
-// SSH経由でルーター情報取得
-// ========================================
-bool executeSSHCommands(const RouterConfig& router, RouterInfo& info) {
-  bool isAsuswrt = (router.osType == RouterOsType::ASUSWRT);
-  const char* osName = isAsuswrt ? "ASUSWRT" : "OpenWrt";
-
-  // ログ出力（secretsは出さない: username/password は表示しない）
-  Serial.printf("[SSH] Connecting to %s:%d (%s)\n",
-    router.ipAddr.c_str(), router.sshPort, osName);
-
-  // 初期化
-  info.rid = router.rid;
-  info.wanIp = "";
-  info.lanIp = "";
-  info.ssid24 = "";
-  info.ssid50 = "";
-  info.clientCount = 0;
-  info.online = false;
-  info.lastUpdate = millis();
-
-  // グローバルSSHクライアントを確認
-  if (globalSshClient == nullptr) {
-    Serial.println("[SSH] Creating globalSshClient...");
-    globalSshClient = new SshClient();
-  }
-
-  // libsshが初期化されていない場合は初期化
-  if (!globalSshClient->isInitialized()) {
-    globalSshClient->begin();
-  }
-
-  SshClient& ssh = *globalSshClient;
-
-  // 既存の接続があれば切断
-  if (ssh.isConnected()) {
-    ssh.disconnect();
-  }
-
-  SshConfig config;
-  config.host = router.ipAddr;
-  config.port = router.sshPort;
-  config.username = router.username;
-  config.password = router.password;
-  config.timeout = globalConfig.sshTimeout;
-
-  logStack("SSH-before-connect");
-  SshResult result = ssh.connect(config);
-  logStack("SSH-after-connect");
-  if (result != SshResult::OK) {
-    Serial.printf("[SSH] Connection failed: %s\n", ssh.getLastError().c_str());
-    return false;
-  }
-
-  info.online = true;
-  SshExecResult execResult;
-
-  // ========================================
-  // WAN IP取得
-  // ========================================
-  if (isAsuswrt) {
-    // ASUSWRT: nvramからWAN IPを取得
-    execResult = ssh.exec("nvram get wan0_ipaddr 2>/dev/null");
-  } else {
-    // OpenWrt: ifconfigからWAN IPを取得
-    execResult = ssh.exec("ifconfig eth0 2>/dev/null || ifconfig wan 2>/dev/null");
-  }
-  if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-    if (isAsuswrt) {
-      info.wanIp = execResult.output;
-      info.wanIp.trim();
-    } else {
-      info.wanIp = parseIpFromIfconfig(execResult.output);
-    }
-    Serial.printf("[SSH] WAN IP: %s\n", info.wanIp.c_str());
-  }
-
-  // ========================================
-  // LAN IP取得
-  // ========================================
-  if (isAsuswrt) {
-    // ASUSWRT: br0インターフェース
-    execResult = ssh.exec("ifconfig br0 2>/dev/null");
-  } else {
-    // OpenWrt: br-lanインターフェース
-    execResult = ssh.exec("ifconfig br-lan 2>/dev/null || ifconfig lan 2>/dev/null");
-  }
-  if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-    info.lanIp = parseIpFromIfconfig(execResult.output);
-    Serial.printf("[SSH] LAN IP: %s\n", info.lanIp.c_str());
-  }
-
-  // ========================================
-  // SSID取得
-  // ========================================
-  if (isAsuswrt) {
-    // ASUSWRT: nvramからSSIDを取得
-    execResult = ssh.exec("nvram get wl0_ssid 2>/dev/null");
-    if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-      info.ssid24 = execResult.output;
-      info.ssid24.trim();
-    }
-    execResult = ssh.exec("nvram get wl1_ssid 2>/dev/null");
-    if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-      info.ssid50 = execResult.output;
-      info.ssid50.trim();
-    }
-  } else {
-    // OpenWrt: uciからSSIDを取得
-    execResult = ssh.exec("uci show wireless 2>/dev/null | grep ssid");
-    if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-      // 2.4GHz (wlan0 or radio0)
-      info.ssid24 = parseSsidFromUci(execResult.output, "wlan0");
-      if (info.ssid24.length() == 0) {
-        info.ssid24 = parseSsidFromUci(execResult.output, "default_radio0");
-      }
-      // 5GHz (wlan1 or radio1)
-      info.ssid50 = parseSsidFromUci(execResult.output, "wlan1");
-      if (info.ssid50.length() == 0) {
-        info.ssid50 = parseSsidFromUci(execResult.output, "default_radio1");
-      }
-    }
-  }
-  Serial.printf("[SSH] SSID 2.4G: %s, 5G: %s\n", info.ssid24.c_str(), info.ssid50.c_str());
-
-  // ========================================
-  // DHCPリース（接続クライアント数）
-  // ========================================
-  if (isAsuswrt) {
-    // ASUSWRT: /var/lib/misc/dnsmasq.leases
-    execResult = ssh.exec("cat /var/lib/misc/dnsmasq.leases 2>/dev/null");
-  } else {
-    // OpenWrt: /tmp/dhcp.leases
-    execResult = ssh.exec("cat /tmp/dhcp.leases 2>/dev/null");
-  }
-  if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-    info.clientCount = parseClientCount(execResult.output);
-    Serial.printf("[SSH] Client count: %d\n", info.clientCount);
-  }
-
-  // ========================================
-  // MACアドレス取得（clients[].apMac用 + LacisID生成）
-  // ========================================
-  if (isAsuswrt) {
-    // ASUSWRT: br0インターフェースのMAC
-    execResult = ssh.exec("cat /sys/class/net/br0/address 2>/dev/null");
-  } else {
-    // OpenWrt: br-lanインターフェースのMAC
-    execResult = ssh.exec("cat /sys/class/net/br-lan/address 2>/dev/null || cat /sys/class/net/eth0/address 2>/dev/null");
-  }
-  if (execResult.result == SshResult::OK && execResult.output.length() > 0) {
-    String mac = execResult.output;
-    mac.trim();
-    // routerMac: 大文字12HEX正規化（clients[].apMacで使用）
-    String cleanMac = mac;
-    cleanMac.replace(":", "");
-    cleanMac.replace("-", "");
-    cleanMac.toUpperCase();
-    info.routerMac = cleanMac;
-    // lacisId生成（送信しない、参照用）
-    info.lacisId = generateRouterLacisId(mac);
-    Serial.printf("[SSH] Router MAC: %s (norm: %s)\n", mac.c_str(), cleanMac.c_str());
-  }
-
-  ssh.disconnect();
-  Serial.printf("[SSH] Data collection complete (%s)\n", osName);
-
-  return true;
-}
-
-// ========================================
-// deviceName sanitize（SSOT準拠）
-// - trim
-// - 制御文字除去（改行/タブ等）
-// - 連続空白を1つに圧縮
-// - 最大64文字
-// ========================================
-String sanitizeDeviceName(const String& raw) {
-  String result;
-  result.reserve(64);
-
-  bool lastWasSpace = true;  // 先頭空白スキップ用
-  for (int i = 0; i < raw.length() && result.length() < 64; i++) {
-    char c = raw.charAt(i);
-
-    // 制御文字（0x00-0x1F, 0x7F）はスキップまたはスペースに
-    if (c < 0x20 || c == 0x7F) {
-      if (!lastWasSpace && result.length() > 0) {
-        result += ' ';
-        lastWasSpace = true;
-      }
-      continue;
-    }
-
-    // スペースの連続圧縮
-    if (c == ' ') {
-      if (!lastWasSpace) {
-        result += c;
-        lastWasSpace = true;
-      }
-      continue;
-    }
-
-    result += c;
-    lastWasSpace = false;
-  }
-
-  // 末尾空白除去
-  result.trim();
-
-  return result;
-}
-
-// ========================================
-// deviceName取得（デフォルト付き）
-// ========================================
-String getDeviceName() {
-  String deviceName = settings.getString("device_name", "");
-  deviceName = sanitizeDeviceName(deviceName);
-
-  // 空の場合はホスト名をデフォルトに
-  if (deviceName.length() == 0) {
-    deviceName = myHostname;  // "ar-is10-XXXXXX"
-  }
-
-  return deviceName;
-}
-
-// ========================================
-// deviceStateReport送信（mobesへの状態報告）
-// 仕様書: 起動後1回 + 60秒毎heartbeat
-// SSOT双方向同期:
-// - state.deviceName
-// - state.appliedConfigSchemaVersion / appliedConfigHash
-// - state.reportedConfig.is10（オプション）
-// ========================================
-bool sendDeviceStateReport() {
-  String stateEndpoint = araneaReg.getSavedStateEndpoint();
-  if (stateEndpoint.length() == 0) {
-    Serial.println("[STATE] No stateEndpoint available");
-    return false;
-  }
-
-  String observedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
-  String deviceName = getDeviceName();  // sanitize済み
-
-  // ReportedConfig用フラグ（デフォルトはsecretsなしで送信）
-  bool reportFullConfig = settings.getBool("is10_report_full_config", false);
-
-  // バッファサイズ: Applied + ReportedConfig分を考慮
-  DynamicJsonDocument doc(4096);
-
-  // auth
-  JsonObject auth = doc.createNestedObject("auth");
-  auth["tid"] = myTid;
-  auth["lacisId"] = myLacisId;
-  auth["cic"] = myCic;
-
-  // report
-  JsonObject report = doc.createNestedObject("report");
-  report["lacisId"] = myLacisId;
-  report["type"] = ARANEA_DEVICE_TYPE;  // canonical: "aranea_ar-is10"
-  report["observedAt"] = observedAt;
-
-  // state
-  JsonObject state = report.createNestedObject("state");
-
-  // 基本情報
-  state["deviceName"] = deviceName;  // mobes userObject.name 連携用
-  state["IPAddress"] = WiFi.localIP().toString();
-  state["MacAddress"] = myMac;
-  state["RSSI"] = WiFi.RSSI();
-  state["routerCount"] = routerCount;
-  state["successCount"] = successCount;
-  state["failCount"] = failCount;
-  state["lastPollResult"] = lastPollResult;
-  state["mqttConnected"] = mqtt.isConnected();
-  state["heap"] = ESP.getFreeHeap();
-
-  // ========================================
-  // Applied情報（SSOT必須）
-  // mobesのconfigApplied.status判定に使用
-  // ========================================
-  state["appliedConfigSchemaVersion"] = savedSchemaVersion;
-  state["appliedConfigHash"] = savedConfigHash;
-  if (lastConfigAppliedAt.length() > 0) {
-    state["lastConfigAppliedAt"] = lastConfigAppliedAt;
-  }
-  if (lastConfigApplyError.length() > 0) {
-    state["lastConfigApplyError"] = lastConfigApplyError;
-  }
-
-  // ========================================
-  // ReportedConfig（現地設定の可視化）
-  // hashだけでもよいが、運用のためにis10設定を返す
-  // ========================================
-  state["reportedConfigSchemaVersion"] = savedSchemaVersion;
-  state["reportedConfigHash"] = savedConfigHash;
-
-  // reportedConfig.is10: 現在動作中の設定
-  JsonObject reportedConfig = state.createNestedObject("reportedConfig");
-  JsonObject is10Cfg = reportedConfig.createNestedObject("is10");
-
-  is10Cfg["scanInterval"] = settings.getInt("is10_scan_interval_sec", 60);
-  is10Cfg["reportClientList"] = settings.getBool("is10_report_clients", true);
-
-  // routers配列（secretsは reportFullConfig フラグで制御）
-  JsonArray routersArr = is10Cfg.createNestedArray("routers");
-  for (int i = 0; i < routerCount; i++) {
-    JsonObject r = routersArr.createNestedObject();
-    r["rid"] = routers[i].rid;
-    r["ipAddr"] = routers[i].ipAddr;
-    r["sshPort"] = routers[i].sshPort;
-    r["enabled"] = routers[i].enabled;
-    r["platform"] = (routers[i].osType == RouterOsType::ASUSWRT) ? "asuswrt" : "openwrt";
-
-    // secrets: reportFullConfig=true の場合のみ含める（運用要件で選択可能）
-    if (reportFullConfig) {
-      r["sshUser"] = routers[i].username;
-      r["password"] = routers[i].password;
-      if (routers[i].publicKey.length() > 0) {
-        r["privateKey"] = routers[i].publicKey;
-      }
-    }
-  }
-
-  String json;
-  serializeJson(doc, json);
-
-  // ログ出力（secretsは出さない、hashは短縮）
-  String hashShort = savedConfigHash.length() > 8 ? savedConfigHash.substring(0, 8) + "..." : savedConfigHash;
-  Serial.printf("[STATE] deviceName=\"%s\", type=%s, schema=%d, hash=%s\n",
-                deviceName.c_str(), ARANEA_DEVICE_TYPE, savedSchemaVersion, hashShort.c_str());
-  Serial.printf("[STATE] Sending to %s (%d bytes)\n", stateEndpoint.c_str(), json.length());
-
-  HTTPClient http;
-  http.begin(stateEndpoint);
-  http.addHeader("Content-Type", "application/json");
-  http.setTimeout(10000);
-
-  int httpCode = http.POST(json);
-  String response = http.getString();
-  http.end();
-
-  bool success = (httpCode >= 200 && httpCode < 300);
-  Serial.printf("[STATE] HTTP %d %s\n", httpCode, success ? "OK" : "NG");
-  if (!success) {
-    Serial.printf("[STATE] Response: %s\n", response.c_str());
-  }
-
-  // HttpManagerIs10にもステータス反映（UI用）
-  httpMgr.setLastStateReport(observedAt, httpCode);
-
-  return success;
-}
-
-// ========================================
-// MQTT config適用（routers配列フル更新）
-// SSOT: secrets（sshUser/password/privateKey）も受け取り・保存・適用
-// CelestialGlobe送信には絶対に載せない
-// ========================================
-void applyRouterConfig(JsonArray routersJson) {
-  // SSOT方針: MQTTからの設定で完全上書き（マージではなく置換）
-  // 既存設定はDesiredで上書きされる
-
-  int newCount = 0;
-  for (JsonObject r : routersJson) {
-    if (newCount >= MAX_ROUTERS) break;
-
-    String rid = r["rid"] | "";
-    if (rid.length() == 0) continue;
-
-    RouterConfig& router = routers[newCount];
-    router.rid = rid;
-    router.ipAddr = r["ipAddr"] | "";
-    router.sshPort = r["sshPort"] | 22;
-    router.enabled = r["enabled"] | true;
-
-    // secrets: 受け取り・保存・適用OK（CelestialGlobeには載せない）
-    // SSOT仕様: sshUser → username, password, privateKey → publicKey
-    if (r.containsKey("sshUser")) {
-      router.username = r["sshUser"].as<String>();
-    } else if (r.containsKey("username")) {
-      router.username = r["username"].as<String>();
-    }
-
-    if (r.containsKey("password")) {
-      router.password = r["password"].as<String>();
-    }
-
-    if (r.containsKey("privateKey")) {
-      router.publicKey = r["privateKey"].as<String>();  // publicKeyフィールドに格納
-    } else if (r.containsKey("publicKey")) {
-      router.publicKey = r["publicKey"].as<String>();
-    }
-
-    // platform → osType マッピング
-    String platform = r["platform"] | "asuswrt";
-    platform.toLowerCase();
-    if (platform == "openwrt") {
-      router.osType = RouterOsType::OPENWRT;
-    } else {
-      router.osType = RouterOsType::ASUSWRT;  // デフォルト
-    }
-
-    // ログ出力（secretsは出さない）
-    Serial.printf("[CONFIG] Router %s: %s:%d (%s)\n",
-      rid.c_str(), router.ipAddr.c_str(), router.sshPort,
-      (router.osType == RouterOsType::ASUSWRT) ? "ASUSWRT" : "OpenWrt");
-
-    newCount++;
-  }
-
-  routerCount = newCount;
-  Serial.printf("[CONFIG] Applied %d routers from MQTT config\n", routerCount);
-  httpMgr.setRouterStatus(routerCount, 0, 0);  // ステータス更新
-}
-
-// ========================================
-// MQTT configメッセージ処理（SSOT双方向同期）
-// 仕様:
-// - schemaVersion巻き戻し禁止
-// - secrets（sshUser/password/privateKey）は受け取り・保存・適用OK
-// - configHashはサーバ発行をそのまま保存（is10は計算しない）
-// - 適用成功後は即時deviceStateReport
-// ========================================
-void handleConfigMessage(const char* data, int len) {
-  Serial.printf("[MQTT] Config received: %d bytes\n", len);
-
-  // JSONパース（is10 config用に大きめのバッファ）
-  DynamicJsonDocument doc(4096);
-  DeserializationError err = deserializeJson(doc, data, len);
-  if (err) {
-    Serial.printf("[MQTT] JSON parse error: %s\n", err.c_str());
-    lastConfigApplyError = "JSON parse error: " + String(err.c_str());
-    settings.setString("is10_config_apply_error", lastConfigApplyError);
-    return;
-  }
-
-  // schemaVersion巻き戻し禁止
-  int schemaVersion = doc["schemaVersion"] | 0;
-  if (schemaVersion <= savedSchemaVersion) {
-    Serial.printf("[MQTT] Ignoring old/same schema: %d <= %d (rollback prevention)\n",
-                  schemaVersion, savedSchemaVersion);
-    return;
-  }
-
-  // configHash取得（サーバ発行、is10は計算しない）
-  String configHash = doc["configHash"] | "";
-  String configHashShort = configHash.length() > 8 ? configHash.substring(0, 8) + "..." : configHash;
-  Serial.printf("[MQTT] New config: schemaVersion=%d, hash=%s\n", schemaVersion, configHashShort.c_str());
-
-  // config.is10を読む
-  JsonObject is10Cfg = doc["config"]["is10"];
-  if (is10Cfg.isNull()) {
-    Serial.println("[MQTT] No config.is10 in message, ignoring");
-    lastConfigApplyError = "No config.is10 in message";
-    settings.setString("is10_config_apply_error", lastConfigApplyError);
-    return;
-  }
-
-  // ========================================
-  // Apply処理開始
-  // ========================================
-  bool applySuccess = true;
-  String applyError = "";
-
-  // scanInterval適用（秒）
-  if (is10Cfg.containsKey("scanInterval")) {
-    int sec = is10Cfg["scanInterval"];
-    if (sec >= 60 && sec <= 86400) {
-      settings.setInt("is10_scan_interval_sec", sec);
-      Serial.printf("[CONFIG] scanInterval=%d sec\n", sec);
-    } else {
-      Serial.printf("[CONFIG] scanInterval=%d out of range (60-86400), skipped\n", sec);
-    }
-  }
-
-  // reportClientList適用
-  if (is10Cfg.containsKey("reportClientList")) {
-    bool reportClients = is10Cfg["reportClientList"];
-    settings.setBool("is10_report_clients", reportClients);
-    Serial.printf("[CONFIG] reportClientList=%s\n", reportClients ? "true" : "false");
-  }
-
-  // routers適用（secrets含む完全置換）
-  if (is10Cfg.containsKey("routers")) {
-    applyRouterConfig(is10Cfg["routers"].as<JsonArray>());
-
-    // routers.jsonに永続化
-    httpMgr.persistRouters();
-    Serial.println("[CONFIG] Routers persisted to SPIFFS");
-  }
-
-  // ========================================
-  // 適用成功時の保存処理
-  // ========================================
-  if (applySuccess) {
-    // NVS保存
-    savedSchemaVersion = schemaVersion;
-    settings.setInt("is10_config_schema_version", schemaVersion);
-
-    savedConfigHash = configHash;
-    settings.setString("is10_config_hash", configHash);
-
-    // ISO8601形式で現在時刻
-    lastConfigAppliedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
-    settings.setString("is10_config_applied_at", lastConfigAppliedAt);
-
-    // エラークリア
-    lastConfigApplyError = "";
-    settings.setString("is10_config_apply_error", "");
-
-    Serial.printf("[CONFIG] Applied successfully: schemaVersion=%d, hash=%s, at=%s\n",
-                  schemaVersion, configHashShort.c_str(), lastConfigAppliedAt.c_str());
-
-    // ========================================
-    // 即時deviceStateReport送信（SSOT必須）
-    // mobesがappliedSchemaVersion/hashで反映確認
-    // ========================================
-    Serial.println("[CONFIG] Sending immediate deviceStateReport...");
-    if (sendDeviceStateReport()) {
-      Serial.println("[CONFIG] Immediate stateReport sent OK");
-    } else {
-      Serial.println("[CONFIG] Immediate stateReport failed (will retry in heartbeat)");
-    }
-  } else {
-    // 適用失敗時（旧設定は保持）
-    lastConfigApplyError = applyError;
-    settings.setString("is10_config_apply_error", applyError);
-    Serial.printf("[CONFIG] Apply failed: %s\n", applyError.c_str());
-  }
-}
+// MQTT config処理はMqttConfigHandlerに移動済み
 
 // ========================================
 // MQTTメッセージ処理（topic振り分け）
@@ -1271,7 +392,7 @@ void handleMqttMessage(const String& topic, const char* data, int dataLen) {
 
   // configトピック
   if (topic.indexOf("/config") >= 0) {
-    handleConfigMessage(data, dataLen);
+    mqttConfigHandler.handleConfigMessage(data, dataLen);
     return;
   }
 
@@ -1308,255 +429,7 @@ void onMqttDisconnected() {
   httpMgr.setMqttStatus(false);
 }
 
-// ========================================
-// CelestialGlobe SSOT送信（Universal Ingest）
-// 仕様書: observedAtはUnix ms（number型）
-// source="ar-is10", devices[], clients[]
-// ========================================
-bool sendToCelestialGlobe() {
-  // エンドポイント取得
-  String baseEndpoint = settings.getString("is10_endpoint", "");
-  String secret = settings.getString("is10_celestial_secret", "");
-
-  // 設定不備チェック（スキップ理由を明確にログ出力）
-  if (baseEndpoint.length() == 0 || secret.length() == 0) {
-    Serial.println("[CELESTIAL] SKIPPED - Missing configuration:");
-    if (baseEndpoint.length() == 0) {
-      Serial.println("[CELESTIAL]   - Endpoint: NOT SET");
-    } else {
-      Serial.println("[CELESTIAL]   - Endpoint: OK");
-    }
-    if (secret.length() == 0) {
-      Serial.println("[CELESTIAL]   - X-Celestial-Secret: NOT SET");
-    } else {
-      Serial.println("[CELESTIAL]   - X-Celestial-Secret: OK");
-    }
-    Serial.println("[CELESTIAL] Configure via HTTP UI: http://<device-ip>/");
-    Serial.println("[CELESTIAL] Settings tab > CelestialGlobe section");
-    return false;
-  }
-
-  // URL構築: endpoint?fid=XXX&source=araneaDevice
-  String url = baseEndpoint + "?fid=" + myFid + "&source=araneaDevice";
-
-  // observedAtはUnix ms（number型）
-  unsigned long long observedAtMs = 0;
-  if (ntp.isSynced()) {
-    observedAtMs = (unsigned long long)ntp.getEpoch() * 1000ULL;
-  } else {
-    observedAtMs = millis();  // フォールバック（不正確だが送信は可能）
-  }
-
-  // JSON構築（最大4KB）
-  DynamicJsonDocument doc(4096);
-
-  // auth
-  JsonObject auth = doc.createNestedObject("auth");
-  auth["tid"] = myTid;
-  auth["lacisId"] = myLacisId;  // is10のlacisId（observer）
-  auth["cic"] = myCic;
-
-  // source（CelestialGlobe用）
-  doc["source"] = CELESTIAL_SOURCE;  // "ar-is10"
-
-  // observedAt（Unix ms, number型）
-  doc["observedAt"] = observedAtMs;
-
-  // devices配列
-  JsonArray devices = doc.createNestedArray("devices");
-
-  for (int i = 0; i < collectedRouterCount; i++) {
-    RouterInfo& info = collectedRouterInfo[i];
-    if (!info.online) continue;  // オフラインはスキップ
-
-    JsonObject dev = devices.createNestedObject();
-
-    // MACアドレス（大文字12HEX - サーバがlacisId生成に使用）
-    // 仕様: ルーターのlacisIdはサーバがMACから生成する
-    dev["mac"] = info.routerMac;  // 大文字12HEX正規化済み
-
-    dev["type"] = "Router";
-    dev["label"] = "Room" + info.rid;
-    dev["status"] = info.online ? "online" : "offline";
-    dev["lanIp"] = info.lanIp;
-    dev["wanIp"] = info.wanIp;
-    dev["ssid24"] = info.ssid24;
-    dev["ssid50"] = info.ssid50;
-    dev["clientCount"] = info.clientCount;
-    // firmware, uptime は取得していないので省略
-    // parentMac はis10のMACを入れない（仕様禁止）
-  }
-
-  // clients配列（reportClientList=trueの場合のみ）
-  // 仕様: 各clientにapMac（接続先ルーターMAC）を含める
-  // 例: { "mac": "AABBCCDDEEFF", "apMac": "112233445566", "hostname": "iPhone" }
-  bool reportClients = settings.getBool("is10_report_clients", true);
-  if (reportClients) {
-    JsonArray clients = doc.createNestedArray("clients");
-    // TODO: クライアント詳細情報がSSHで取得できた場合に追加
-    // DHCPリースからclient MAC取得 → apMac = info.routerMac をセット
-    // parentMacはルーターの上流が確実に分かる場合のみ（不明なら空）
-  }
-
-  String json;
-  serializeJson(doc, json);
-
-  Serial.printf("[CELESTIAL] Sending to %s\n", url.c_str());
-  Serial.printf("[CELESTIAL] Payload size: %d bytes, devices: %d\n",
-                json.length(), devices.size());
-
-  HTTPClient http;
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Celestial-Secret", secret);
-  http.setTimeout(15000);
-
-  int httpCode = http.POST(json);
-  String response = http.getString();
-  http.end();
-
-  bool success = (httpCode >= 200 && httpCode < 300);
-  if (success) {
-    Serial.printf("[CELESTIAL] OK %d\n", httpCode);
-  } else {
-    Serial.printf("[CELESTIAL] NG %d: %s\n", httpCode, response.c_str());
-  }
-
-  return success;
-}
-
-// ========================================
-// ルーター情報をエンドポイントへPOST（旧形式 - 廃止予定）
-// ========================================
-// DISABLED: LibSSH-ESP32 TLS競合テストのため関数全体を無効化
-// NOTE: CelestialGlobe SSOT形式に移行予定
-#if 0
-bool postRouterInfo(const RouterInfo& info) {
-  Serial.println("[DEBUG] postRouterInfo() entered");
-
-  if (globalConfig.endpoint.length() == 0) {
-    Serial.println("[POST] No endpoint configured");
-    return false;
-  }
-
-  // メモリ計測（POST前）
-  size_t freeHeap = ESP.getFreeHeap();
-  size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  Serial.printf("[MEM] PRE-POST: heap=%u, largest=%u\n", freeHeap, largestBlock);
-
-  String observedAt = ntp.isSynced() ? ntp.getIso8601() : "1970-01-01T00:00:00Z";
-
-  StaticJsonDocument<1024> doc;
-
-  // auth
-  JsonObject auth = doc.createNestedObject("auth");
-  auth["tid"] = myTid;
-  auth["lacisId"] = myLacisId;
-  auth["cic"] = myCic;
-
-  // report
-  JsonObject report = doc.createNestedObject("report");
-  report["observedAt"] = observedAt;
-  report["sourceDevice"] = myLacisId;
-  report["sourceType"] = DEVICE_TYPE;
-
-  // router data
-  JsonObject routerData = report.createNestedObject("router");
-  routerData["rid"] = info.rid;
-  routerData["lacisId"] = info.lacisId;
-  routerData["wanIp"] = info.wanIp;
-  routerData["lanIp"] = info.lanIp;
-  routerData["ssid24"] = info.ssid24;
-  routerData["ssid50"] = info.ssid50;
-  routerData["clientCount"] = info.clientCount;
-  routerData["online"] = info.online;
-
-  String json;
-  serializeJson(doc, json);
-
-  Serial.printf("[POST] Sending to %s\n", globalConfig.endpoint.c_str());
-
-  // SecureClientの初期化（一度だけ）- グローバル再利用でnew/delete削減
-  // 注: ESP32 Arduino Core 3.xではsetBufferSizes()なし、デフォルト16KB×2
-  if (!secureClientInitialized) {
-    secureClient.setInsecure();  // 証明書検証スキップ（組み込みデバイス用）
-    secureClientInitialized = true;
-    Serial.println("[POST] SecureClient initialized (insecure mode)");
-  }
-
-  HTTPClient http;
-  http.begin(secureClient, globalConfig.endpoint);  // グローバルSecureClientを再利用
-  http.addHeader("Content-Type", "application/json");
-  http.setTimeout(15000);
-
-  // メモリ計測（TLS接続直前）
-  freeHeap = ESP.getFreeHeap();
-  largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  Serial.printf("[MEM] PRE-TLS: heap=%u, largest=%u\n", freeHeap, largestBlock);
-
-  int httpCode = http.POST(json);
-  bool success = (httpCode >= 200 && httpCode < 300);
-
-  if (success) {
-    Serial.printf("[POST] OK %d\n", httpCode);
-    lastPollResult = "OK";
-    successCount++;
-  } else {
-    Serial.printf("[POST] NG %d\n", httpCode);
-    lastPollResult = "NG";
-    failCount++;
-  }
-
-  http.end();
-
-  // メモリ計測（POST後）
-  freeHeap = ESP.getFreeHeap();
-  largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  Serial.printf("[MEM] POST-END: heap=%u, largest=%u\n", freeHeap, largestBlock);
-
-  return success;
-}
-#endif
-
-// ========================================
-// SSHタスク起動（非ブロッキング - ミニマル版アプローチ）
-// ========================================
-bool startSshTask(int index) {
-  if (index < 0 || index >= routerCount) return false;
-  if (sshInProgress) return false;  // 既にSSH実行中
-
-  RouterConfig& router = routers[index];
-  if (!router.enabled || router.ipAddr.length() == 0) {
-    return false;
-  }
-
-  // フラグリセット
-  sshDone = false;
-  sshSuccess = false;
-  sshInProgress = true;
-  sshTaskStartTime = millis();  // ウォッチドッグ用
-
-  Serial.printf("[POLL] Starting SSH for Router %d/%d\n", index + 1, routerCount);
-
-  // SSH タスクを Core 1 で実行（ミニマル版と同じ）
-  BaseType_t xReturned = xTaskCreatePinnedToCore(
-    sshTaskFunction,
-    "ssh",
-    SSH_TASK_STACK_SIZE,
-    NULL,  // パラメータ不要（グローバル変数を使用）
-    tskIDLE_PRIORITY + 1,  // ミニマル版と同じ優先度
-    NULL,
-    1  // Core 1（ミニマル版と同じ）
-  );
-
-  if (xReturned != pdPASS) {
-    Serial.println("[POLL] ERROR: Failed to create SSH task");
-    sshInProgress = false;
-    return false;
-  }
-
-  return true;
-}
+// CelestialGlobe送信はCelestialSenderIs10に移動済み
 
 // ========================================
 // GPIO初期化
@@ -1624,7 +497,7 @@ void updateDisplay() {
 
   String line1 = wifi.getIP() + " " + String(WiFi.RSSI()) + "dBm";
   String cicStr = myCic.length() > 0 ? myCic : "------";
-  String statusLine = "R:" + String(routerCount) + " OK:" + String(successCount) + " NG:" + String(failCount);
+  String statusLine = "R:" + String(routerCount) + " OK:" + String(sshPoller.getSuccessCount()) + " NG:" + String(sshPoller.getFailCount());
 
   display.showIs02Main(line1, cicStr, statusLine, false);
 }
@@ -1830,37 +703,73 @@ void setup() {
   // deviceName変更時の即時deviceStateReport送信（SSOT）
   httpMgr.onDeviceNameChanged([]() {
     Serial.println("[WebUI] deviceName changed - sending immediate deviceStateReport");
-    sendDeviceStateReport();
+    sendStateReport();
+  });
+
+  // ========================================
+  // StateReporter初期化（送信機能:global + 構築:is10固有）
+  // ========================================
+  String stateEndpoint = araneaReg.getSavedStateEndpoint();
+  stateReporter.begin(stateEndpoint);
+  stateReporter.setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
+
+  stateReporterIs10.begin(&stateReporter, &settings, &araneaReg, &ntp, &mqtt,
+                           &sshPoller, routers, &routerCount);
+  stateReporterIs10.setDeviceType(ARANEA_DEVICE_TYPE);
+  stateReporterIs10.setLacisId(myLacisId);
+  stateReporterIs10.setMac(myMac);
+  stateReporterIs10.setHostname(myHostname);
+  stateReporterIs10.setTid(myTid);
+  stateReporterIs10.setCic(myCic);
+  stateReporterIs10.setHttpManager(&httpMgr);
+
+  // HttpManagerにステータス反映コールバック
+  stateReporter.onReportSent([](bool success, int httpCode) {
+    String now = ntp.isSynced() ? ntp.getIso8601() : "";
+    httpMgr.setLastStateReport(now, httpCode);
+  });
+
+  // ========================================
+  // CelestialSender初期化
+  // ========================================
+  celestialSender.begin(&settings, &ntp, &sshPoller);
+  celestialSender.setAuth(myTid, myLacisId, myCic, myFid);
+  celestialSender.setSource(CELESTIAL_SOURCE);  // "ar-is10"
+
+  // ========================================
+  // MqttConfigHandler初期化
+  // ========================================
+  mqttConfigHandler.begin(&settings, &ntp, routers, &routerCount, &httpMgr, &stateReporterIs10);
+  mqttConfigHandler.onConfigApplied([]() {
+    Serial.println("[CONFIG] Sending immediate deviceStateReport...");
+    if (sendStateReport()) {
+      Serial.println("[CONFIG] Immediate stateReport sent OK");
+    } else {
+      Serial.println("[CONFIG] Immediate stateReport failed (will retry in heartbeat)");
+    }
   });
 
   // ========================================
   // deviceStateReport初回送信（必須）
-  // mobesのaraneaDeviceConfigは araneaDeviceStates/{lacisId} が
-  // ないと "Device not found" で設定投入できない
   // ========================================
   display.showBoot("StateReport...");
-  if (sendDeviceStateReport()) {
-    initialStateReportSent = true;
+  if (sendStateReport()) {
+    stateReporter.setInitialReportSent(true);
     Serial.println("[STATE] Initial state report sent");
   } else {
     Serial.println("[STATE] WARNING: Initial state report failed");
-    // 失敗してもloop()で再試行するので続行
   }
-  lastHeartbeat = millis();
 
   // ========================================
   // MQTT接続（双方向デバイス用）
   // ========================================
   mqttWsUrl = araneaReg.getSavedMqttEndpoint();
 
-  // NVSからApplied状態を復元（SSOT双方向同期）
-  savedSchemaVersion = settings.getInt("is10_config_schema_version", 0);
-  savedConfigHash = settings.getString("is10_config_hash", "");
-  lastConfigAppliedAt = settings.getString("is10_config_applied_at", "");
-  lastConfigApplyError = settings.getString("is10_config_apply_error", "");
-
-  String hashShort = savedConfigHash.length() > 8 ? savedConfigHash.substring(0, 8) + "..." : savedConfigHash;
-  Serial.printf("[CONFIG] Saved Applied state: schema=%d, hash=%s\n", savedSchemaVersion, hashShort.c_str());
+  String hashShort = stateReporterIs10.getConfigHash().length() > 8
+    ? stateReporterIs10.getConfigHash().substring(0, 8) + "..."
+    : stateReporterIs10.getConfigHash();
+  Serial.printf("[CONFIG] Saved Applied state: schema=%d, hash=%s\n",
+    stateReporterIs10.getSchemaVersion(), hashShort.c_str());
 
   if (mqttWsUrl.length() > 0) {
     display.showBoot("MQTT...");
@@ -1902,9 +811,6 @@ void setup() {
   // RUNモードへ
   op.setMode(OperatorMode::RUN);
 
-  // タイミング初期化
-  lastRouterPoll = millis();
-
   // 3秒間の安定化待機（yield()を入れてバックグラウンドタスクを処理）
   Serial.println("[BOOT] Waiting for all modules to stabilize (3s)...");
   for (int i = 0; i < 30; i++) {
@@ -1924,14 +830,31 @@ void setup() {
   }
 
   // ========================================
-  // SSH初期化 - 新方式: setup()で1回だけlibssh_begin()
+  // SSH Poller初期化
   // ========================================
-  // libssh_begin() をsetup()で1回だけ呼び出す
-  // ssh_finalize() は呼び出さない（グローバル状態破壊を防ぐ）
   lastStage = STAGE_SSH_BEGIN;
   Serial.printf("[STAGE] %s\n", stageStr(lastStage));
-  libssh_begin();
-  Serial.println("[SSH] libssh_begin() called once in setup()");
+
+  sshPoller.begin(routers, &routerCount, globalConfig.sshTimeout);
+  sshPoller.setRouterInterval(globalConfig.routerInterval);
+  sshPoller.setPollInterval(ROUTER_POLL_INTERVAL_MS);
+
+  // サイクル完了時にCelestialGlobe送信
+  sshPoller.onCycleComplete([](int success, int total) {
+    Serial.printf("[SSH-POLLER] Cycle complete: %d/%d\n", success, total);
+    httpMgr.setRouterStatus(total, success, millis());
+
+    // CelestialGlobe送信（メモリ回復待機後）
+    delay(3000);
+    uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    if (largestBlock >= 16000) {
+      celestialSender.send();
+    } else {
+      Serial.printf("[SSH-POLLER] Skip CelestialGlobe - low memory (%u < 16000)\n", largestBlock);
+    }
+  });
+
+  Serial.println("[SSH-POLLER] Initialized");
 
   lastStage = STAGE_SSH_DONE;
   Serial.printf("[STAGE] %s\n", stageStr(lastStage));
@@ -2007,143 +930,22 @@ void loop() {
   }
 
   // ========================================
-  // 4. ルーターポーリング（非ブロッキング - ミニマル版アプローチ）
+  // 4. ルーターポーリング（SshPollerIs10経由）
   // ========================================
   // ポーリングステータスを更新
-  httpMgr.setPollingStatus(currentRouterIndex, sshInProgress);
+  httpMgr.setPollingStatus(sshPoller.getCurrentIndex(), sshPoller.isPolling());
 
-  if (!apModeActive && routerCount > 0 && httpMgr.isPollingEnabled()) {
-    // SSHタスクウォッチドッグ: 長時間ハングしたら強制スキップ
-    if (sshInProgress && !sshDone && (now - sshTaskStartTime >= SSH_TASK_WATCHDOG_MS)) {
-      Serial.printf("[WATCHDOG] SSH task timeout after %lu ms, forcing skip\n",
-                    now - sshTaskStartTime);
-      Serial.printf("[WATCHDOG] Router %d/%d marked as FAILED (watchdog)\n",
-                    currentRouterIndex + 1, routerCount);
-      // 強制的に失敗として処理
-      sshInProgress = false;
-      sshDone = true;
-      sshSuccess = false;
-      failCount++;
-      // 次のルーターへ進む
-      currentRouterIndex++;
-      if (currentRouterIndex >= routerCount) {
-        Serial.printf("\n[COMPLETE] %d/%d success (watchdog triggered)\n", successCount, routerCount);
-        httpMgr.setRouterStatus(routerCount, successCount, millis());  // ステータス更新
-        collectedRouterCount = routerCount;
-        sendToCelestialGlobe();
-        currentRouterIndex = 0;
-        successCount = 0;
-        failCount = 0;
-        lastRouterPoll = now;
-      }
-      sshDone = false;  // フラグリセット
-    }
+  // SshPollerIs10の有効/無効をhttpMgrと同期
+  sshPoller.setEnabled(!apModeActive && routerCount > 0 && httpMgr.isPollingEnabled());
 
-    // SSH完了チェック
-    if (sshDone && sshInProgress) {
-      sshInProgress = false;
-
-      // ヒープ状況を毎回ログ出力（デバッグ用）
-      uint32_t freeHeap = ESP.getFreeHeap();
-      uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-
-      if (sshSuccess) {
-        Serial.printf("[POLL] Router %d/%d SUCCESS (heap=%u, largest=%u)\n",
-                      currentRouterIndex + 1, routerCount, freeHeap, largestBlock);
-        successCount++;
-      } else {
-        Serial.printf("[POLL] Router %d/%d FAILED (heap=%u, largest=%u)\n",
-                      currentRouterIndex + 1, routerCount, freeHeap, largestBlock);
-        failCount++;
-      }
-
-      // ヒープ危険水準警告（SSH_TASK_STACK_SIZE + マージン）
-      if (largestBlock < SSH_TASK_STACK_SIZE + 10000) {
-        Serial.printf("[HEAP] WARNING: Low memory! largest=%u < required=%u\n",
-                      largestBlock, SSH_TASK_STACK_SIZE + 10000);
-      }
-
-      sshDone = false;
-
-      // 次のルーターへ（10秒待機 - メモリ回復＋MQTT/HTTP余裕）
-      delay(10000);
-      currentRouterIndex++;
-      if (currentRouterIndex >= routerCount) {
-        // 全ルーター完了
-        uint32_t freeHeap = ESP.getFreeHeap();
-        uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-        Serial.printf("\n[COMPLETE] %d/%d success\n", successCount, routerCount);
-        Serial.printf("[COMPLETE] heap=%u, largest=%u\n\n", freeHeap, largestBlock);
-        httpMgr.setRouterStatus(routerCount, successCount, millis());  // ステータス更新
-
-        // CelestialGlobe送信前にメモリ回復待機
-        Serial.println("[COMPLETE] Waiting 3s for memory recovery before CelestialGlobe...");
-        delay(3000);
-
-        // 再チェック
-        freeHeap = ESP.getFreeHeap();
-        largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-        Serial.printf("[COMPLETE] After wait: heap=%u, largest=%u\n", freeHeap, largestBlock);
-
-        // CelestialGlobe SSOT送信（ヒープ16KB以上必要）
-        collectedRouterCount = routerCount;
-        if (largestBlock < 16000) {
-          Serial.printf("[COMPLETE] SKIP CelestialGlobe - low memory (largest=%u < 16000)\n", largestBlock);
-        } else if (sendToCelestialGlobe()) {
-          Serial.println("[COMPLETE] CelestialGlobe sent OK");
-        } else {
-          Serial.println("[COMPLETE] CelestialGlobe send failed");
-        }
-
-        currentRouterIndex = 0;
-        successCount = 0;
-        failCount = 0;
-        lastRouterPoll = now;  // インターバルリセット
-      }
-    }
-    // 新しいSSH開始
-    else if (!sshInProgress && (currentRouterIndex == 0 || (now - lastRouterPoll >= ROUTER_POLL_INTERVAL_MS))) {
-      // SSH開始前にヒープチェック（クラッシュ防止）
-      uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-      uint32_t requiredMemory = SSH_TASK_STACK_SIZE + 20000;  // スタック + libsshバッファ
-
-      if (largestBlock < requiredMemory) {
-        Serial.printf("[HEAP] CRITICAL: Skipping Router %d/%d - insufficient memory\n",
-                      currentRouterIndex + 1, routerCount);
-        Serial.printf("[HEAP] largest=%u < required=%u\n", largestBlock, requiredMemory);
-        Serial.printf("[HEAP] Aborting cycle, %d/%d completed\n", successCount, routerCount);
-
-        // サイクル中断・リセット
-        currentRouterIndex = 0;
-        successCount = 0;
-        failCount = 0;
-        lastRouterPoll = now;
-
-        // 次サイクルまで待機させるため長めのインターバル
-        Serial.println("[HEAP] Waiting 60s for memory recovery...");
-      } else {
-        startSshTask(currentRouterIndex);
-        if (currentRouterIndex == 0) {
-          lastRouterPoll = now;
-        }
-      }
-    }
-  }
+  // SshPollerIs10のメインループ処理
+  sshPoller.handle();
 
   // ========================================
-  // 4.5 deviceStateReport heartbeat（60秒毎）
+  // 4.5 deviceStateReport heartbeat（StateReporter経由）
   // ========================================
-  if (!apModeActive && (now - lastHeartbeat >= HEARTBEAT_INTERVAL_MS)) {
-    // 初回が失敗していた場合も再試行
-    if (!initialStateReportSent) {
-      if (sendDeviceStateReport()) {
-        initialStateReportSent = true;
-        Serial.println("[STATE] Retry state report sent");
-      }
-    } else {
-      sendDeviceStateReport();
-    }
-    lastHeartbeat = now;
+  if (!apModeActive) {
+    stateReporter.handle();
   }
 
   // ========================================

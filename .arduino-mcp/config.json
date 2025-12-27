@@ -1,0 +1,9 @@
+{
+  "buildOutputDir": "/Users/hideakikurata/Library/CloudStorage/Dropbox/Mac (3)/Documents/aranea_ISMS/builds",
+  "sketchesDir": "/Users/hideakikurata/Library/CloudStorage/Dropbox/Mac (3)/Documents/aranea_ISMS/sketches",
+  "dataDir": "/Users/hideakikurata/Library/CloudStorage/Dropbox/Mac (3)/Documents/aranea_ISMS/data",
+  "defaultFqbn": "esp32:esp32:esp32",
+  "defaultBaud": 115200,
+  "additionalBuildDirs": [],
+  "portNicknames": {}
+}

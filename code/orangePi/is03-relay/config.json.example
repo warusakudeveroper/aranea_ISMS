@@ -1,0 +1,12 @@
+{
+  "tenantName": "市山水産株式会社",
+  "tid": "T2025120608261484221",
+  "fid": "9000",
+  "lacisId": "30030200A846FAC50096",
+  "cic_code": "285135",
+  "deviceType": "ISMS_ar-is03",
+  "productType": "003",
+  "productCode": "0096",
+  "macAddress": "0200A846FAC5",
+  "stateEndpoint": "https://asia-northeast1-mobesorder.cloudfunctions.net/deviceStateReport"
+}

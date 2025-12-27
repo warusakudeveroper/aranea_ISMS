@@ -2,24 +2,24 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://aranea.sdk/schemas/types/aranea_ar-is05a.json",
   "title": "aranea_ar-is05a 8-Channel Detector",
-  "description": "8ch入力検出器（ch7-8はI/O切替可能）",
-  "type": "object",
-
-  "metadata": {
-    "productType": "005",
-    "productCodes": ["0001", "0096"],
-    "displayName": "8-Channel Detector",
-    "capabilities": ["detector", "webhook", "output", "rules"],
-    "semanticTags": ["検出", "窓", "ドア", "Webhook"],
-    "features": [
-      "8ch GPIO入力",
-      "ch7/ch8 出力切替可能",
-      "Webhook通知",
-      "トリガールール",
-      "Web UI",
-      "OTA対応"
-    ]
-  },
+  "description": "8ch入力検出器（ch7-8はI/O切替可能、Webhook・QuietMode対応）",
+  "type": "aranea_ar-is05a",
+  "displayName": "8-Channel Detector",
+  "productType": "005",
+  "productCodes": ["0001", "0096"],
+  "capabilities": ["detector", "webhook", "output", "rules", "quietMode"],
+  "semanticTags": ["検出器", "センサー", "Webhook", "おやすみモード"],
+  "features": [
+    "8ch GPIO入力",
+    "ch7/ch8 出力切替可能（Momentary/Alternate/Interval）",
+    "Webhook通知（最大5送信先、チャンネル別マスク）",
+    "QuietMode（おやすみモード）",
+    "Webhookキュー（3件上限、10秒インターバル）",
+    "カスタム通知文",
+    "トリガールール",
+    "Web UI",
+    "OTA対応"
+  ],
 
   "stateSchema": {
     "type": "object",
@@ -78,8 +78,8 @@
             },
             "meaning": {
               "type": "string",
-              "enum": ["open", "close"],
-              "description": "HIGH時の意味"
+              "enum": ["active", "inactive"],
+              "description": "HIGH時の意味（active=検知, inactive=非検知）"
             },
             "debounceMs": {
               "type": "integer",
@@ -91,24 +91,104 @@
               "type": "boolean",
               "default": false,
               "description": "出力モード (ch7/ch8のみ)"
+            },
+            "outputMode": {
+              "type": "integer",
+              "enum": [0, 1, 2],
+              "default": 0,
+              "description": "出力動作: 0=Momentary, 1=Alternate, 2=Interval (ch7/ch8のみ)"
+            },
+            "outputDurationMs": {
+              "type": "integer",
+              "minimum": 500,
+              "maximum": 10000,
+              "default": 3000,
+              "description": "出力時間（Momentary/Interval時）"
+            },
+            "intervalCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 3,
+              "description": "繰り返し回数（Intervalモード時）"
             }
           }
         }
       },
-      "webhook": {
+      "webhooks": {
         "type": "object",
+        "description": "Webhook通知設定（最大5送信先、キュー管理）",
         "properties": {
-          "discord": {
-            "type": "string",
-            "format": "uri"
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Webhook通知有効"
           },
-          "slack": {
-            "type": "string",
-            "format": "uri"
+          "endpoints": {
+            "type": "array",
+            "maxItems": 5,
+            "description": "送信先設定（最大5件）",
+            "items": {
+              "type": "object",
+              "required": ["url"],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "送信先URL（Discord/Slack/Generic対応）"
+                },
+                "channelMask": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255,
+                  "default": 255,
+                  "description": "通知対象チャンネルマスク (bit0=ch1, 0xFF=全ch)"
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 256,
+                  "description": "カスタム通知文（空欄時はデフォルト）"
+                }
+              }
+            }
           },
-          "generic": {
-            "type": "string",
-            "format": "uri"
+          "queueSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3,
+            "description": "キュー上限（超過分は切り捨て）"
+          },
+          "intervalSec": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 10,
+            "description": "送信間隔（秒）"
+          }
+        }
+      },
+      "quietMode": {
+        "type": "object",
+        "description": "おやすみモード設定（指定時間帯はWebhook送信しない）",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "startHour": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 23,
+            "default": 22,
+            "description": "開始時刻（時、24時間制）"
+          },
+          "endHour": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 23,
+            "default": 6,
+            "description": "終了時刻（時、24時間制）"
           }
         }
       },
@@ -125,34 +205,51 @@
   "commandSchema": {
     "type": "object",
     "properties": {
-      "setOutput": {
+      "output_on": {
         "type": "object",
-        "required": ["ch", "active"],
+        "required": ["ch"],
+        "description": "設定されたOutputModeに従って出力をトリガー",
         "properties": {
           "ch": {
             "type": "integer",
             "enum": [7, 8],
             "description": "出力チャンネル (7 or 8)"
-          },
-          "active": {
-            "type": "boolean"
           }
         }
       },
-      "pulse": {
+      "output_off": {
         "type": "object",
         "required": ["ch"],
+        "description": "出力を停止",
         "properties": {
           "ch": {
             "type": "integer",
             "enum": [7, 8]
-          },
-          "durationMs": {
-            "type": "integer",
-            "minimum": 100,
-            "default": 1000
           }
         }
+      },
+      "set_config": {
+        "type": "object",
+        "description": "設定変更（MQTT経由）",
+        "properties": {
+          "webhooksEnabled": { "type": "boolean", "description": "Webhook通知有効/無効" },
+          "quietEnabled": { "type": "boolean" },
+          "quietStart": { "type": "integer", "minimum": 0, "maximum": 23 },
+          "quietEnd": { "type": "integer", "minimum": 0, "maximum": 23 },
+          "ch7_mode": { "type": "string", "enum": ["input", "output"] },
+          "ch8_mode": { "type": "string", "enum": ["input", "output"] },
+          "ch7_outMode": { "type": "integer", "enum": [0, 1, 2] },
+          "ch8_outMode": { "type": "integer", "enum": [0, 1, 2] },
+          "ch7_duration": { "type": "integer", "minimum": 500, "maximum": 10000 },
+          "ch8_duration": { "type": "integer", "minimum": 500, "maximum": 10000 },
+          "ch7_count": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "ch8_count": { "type": "integer", "minimum": 1, "maximum": 100 }
+        }
+      },
+      "get_status": {
+        "type": "object",
+        "description": "現在のステータスを取得（statusトピックへ応答）",
+        "properties": {}
       }
     }
   },
@@ -186,13 +283,13 @@
         "webhookMask": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 7,
-          "description": "Webhook送信先 (bit0=discord, bit1=slack, bit2=generic)"
+          "maximum": 31,
+          "description": "Webhook送信先マスク (bit0=endpoint[0], bit4=endpoint[4])"
         },
         "stateCond": {
           "type": "integer",
           "enum": [0, 1, 2],
-          "description": "0=any, 1=open時, 2=close時"
+          "description": "0=any, 1=active時（検知）, 2=inactive時（非検知）"
         },
         "cooldownMs": {
           "type": "integer",

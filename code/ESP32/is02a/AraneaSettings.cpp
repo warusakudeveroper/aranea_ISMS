@@ -31,6 +31,32 @@ void AraneaSettings::initDefaults(SettingManager& settings) {
     settings.setString("tenant_cic", ARANEA_DEFAULT_TENANT_CIC);
   }
 
+  // WiFi設定（6スロット）
+  if (settings.getString("wifi_ssid1", "").length() == 0) {
+    settings.setString("wifi_ssid1", ARANEA_DEFAULT_WIFI_SSID_1);
+    settings.setString("wifi_pass1", ARANEA_DEFAULT_WIFI_PASS_1);
+  }
+  if (settings.getString("wifi_ssid2", "").length() == 0) {
+    settings.setString("wifi_ssid2", ARANEA_DEFAULT_WIFI_SSID_2);
+    settings.setString("wifi_pass2", ARANEA_DEFAULT_WIFI_PASS_2);
+  }
+  if (settings.getString("wifi_ssid3", "").length() == 0) {
+    settings.setString("wifi_ssid3", ARANEA_DEFAULT_WIFI_SSID_3);
+    settings.setString("wifi_pass3", ARANEA_DEFAULT_WIFI_PASS_3);
+  }
+  if (settings.getString("wifi_ssid4", "").length() == 0) {
+    settings.setString("wifi_ssid4", ARANEA_DEFAULT_WIFI_SSID_4);
+    settings.setString("wifi_pass4", ARANEA_DEFAULT_WIFI_PASS_4);
+  }
+  if (settings.getString("wifi_ssid5", "").length() == 0) {
+    settings.setString("wifi_ssid5", ARANEA_DEFAULT_WIFI_SSID_5);
+    settings.setString("wifi_pass5", ARANEA_DEFAULT_WIFI_PASS_5);
+  }
+  if (settings.getString("wifi_ssid6", "").length() == 0) {
+    settings.setString("wifi_ssid6", ARANEA_DEFAULT_WIFI_SSID_6);
+    settings.setString("wifi_pass6", ARANEA_DEFAULT_WIFI_PASS_6);
+  }
+
   // エンドポイント
   if (settings.getString("gate_url", "").length() == 0) {
     settings.setString("gate_url", ARANEA_DEFAULT_GATE_URL);
@@ -71,6 +97,24 @@ void AraneaSettings::initDefaults(SettingManager& settings) {
   // バッチ送信設定
   if (settings.getInt(Is02aKeys::kBatchIntv, 0) == 0) {
     settings.setInt(Is02aKeys::kBatchIntv, IS02A_DEFAULT_BATCH_INTERVAL);
+  }
+
+  // ステータスレポート設定
+  if (settings.getInt(Is02aKeys::kReportIntv, 0) == 0) {
+    settings.setInt(Is02aKeys::kReportIntv, IS02A_DEFAULT_REPORT_INTERVAL);
+  }
+
+  // リブートスケジューラ設定（-1も有効な値なので hasKey でチェック）
+  if (!settings.hasKey(Is02aKeys::kRebootHour)) {
+    settings.setInt(Is02aKeys::kRebootHour, IS02A_DEFAULT_REBOOT_HOUR);
+  }
+  if (!settings.hasKey(Is02aKeys::kRebootMin)) {
+    settings.setInt(Is02aKeys::kRebootMin, IS02A_DEFAULT_REBOOT_MIN);
+  }
+
+  // ノード蓄積設定（オンメモリ限定）
+  if (settings.getInt(Is02aKeys::kMaxNodes, 0) == 0) {
+    settings.setInt(Is02aKeys::kMaxNodes, IS02A_DEFAULT_MAX_NODES);
   }
 
   // リレー先設定

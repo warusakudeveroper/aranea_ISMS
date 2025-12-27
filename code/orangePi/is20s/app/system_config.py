@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # データディレクトリ
 DATA_DIR = Path("/var/lib/is20s")
 SYNC_CONFIG_FILE = DATA_DIR / "sync_config.json"
+WIFI_CONFIG_FILE = DATA_DIR / "wifi_config.json"
 
 # 同期対象キャッシュファイル
 CACHE_FILES = [
@@ -29,11 +30,240 @@ CACHE_FILES = [
     "asn_cache.json",
 ]
 
+# WiFi設定の最大数
+MAX_WIFI_CONFIGS = 6
+
+# デフォルトWiFi設定（cluster1-6）
+DEFAULT_WIFI_CONFIGS = [
+    {"ssid": "cluster1", "password": "isms12345@", "priority": 0},
+    {"ssid": "cluster2", "password": "isms12345@", "priority": 1},
+    {"ssid": "cluster3", "password": "isms12345@", "priority": 2},
+    {"ssid": "cluster4", "password": "isms12345@", "priority": 3},
+    {"ssid": "cluster5", "password": "isms12345@", "priority": 4},
+    {"ssid": "cluster6", "password": "isms12345@", "priority": 5},
+]
+
+
+class WiFiConfigManager:
+    """
+    WiFi複数設定管理クラス
+
+    is10と同様に最大6件のWiFi設定を保持し、
+    先頭から順に接続を試行するローテーション機能を提供
+    """
+
+    def __init__(self, config_file: Path = WIFI_CONFIG_FILE):
+        self.config_file = config_file
+        self.configs: List[Dict[str, Any]] = []
+        self._load()
+
+    def _load(self) -> None:
+        """設定ファイルから読み込み"""
+        if self.config_file.exists():
+            try:
+                with self.config_file.open() as f:
+                    data = json.load(f)
+                    self.configs = data.get("wifi_configs", [])[:MAX_WIFI_CONFIGS]
+                    logger.info("Loaded %d WiFi configs from file", len(self.configs))
+            except Exception as e:
+                logger.warning("Failed to load WiFi config: %s", e)
+                self.configs = []
+
+        # 設定がない場合はデフォルトを使用
+        if not self.configs:
+            self.configs = DEFAULT_WIFI_CONFIGS.copy()
+            self._save()
+            logger.info("Initialized with default WiFi configs")
+
+    def _save(self) -> bool:
+        """設定ファイルに保存"""
+        try:
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.config_file.open("w") as f:
+                json.dump({"wifi_configs": self.configs}, f, indent=2)
+            logger.info("Saved %d WiFi configs", len(self.configs))
+            return True
+        except Exception as e:
+            logger.error("Failed to save WiFi config: %s", e)
+            return False
+
+    def get_all(self) -> List[Dict[str, Any]]:
+        """すべてのWiFi設定を取得（パスワードはマスク）"""
+        return [
+            {
+                "ssid": c.get("ssid", ""),
+                "password": "***" if c.get("password") else "",
+                "priority": c.get("priority", i),
+                "index": i,
+            }
+            for i, c in enumerate(self.configs)
+        ]
+
+    def get_all_raw(self) -> List[Dict[str, Any]]:
+        """すべてのWiFi設定を取得（パスワード含む・内部用）"""
+        return self.configs.copy()
+
+    def add(self, ssid: str, password: str) -> Dict[str, Any]:
+        """WiFi設定を追加"""
+        if len(self.configs) >= MAX_WIFI_CONFIGS:
+            return {"ok": False, "error": f"Maximum {MAX_WIFI_CONFIGS} configs allowed"}
+
+        if not ssid:
+            return {"ok": False, "error": "SSID required"}
+
+        # 既存のSSIDチェック
+        for c in self.configs:
+            if c.get("ssid") == ssid:
+                return {"ok": False, "error": f"SSID '{ssid}' already exists"}
+
+        new_config = {
+            "ssid": ssid,
+            "password": password,
+            "priority": len(self.configs),
+        }
+        self.configs.append(new_config)
+
+        if self._save():
+            return {"ok": True, "message": f"Added WiFi config for '{ssid}'", "index": len(self.configs) - 1}
+        else:
+            self.configs.pop()
+            return {"ok": False, "error": "Failed to save config"}
+
+    def update(self, index: int, ssid: str = None, password: str = None) -> Dict[str, Any]:
+        """WiFi設定を更新"""
+        if index < 0 or index >= len(self.configs):
+            return {"ok": False, "error": f"Invalid index: {index}"}
+
+        if ssid is not None:
+            # 他のSSIDと重複チェック
+            for i, c in enumerate(self.configs):
+                if i != index and c.get("ssid") == ssid:
+                    return {"ok": False, "error": f"SSID '{ssid}' already exists at index {i}"}
+            self.configs[index]["ssid"] = ssid
+
+        if password is not None:
+            self.configs[index]["password"] = password
+
+        if self._save():
+            return {"ok": True, "message": f"Updated WiFi config at index {index}"}
+        else:
+            return {"ok": False, "error": "Failed to save config"}
+
+    def delete(self, index: int) -> Dict[str, Any]:
+        """WiFi設定を削除"""
+        if index < 0 or index >= len(self.configs):
+            return {"ok": False, "error": f"Invalid index: {index}"}
+
+        deleted = self.configs.pop(index)
+
+        # priority再計算
+        for i, c in enumerate(self.configs):
+            c["priority"] = i
+
+        if self._save():
+            return {"ok": True, "message": f"Deleted WiFi config for '{deleted.get('ssid', '')}'"}
+        else:
+            self.configs.insert(index, deleted)
+            return {"ok": False, "error": "Failed to save config"}
+
+    def reorder(self, old_index: int, new_index: int) -> Dict[str, Any]:
+        """WiFi設定の優先順位を変更"""
+        if old_index < 0 or old_index >= len(self.configs):
+            return {"ok": False, "error": f"Invalid old_index: {old_index}"}
+        if new_index < 0 or new_index >= len(self.configs):
+            return {"ok": False, "error": f"Invalid new_index: {new_index}"}
+
+        config = self.configs.pop(old_index)
+        self.configs.insert(new_index, config)
+
+        # priority再計算
+        for i, c in enumerate(self.configs):
+            c["priority"] = i
+
+        if self._save():
+            return {"ok": True, "message": "Reordered WiFi configs"}
+        else:
+            return {"ok": False, "error": "Failed to save config"}
+
+    def reset_to_defaults(self) -> Dict[str, Any]:
+        """デフォルト設定にリセット"""
+        self.configs = DEFAULT_WIFI_CONFIGS.copy()
+        if self._save():
+            return {"ok": True, "message": "Reset to default WiFi configs"}
+        else:
+            return {"ok": False, "error": "Failed to save config"}
+
+    async def auto_connect(self, timeout_per_ssid: int = 60) -> Dict[str, Any]:
+        """
+        保存されたWiFi設定を順番に試行して接続
+
+        Args:
+            timeout_per_ssid: 各SSIDあたりの接続タイムアウト（秒）
+
+        Returns:
+            接続結果
+        """
+        if not self.configs:
+            return {"ok": False, "error": "No WiFi configs available"}
+
+        # 現在の接続状態チェック
+        current = get_wifi_status()
+        if current.get("connected"):
+            return {
+                "ok": True,
+                "message": f"Already connected to {current.get('ssid')}",
+                "ssid": current.get("ssid"),
+                "already_connected": True,
+            }
+
+        tried = []
+        for i, config in enumerate(self.configs):
+            ssid = config.get("ssid", "")
+            password = config.get("password", "")
+
+            if not ssid:
+                continue
+
+            logger.info("Trying WiFi config %d: %s", i, ssid)
+            tried.append(ssid)
+
+            result = await connect_wifi(ssid, password)
+
+            if result.get("ok"):
+                logger.info("Successfully connected to %s", ssid)
+                return {
+                    "ok": True,
+                    "message": f"Connected to {ssid}",
+                    "ssid": ssid,
+                    "tried": tried,
+                    "index": i,
+                }
+            else:
+                logger.warning("Failed to connect to %s: %s", ssid, result.get("error"))
+
+        return {
+            "ok": False,
+            "error": "Failed to connect to any configured WiFi",
+            "tried": tried,
+        }
+
+
+# WiFiConfigManagerシングルトン
+_wifi_config_manager: Optional[WiFiConfigManager] = None
+
+
+def get_wifi_config_manager() -> WiFiConfigManager:
+    """WiFiConfigManagerシングルトンを取得"""
+    global _wifi_config_manager
+    if _wifi_config_manager is None:
+        _wifi_config_manager = WiFiConfigManager()
+    return _wifi_config_manager
+
 
 # ========== WiFi設定 ==========
 
 def get_wifi_status() -> Dict[str, Any]:
-    """WiFi接続状態を取得"""
+    """WiFi接続状態を取得（nmcli使用）"""
     result = {
         "connected": False,
         "ssid": None,
@@ -43,14 +273,20 @@ def get_wifi_status() -> Dict[str, Any]:
     }
 
     try:
-        # iwgetid でSSID取得
+        # nmcli でwlan0の接続状態を取得
         proc = subprocess.run(
-            ["iwgetid", "-r"],
+            ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"],
             capture_output=True, text=True, timeout=5
         )
-        if proc.returncode == 0 and proc.stdout.strip():
-            result["ssid"] = proc.stdout.strip()
-            result["connected"] = True
+        if proc.returncode == 0:
+            for line in proc.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split(":")
+                if len(parts) >= 3 and parts[2] == "wlan0" and parts[1] == "802-11-wireless":
+                    result["ssid"] = parts[0]
+                    result["connected"] = True
+                    break
 
         # IPアドレス取得
         proc = subprocess.run(
@@ -62,15 +298,25 @@ def get_wifi_status() -> Dict[str, Any]:
             if match:
                 result["ip_address"] = match.group(1)
 
-        # 信号強度取得
-        proc = subprocess.run(
-            ["iwconfig", "wlan0"],
-            capture_output=True, text=True, timeout=5
-        )
-        if proc.returncode == 0:
-            match = re.search(r"Signal level[=:](-?\d+)", proc.stdout)
-            if match:
-                result["signal_strength"] = int(match.group(1))
+        # 信号強度取得（nmcli dev wifi listから）
+        if result["ssid"]:
+            proc = subprocess.run(
+                ["nmcli", "-t", "-f", "SSID,SIGNAL", "dev", "wifi", "list"],
+                capture_output=True, text=True, timeout=10
+            )
+            if proc.returncode == 0:
+                for line in proc.stdout.strip().split("\n"):
+                    if not line:
+                        continue
+                    parts = line.split(":")
+                    if len(parts) >= 2 and parts[0] == result["ssid"]:
+                        try:
+                            # Signal is 0-100%, convert to approximate dBm
+                            signal_pct = int(parts[1])
+                            result["signal_strength"] = signal_pct
+                        except ValueError:
+                            pass
+                        break
 
     except Exception as e:
         logger.warning("Failed to get WiFi status: %s", e)
@@ -473,4 +719,7 @@ __all__ = [
     "set_timezone",
     "CacheSyncManager",
     "get_sync_manager",
+    "WiFiConfigManager",
+    "get_wifi_config_manager",
+    "MAX_WIFI_CONFIGS",
 ]

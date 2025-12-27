@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/aranea_ar-is02a.json",
+  "title": "aranea_ar-is02a BLE Gateway",
+  "description": "BLEゲートウェイ（is01aデータ受信・中継）+ 温湿度センサー",
+  "type": "object",
+
+  "metadata": {
+    "productType": "002",
+    "productCodes": ["0096"],
+    "displayName": "BLE Gateway & Temp/Hum Sensor",
+    "capabilities": ["gateway", "temperature", "humidity", "relay"],
+    "semanticTags": ["BLE", "ゲートウェイ", "温度", "湿度", "中継"],
+    "features": [
+      "BLE受信（is01aデータ集約）",
+      "自己温湿度計測（HT-30）",
+      "クラウドMQTT送信",
+      "ローカルリレー（is03a）",
+      "Web UI",
+      "OTA対応"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["gateway"],
+    "properties": {
+      "gateway": {
+        "type": "object",
+        "properties": {
+          "connectedNodes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "接続中のis01aノード数"
+          },
+          "lastBatchTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "最終バッチ送信時刻"
+          }
+        }
+      },
+      "self": {
+        "type": "object",
+        "properties": {
+          "temperature": {
+            "type": "number",
+            "minimum": -20,
+            "maximum": 60,
+            "description": "自己計測温度 (°C)"
+          },
+          "humidity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "自己計測湿度 (%)"
+          }
+        }
+      },
+      "relay": {
+        "type": "object",
+        "properties": {
+          "successCount": {
+            "type": "integer",
+            "description": "リレー成功回数"
+          },
+          "failCount": {
+            "type": "integer",
+            "description": "リレー失敗回数"
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "batchIntervalSec": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 300,
+        "default": 30,
+        "description": "バッチ送信間隔（秒）"
+      },
+      "selfMeasureIntervalSec": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 300,
+        "default": 60,
+        "description": "自己計測間隔（秒）"
+      },
+      "bleScanSec": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 30,
+        "default": 5,
+        "description": "BLEスキャン時間（秒）"
+      }
+    }
+  }
+}

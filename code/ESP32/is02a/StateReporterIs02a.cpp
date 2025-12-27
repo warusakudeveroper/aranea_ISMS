@@ -62,6 +62,14 @@ void StateReporterIs02a::resetStats() {
   consecutiveFailures_ = 0;
 }
 
+void StateReporterIs02a::setLastBatchTimeNow() {
+  if (ntp_) {
+    lastBatchTime_ = ntp_->getIso8601();
+  } else {
+    lastBatchTime_ = String(millis() / 1000) + "s";
+  }
+}
+
 String StateReporterIs02a::buildPayload() {
   DynamicJsonDocument doc(4096);
 

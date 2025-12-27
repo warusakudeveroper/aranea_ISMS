@@ -5,7 +5,7 @@
  *  !!!!! 必読 !!!!!  ARANEA共通モジュール インポート管理
  * ============================================================
  *
- * このファイルは generic/ESP32/global/ から共通モジュールを
+ * このファイルは code/ESP32/global/ から共通モジュールを
  * 選択的にインポートするための管理クラスです。
  *
  * 【重要】ビルド設定
@@ -47,11 +47,11 @@
  * 3. ArduinoIDEの場合: libraries.propertiesでglobalを参照
  * 4. PlatformIOの場合: lib_depsでglobalを参照
  *
- * 【ライブラリパス設定（Arduino IDE）】
- * /private/tmp/AraneaGlobalGeneric をライブラリとして登録
- * または generic/ESP32/global/src をシンボリックリンク
+ * 【ライブラリパス設定】
+ * Arduino IDE: code/ESP32/global/src をライブラリとして登録
+ * PlatformIO: lib_deps で global を参照
  *
- * @see generic/ESP32/______MUST_READ_ROLE_DIVISION______.md
+ * @see code/ESP32/______MUST_READ_ROLE_DIVISION______.md
  */
 
 #ifndef ARANEA_GLOBAL_IMPORTER_H

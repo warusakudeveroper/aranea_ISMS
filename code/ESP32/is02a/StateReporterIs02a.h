@@ -71,6 +71,7 @@ public:
   int getRelaySuccessCount() const { return relaySuccessCount_; }
   int getRelayFailCount() const { return relayFailCount_; }
   String getLastBatchTime() const { return lastBatchTime_; }
+  void setLastBatchTimeNow();
   void resetStats();
 
 private:

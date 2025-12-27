@@ -145,7 +145,6 @@ araneaReg.begin(gateUrl);
 TenantPrimaryAuth tenantAuth;
 tenantAuth.lacisId = settings.getString("tenant_lacisid", "");
 tenantAuth.userId = settings.getString("tenant_email", "");
-tenantAuth.pass = settings.getString("tenant_pass", "");
 tenantAuth.cic = settings.getString("tenant_cic", "");
 araneaReg.setTenantPrimary(tenantAuth);
 

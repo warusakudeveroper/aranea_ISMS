@@ -89,103 +89,114 @@ bool CelestialSenderIs10::send() {
   // URL構築: endpoint?fid=XXX&source=araneaDevice
   String url = baseEndpoint + "?fid=" + fid_ + "&source=araneaDevice";
 
-  // observedAtはUnix ms（number型）
-  unsigned long long observedAtMs = 0;
+  // observedAt（ISO8601形式）
+  String observedAt = "1970-01-01T00:00:00.000Z";
   if (ntp_ && ntp_->isSynced()) {
-    observedAtMs = (unsigned long long)ntp_->getEpoch() * 1000ULL;
-  } else {
-    observedAtMs = millis();  // フォールバック（不正確だが送信は可能）
+    observedAt = ntp_->getIso8601();
   }
 
-  // P1: StaticJsonDocumentで動的アロケーション回避
-  StaticJsonDocument<4096> doc;
-
-  // auth
-  JsonObject auth = doc.createNestedObject("auth");
-  auth["tid"] = tid_;
-  auth["lacisId"] = lacisId_;  // is10のlacisId（observer）
-  auth["cic"] = cic_;
-
-  // source（CelestialGlobe用）
-  doc["source"] = source_;
-
-  // observedAt（Unix ms, number型）
-  doc["observedAt"] = observedAtMs;
-
-  // devices配列
-  JsonArray devices = doc.createNestedArray("devices");
-
+  // 各ルーターごとにレポート送信（仕様: router は単一オブジェクト）
   RouterInfo* routerInfos = sshPoller_->getRouterInfos();
   int infoCount = sshPoller_->getRouterInfoCount();
+  int successCount = 0;
+  int sendCount = 0;
+
+  bool reportClients = settings_->getBool(Is10Keys::kReportClnt, true);
+
   for (int i = 0; i < infoCount; i++) {
     RouterInfo& info = routerInfos[i];
-    if (!info.online) continue;  // オフラインはスキップ
 
-    JsonObject dev = devices.createNestedObject();
+    // P1: StaticJsonDocumentで動的アロケーション回避
+    StaticJsonDocument<4096> doc;
 
-    // MACアドレス（大文字12HEX - サーバがlacisId生成に使用）
-    // 仕様: ルーターのlacisIdはサーバがMACから生成する
-    dev["mac"] = info.routerMac;  // 大文字12HEX正規化済み
+    // auth
+    JsonObject auth = doc.createNestedObject("auth");
+    auth["tid"] = tid_;
+    auth["lacisId"] = lacisId_;
+    auth["cic"] = cic_;
 
-    dev["type"] = "Router";
-    dev["label"] = "Room" + info.rid;
-    dev["status"] = info.online ? "online" : "offline";
-    dev["lanIp"] = info.lanIp;
-    dev["wanIp"] = info.wanIp;
-    dev["ssid24"] = info.ssid24;
-    dev["ssid50"] = info.ssid50;
-    dev["clientCount"] = info.clientCount;
-    // firmware, uptime は取得していないので省略
-    // parentMac はis10のMACを入れない（仕様禁止）
+    // report（CelestialGlobe仕様準拠）
+    JsonObject report = doc.createNestedObject("report");
+    report["observedAt"] = observedAt;
+    report["sourceDevice"] = lacisId_;
+    report["sourceType"] = "ar-is10";
+
+    // router（単一オブジェクト）
+    JsonObject router = report.createNestedObject("router");
+    router["mac"] = formatMacWithColons(info.routerMac);
+    router["wanIp"] = info.wanIp;
+    router["lanIp"] = info.lanIp;
+    router["ssid24"] = info.ssid24;
+    router["ssid50"] = info.ssid50;
+    router["online"] = info.online;
+    router["clientCount"] = info.clientCount;
+
+    // clients配列（reportClientList=trueの場合のみ）
+    JsonArray clients = report.createNestedArray("clients");
+    if (reportClients && info.online) {
+      // TODO: クライアント詳細情報がSSHで取得できた場合に追加
+      // 現状はSSH経由でクライアントリストを取得していないため空配列
+    }
+
+    // P1: String::reserve()でフラグメンテーション軽減
+    String json;
+    json.reserve(1024);
+    serializeJson(doc, json);
+
+    sendCount++;
+    Serial.printf("[CELESTIAL] Sending router %d/%d (MAC: %s)\n",
+                  sendCount, infoCount, info.routerMac.c_str());
+
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-Celestial-Secret", secret);
+    http.setTimeout(HTTP_TIMEOUT_MS);
+
+    int httpCode = http.POST(json);
+    yield();  // P0: WDT対策
+
+    String response = http.getString();
+    http.end();
+    yield();  // P0: WDT対策
+
+    if (httpCode >= 200 && httpCode < 300) {
+      successCount++;
+      Serial.printf("[CELESTIAL] Router %s: OK %d\n", info.rid.c_str(), httpCode);
+    } else {
+      Serial.printf("[CELESTIAL] Router %s: NG %d - %s\n",
+                    info.rid.c_str(), httpCode, response.c_str());
+    }
   }
 
-  // clients配列（reportClientList=trueの場合のみ）
-  // 仕様: 各clientにapMac（接続先ルーターMAC）を含める
-  // 例: { "mac": "AABBCCDDEEFF", "apMac": "112233445566", "hostname": "iPhone" }
-  bool reportClients = settings_->getBool(Is10Keys::kReportClnt, true);
-  if (reportClients) {
-    JsonArray clients = doc.createNestedArray("clients");
-    // TODO: クライアント詳細情報がSSHで取得できた場合に追加
-    // DHCPリースからclient MAC取得 → apMac = info.routerMac をセット
-    // parentMacはルーターの上流が確実に分かる場合のみ（不明なら空）
-  }
-
-  // P1: String::reserve()でフラグメンテーション軽減
-  String json;
-  json.reserve(2048);
-  serializeJson(doc, json);
-
-  Serial.printf("[CELESTIAL] Sending to %s\n", url.c_str());
-  Serial.printf("[CELESTIAL] Payload size: %d bytes, devices: %d\n",
-                json.length(), devices.size());
-
-  HTTPClient http;
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Celestial-Secret", secret);
-  http.setTimeout(HTTP_TIMEOUT_MS);  // P0: 15s→3sに短縮
-
-  int httpCode = http.POST(json);
-  yield();  // P0: WDT対策
-
-  String response = http.getString();
-  http.end();
-  yield();  // P0: WDT対策
-
-  bool success = (httpCode >= 200 && httpCode < 300);
+  bool success = (sendCount > 0 && successCount == sendCount);
 
   // P0: バックオフ管理
   if (success) {
     consecutiveFailures_ = 0;
-    Serial.printf("[CELESTIAL] OK %d\n", httpCode);
+    Serial.printf("[CELESTIAL] All %d routers sent OK\n", successCount);
+  } else if (sendCount == 0) {
+    Serial.println("[CELESTIAL] No routers to send");
   } else {
     consecutiveFailures_++;
     lastFailTime_ = millis();
     if (consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES) {
       Serial.printf("[CELESTIAL] Entering backoff (%d consecutive failures)\n", consecutiveFailures_);
     }
-    Serial.printf("[CELESTIAL] NG %d: %s\n", httpCode, response.c_str());
+    Serial.printf("[CELESTIAL] Partial failure: %d/%d succeeded\n", successCount, sendCount);
   }
 
   return success;
+}
+
+// MACアドレスをコロン区切り形式に変換 (AABBCCDDEEFF → AA:BB:CC:DD:EE:FF)
+String CelestialSenderIs10::formatMacWithColons(const String& mac) {
+  if (mac.length() != 12) return mac;
+  String formatted;
+  formatted.reserve(17);
+  for (int i = 0; i < 12; i += 2) {
+    if (i > 0) formatted += ':';
+    formatted += mac.substring(i, i + 2);
+  }
+  return formatted;
 }

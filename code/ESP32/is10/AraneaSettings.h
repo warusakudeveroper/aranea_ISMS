@@ -107,7 +107,6 @@ struct TenantAuth {
   String lacisId;
   String email;
   String cic;
-  String pass;
 };
 
 /**

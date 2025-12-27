@@ -1,3 +1,4 @@
+import socket
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Callable, Optional
@@ -22,6 +23,8 @@ from .system_config import (
     set_ntp_server,
     set_timezone,
     get_sync_manager,
+    get_wifi_config_manager,
+    MAX_WIFI_CONFIGS,
 )
 
 
@@ -324,6 +327,85 @@ def create_router(
         result = await connect_wifi(ssid, password)
         return result
 
+    # ========== WiFi複数設定API ==========
+
+    @router.get("/api/wifi/configs")
+    async def wifi_configs_list(request: Request):
+        """WiFi設定一覧を取得（パスワードはマスク）"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        mgr = get_wifi_config_manager()
+        return {
+            "ok": True,
+            "configs": mgr.get_all(),
+            "max_configs": MAX_WIFI_CONFIGS,
+        }
+
+    @router.post("/api/wifi/configs")
+    async def wifi_configs_add(payload: Dict[str, Any], request: Request):
+        """WiFi設定を追加"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        ssid = payload.get("ssid", "")
+        password = payload.get("password", "")
+        if not ssid:
+            return {"ok": False, "error": "SSID required"}
+        mgr = get_wifi_config_manager()
+        return mgr.add(ssid, password)
+
+    @router.put("/api/wifi/configs/{index}")
+    async def wifi_configs_update(index: int, payload: Dict[str, Any], request: Request):
+        """WiFi設定を更新"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        ssid = payload.get("ssid")
+        password = payload.get("password")
+        mgr = get_wifi_config_manager()
+        return mgr.update(index, ssid=ssid, password=password)
+
+    @router.delete("/api/wifi/configs/{index}")
+    async def wifi_configs_delete(index: int, request: Request):
+        """WiFi設定を削除"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        mgr = get_wifi_config_manager()
+        return mgr.delete(index)
+
+    @router.post("/api/wifi/configs/reorder")
+    async def wifi_configs_reorder(payload: Dict[str, Any], request: Request):
+        """WiFi設定の優先順位を変更"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        old_index = payload.get("old_index")
+        new_index = payload.get("new_index")
+        if old_index is None or new_index is None:
+            return {"ok": False, "error": "old_index and new_index required"}
+        mgr = get_wifi_config_manager()
+        return mgr.reorder(old_index, new_index)
+
+    @router.post("/api/wifi/configs/reset")
+    async def wifi_configs_reset(request: Request):
+        """WiFi設定をデフォルトにリセット"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        mgr = get_wifi_config_manager()
+        return mgr.reset_to_defaults()
+
+    @router.post("/api/wifi/auto-connect")
+    async def wifi_auto_connect(request: Request):
+        """保存されたWiFi設定を順番に試行して接続"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        mgr = get_wifi_config_manager()
+        return await mgr.auto_connect()
+
     # ========== NTP設定API ==========
 
     @router.get("/api/ntp/status")
@@ -451,6 +533,227 @@ def create_router(
         sync_mgr = get_sync_manager()
         results = await sync_mgr.sync_all_peers()
         return {"ok": True, "results": results}
+
+    # ===== SpeedDial API =====
+    @router.get("/api/speeddial")
+    async def get_speeddial(request: Request):
+        """
+        SpeedDial: 全設定をINI形式テキストで取得
+        スマホでの一括コピー＆ペースト設定用
+        """
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        lines = []
+
+        # Device Info
+        lines.append("[Device]")
+        lines.append(f"name={cfg.device.name}")
+        lines.append(f"lacisid={state.lacis_id or ''}")
+        lines.append(f"hostname={socket.gethostname()}")
+        lines.append("")
+
+        # WiFi Settings
+        lines.append("[WiFi]")
+        wifi_mgr = get_wifi_config_manager()
+        for i, c in enumerate(wifi_mgr.configs):
+            ssid = c.get("ssid", "")
+            pwd = c.get("password", "")
+            lines.append(f"wifi{i+1}={ssid},{pwd}")
+        lines.append("")
+
+        # Capture Settings
+        lines.append("[Capture]")
+        watch_cfg = load_watch_config()
+        cap_cfg = watch_cfg.get("capture", {})
+        mode_cfg = watch_cfg.get("mode", {})
+        lines.append(f"enabled={str(mode_cfg.get('enabled', True)).lower()}")
+        lines.append(f"dry_run={str(mode_cfg.get('dry_run', True)).lower()}")
+        lines.append(f"iface={cap_cfg.get('iface', 'end0')}")
+        lines.append(f"syn_only={str(cap_cfg.get('syn_only', True)).lower()}")
+        lines.append("")
+
+        # NTP Settings
+        lines.append("[NTP]")
+        lines.append(f"server={watch_cfg.get('ntp_server', 'ntp.nict.jp')}")
+        lines.append(f"timezone={watch_cfg.get('timezone', 'Asia/Tokyo')}")
+        lines.append("")
+
+        # Sync Settings
+        lines.append("[Sync]")
+        sync_mgr = get_sync_manager()
+        peers = sync_mgr.config.get("peers", [])
+        for i, peer in enumerate(peers):
+            if isinstance(peer, dict):
+                lines.append(f"peer{i+1}={peer.get('host', '')}:{peer.get('port', 8080)}")
+            else:
+                lines.append(f"peer{i+1}={peer}")
+        lines.append("")
+
+        # Post Settings
+        lines.append("[Post]")
+        post_cfg = watch_cfg.get("post", {})
+        lines.append(f"url={post_cfg.get('url', '')}")
+        lines.append(f"gzip={str(post_cfg.get('gzip', True)).lower()}")
+
+        text = "\n".join(lines)
+        return {"ok": True, "text": text, "format": "ini"}
+
+    @router.post("/api/speeddial")
+    async def set_speeddial(request: Request):
+        """
+        SpeedDial: INI形式テキストから設定を適用
+        スマホでの一括貼り付け設定用
+        """
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        body = await request.json()
+        text = body.get("text", "")
+        if not text:
+            return {"ok": False, "error": "No text provided"}
+
+        # Parse INI-style text
+        current_section = None
+        parsed = {}
+        errors = []
+
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            # Section header
+            if line.startswith("[") and line.endswith("]"):
+                current_section = line[1:-1]
+                if current_section not in parsed:
+                    parsed[current_section] = {}
+                continue
+
+            # Key=Value pair
+            if "=" in line and current_section:
+                key, _, value = line.partition("=")
+                parsed[current_section][key.strip()] = value.strip()
+
+        applied = []
+
+        # Apply WiFi settings
+        if "WiFi" in parsed:
+            try:
+                wifi_mgr = get_wifi_config_manager()
+                new_configs = []
+                for key, val in parsed["WiFi"].items():
+                    if key.startswith("wifi") and "," in val:
+                        parts = val.split(",", 1)
+                        ssid = parts[0].strip()
+                        pwd = parts[1].strip() if len(parts) > 1 else ""
+                        if ssid:
+                            new_configs.append({
+                                "ssid": ssid,
+                                "password": pwd,
+                                "priority": len(new_configs)
+                            })
+                if new_configs:
+                    wifi_mgr.configs = new_configs[:MAX_WIFI_CONFIGS]
+                    wifi_mgr._save()
+                    applied.append(f"WiFi: {len(new_configs)} configs")
+            except Exception as e:
+                errors.append(f"WiFi: {str(e)}")
+
+        # Apply NTP settings
+        if "NTP" in parsed:
+            try:
+                ntp_cfg = parsed["NTP"]
+                if "server" in ntp_cfg:
+                    from system_config import set_ntp_server
+                    set_ntp_server(ntp_cfg["server"])
+                    applied.append(f"NTP server: {ntp_cfg['server']}")
+                if "timezone" in ntp_cfg:
+                    from system_config import set_timezone
+                    set_timezone(ntp_cfg["timezone"])
+                    applied.append(f"Timezone: {ntp_cfg['timezone']}")
+            except Exception as e:
+                errors.append(f"NTP: {str(e)}")
+
+        # Apply Capture settings
+        if "Capture" in parsed:
+            try:
+                cap_cfg = parsed["Capture"]
+                watch_cfg = load_watch_config()
+                changed = False
+
+                if "enabled" in cap_cfg:
+                    watch_cfg.setdefault("mode", {})["enabled"] = cap_cfg["enabled"].lower() == "true"
+                    changed = True
+                if "dry_run" in cap_cfg:
+                    watch_cfg.setdefault("mode", {})["dry_run"] = cap_cfg["dry_run"].lower() == "true"
+                    changed = True
+                if "iface" in cap_cfg:
+                    watch_cfg.setdefault("capture", {})["iface"] = cap_cfg["iface"]
+                    changed = True
+                if "syn_only" in cap_cfg:
+                    watch_cfg.setdefault("capture", {})["syn_only"] = cap_cfg["syn_only"].lower() == "true"
+                    changed = True
+
+                if changed:
+                    save_watch_config(watch_cfg)
+                    applied.append("Capture settings")
+            except Exception as e:
+                errors.append(f"Capture: {str(e)}")
+
+        # Apply Sync settings
+        if "Sync" in parsed:
+            try:
+                sync_cfg = parsed["Sync"]
+                new_peers = []
+                for key, val in sync_cfg.items():
+                    if key.startswith("peer") and val:
+                        # Parse host:port format
+                        if ":" in val:
+                            host, port_str = val.rsplit(":", 1)
+                            try:
+                                port = int(port_str)
+                            except ValueError:
+                                port = 8080
+                        else:
+                            host = val
+                            port = 8080
+                        new_peers.append({"host": host, "port": port})
+                if new_peers:
+                    sync_mgr = get_sync_manager()
+                    sync_mgr.config["peers"] = new_peers
+                    sync_mgr._save_config()
+                    applied.append(f"Sync: {len(new_peers)} peers")
+            except Exception as e:
+                errors.append(f"Sync: {str(e)}")
+
+        # Apply Post settings
+        if "Post" in parsed:
+            try:
+                post_cfg = parsed["Post"]
+                watch_cfg = load_watch_config()
+                changed = False
+
+                if "url" in post_cfg:
+                    watch_cfg.setdefault("post", {})["url"] = post_cfg["url"]
+                    changed = True
+                if "gzip" in post_cfg:
+                    watch_cfg.setdefault("post", {})["gzip"] = post_cfg["gzip"].lower() == "true"
+                    changed = True
+
+                if changed:
+                    save_watch_config(watch_cfg)
+                    applied.append("Post settings")
+            except Exception as e:
+                errors.append(f"Post: {str(e)}")
+
+        return {
+            "ok": len(errors) == 0,
+            "applied": applied,
+            "errors": errors if errors else None
+        }
 
     return router
 

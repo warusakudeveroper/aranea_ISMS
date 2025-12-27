@@ -12,6 +12,58 @@ SDK CLI v0.1.4 は基本機能が動作するようになりましたが、**実
 
 ---
 
+## 0. Gate API stateEndpoint返却 (P0) - 最優先
+
+### 問題
+
+現在 `araneaDeviceGate` の登録レスポンスに `stateEndpoint` が含まれていません。
+
+デバイスは登録後にCICを取得できますが、**状態レポートの送信先URLが不明**なため、deviceStateReportを送信できません。
+
+### 現状のレスポンス
+
+```json
+{
+  "ok": true,
+  "userObject": {
+    "cic_code": "xxxxxx"
+  }
+}
+```
+
+### 必要なレスポンス
+
+```json
+{
+  "ok": true,
+  "userObject": {
+    "cic_code": "xxxxxx"
+  },
+  "stateEndpoint": "https://asia-northeast1-mobesorder.cloudfunctions.net/deviceStateReport",
+  "mqttEndpoint": "wss://asia-northeast1-mobesorder.cloudfunctions.net/araneaMqtt"
+}
+```
+
+### 影響
+
+- **is10**: 登録済みだがstateEndpointが空のため401エラー
+- **全デバイス**: 新規登録時にstateEndpointが取得できない
+
+### 暫定対応（デバイス側）
+
+デバイス側では以下のフォールバックを実装予定：
+```cpp
+String stateEndpoint = araneaReg.getSavedStateEndpoint();
+if (stateEndpoint.length() == 0) {
+  // Gate APIが返さない場合はデフォルト使用
+  stateEndpoint = ARANEA_DEFAULT_CLOUD_URL;
+}
+```
+
+ただし、将来的なエンドポイント変更に対応するため、**Gate APIでの返却が必須**です。
+
+---
+
 ## 1. MQTT テスト機能 (P0)
 
 ### 1.1 MQTTダミーコマンド送信
@@ -279,6 +331,7 @@ aranea-sdk mock start \
 
 | 優先度 | 機能 | 理由 |
 |--------|------|------|
+| **P0** | Gate API stateEndpoint返却 | **デバイスがstateReport送信不可** |
 | **P0** | MQTTテスト | コマンド受信のテストが現状不可能 |
 | **P1** | 遅延テスト | タイムアウト実装の検証に必須 |
 | **P1** | エラーケース | 異常系の動作確認に必須 |

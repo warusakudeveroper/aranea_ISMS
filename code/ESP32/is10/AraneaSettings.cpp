@@ -67,7 +67,6 @@ void AraneaSettings::resetToDefaults() {
   _tenantAuth.lacisId = ARANEA_DEFAULT_TENANT_LACISID;
   _tenantAuth.email = ARANEA_DEFAULT_TENANT_EMAIL;
   _tenantAuth.cic = ARANEA_DEFAULT_TENANT_CIC;
-  _tenantAuth.pass = "";  // passは廃止（認証はlacisId + userId + cicの3要素）
 
   // WiFi設定
   _wifiConfig.ssid[0] = ARANEA_DEFAULT_WIFI_SSID_1;
@@ -234,7 +233,6 @@ String AraneaSettings::toJson() {
   tenant["lacisId"] = _tenantAuth.lacisId;
   tenant["email"] = _tenantAuth.email;
   tenant["cic"] = _tenantAuth.cic;
-  tenant["pass"] = _tenantAuth.pass;
 
   // WiFi
   JsonObject wifi = doc.createNestedObject("wifi");
@@ -277,7 +275,6 @@ bool AraneaSettings::fromJson(const String& json) {
     if (tenant.containsKey("lacisId")) _tenantAuth.lacisId = tenant["lacisId"].as<String>();
     if (tenant.containsKey("email")) _tenantAuth.email = tenant["email"].as<String>();
     if (tenant.containsKey("cic")) _tenantAuth.cic = tenant["cic"].as<String>();
-    if (tenant.containsKey("pass")) _tenantAuth.pass = tenant["pass"].as<String>();
   }
 
   // WiFi
