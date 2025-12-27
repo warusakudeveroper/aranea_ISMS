@@ -213,7 +213,6 @@ POST {generic_webhook_url}
 | `tid` | string | テナントID |
 | `tenant_lacisid` | string | テナントプライマリのlacisID |
 | `tenant_email` | string | テナントプライマリのEmail |
-| `tenant_pass` | string | テナントプライマリのパスワード |
 | `tenant_cic` | string | テナントプライマリのCIC |
 | `cic` | string | 自デバイスのCIC |
 

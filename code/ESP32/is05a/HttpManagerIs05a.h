@@ -72,6 +72,11 @@ private:
     void handleRules();
     void handleRuleSave();
     void handleRuleDelete();
+
+    // 出力制御ハンドラ
+    void handleOutputTrigger();
+    void handleOutputStop();
+    void handleOutputConfig();
 };
 
 #endif // HTTP_MANAGER_IS05A_H

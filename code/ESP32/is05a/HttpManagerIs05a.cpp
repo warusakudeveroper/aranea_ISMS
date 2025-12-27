@@ -60,6 +60,9 @@ void HttpManagerIs05a::getTypeSpecificStatus(JsonObject& obj) {
     obj["webhookEnabled"] = webhooks_->isEnabled();
     obj["webhookSent"] = webhooks_->getSentCount();
     obj["webhookFail"] = webhooks_->getFailCount();
+    obj["webhookQueue"] = webhooks_->getCurrentQueueLength();
+    obj["webhookDrop"] = webhooks_->getQueueDropCount();
+    obj["webhookEndpoints"] = webhooks_->getEndpointCount();
 
     // 送信状態
     obj["lastChangedChannel"] = lastChangedChannel_;
@@ -77,32 +80,111 @@ String HttpManagerIs05a::generateTypeSpecificTabs() {
 
 String HttpManagerIs05a::generateTypeSpecificTabContents() {
     String html;
-    // Channels Tab
+    // Channels Tab - 既存テーマ準拠
+    html += F("<style>");
+    html += F(".ch-lamp{width:24px;height:24px;border-radius:50%;display:inline-block;margin-right:12px;");
+    html += F("border:2px solid #ccc;transition:all 0.3s;flex-shrink:0;}");
+    html += F(".ch-lamp.active{background:#4caf50;border-color:#4caf50;box-shadow:0 0 12px #4caf50;}");
+    html += F(".ch-lamp.inactive{background:#e0e0e0;border-color:#bbb;}");
+    html += F(".ch-lamp.output-on{background:#ff9800;border-color:#ff9800;box-shadow:0 0 12px #ff9800;}");
+    html += F(".ch-panel{background:#fff;border:1px solid #ddd;border-radius:8px;margin:8px 0;}");
+    html += F(".ch-header{display:flex;align-items:center;padding:12px 16px;cursor:pointer;}");
+    html += F(".ch-header:hover{background:#f5f5f5;}");
+    html += F(".ch-title{flex:1;font-weight:600;color:#333;}");
+    html += F(".ch-state-badge{font-size:0.8em;padding:4px 10px;border-radius:12px;margin-left:8px;}");
+    html += F(".ch-state-badge.detecting{background:#4caf50;color:#fff;}");
+    html += F(".ch-state-badge.idle{background:#e0e0e0;color:#666;}");
+    html += F(".ch-state-badge.on{background:#ff9800;color:#fff;}");
+    html += F(".ch-state-badge.off{background:#e0e0e0;color:#666;}");
+    html += F(".ch-body{padding:16px;display:none;border-top:1px solid #eee;background:#fafafa;}");
+    html += F(".ch-body.open{display:block;}");
+    html += F(".ch-expand{color:#999;transition:transform 0.2s;}.ch-expand.open{transform:rotate(180deg);}");
+    html += F(".ch-warning{background:#fff3e0;border:1px solid #ffcc80;color:#e65100;padding:10px;border-radius:6px;margin:8px 0;font-size:0.9em;}");
+    html += F(".toggle-row{display:flex;align-items:center;gap:12px;margin:12px 0;}");
+    html += F(".toggle-label{min-width:80px;color:#333;}.toggle-switch{position:relative;width:50px;height:26px;}");
+    html += F(".toggle-switch input{opacity:0;width:0;height:0;}");
+    html += F(".toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:26px;transition:0.3s;}");
+    html += F(".toggle-slider:before{position:absolute;content:\"\";height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:0.3s;box-shadow:0 1px 3px rgba(0,0,0,0.3);}");
+    html += F(".toggle-switch input:checked+.toggle-slider{background:#ff9800;}");
+    html += F(".toggle-switch input:checked+.toggle-slider:before{transform:translateX(24px);}");
+    html += F(".output-controls{margin-top:12px;padding:12px;background:#fff;border:1px solid #ddd;border-radius:6px;}");
+    html += F("</style>");
     html += F("<div id=\"tab-channels\" class=\"tab-content\">");
-    html += F("<h3>8ch Channel Status</h3>");
-    html += F("<div id=\"channel-list\"></div>");
-    html += F("<h4>ch7/ch8 Output Control</h4>");
-    html += F("<div class=\"form-group\"><label>ch7 Mode:</label>");
-    html += F("<select id=\"ch7-mode\" onchange=\"setChannelMode(7, this.value)\">");
-    html += F("<option value=\"input\">Input</option><option value=\"output\">Output</option></select>");
-    html += F("<button onclick=\"sendPulse(7)\">Pulse (3s)</button></div>");
-    html += F("<div class=\"form-group\"><label>ch8 Mode:</label>");
-    html += F("<select id=\"ch8-mode\" onchange=\"setChannelMode(8, this.value)\">");
-    html += F("<option value=\"input\">Input</option><option value=\"output\">Output</option></select>");
-    html += F("<button onclick=\"sendPulse(8)\">Pulse (3s)</button></div></div>");
-    // Webhook Tab
+    html += F("<h3>8ch Detector</h3>");
+    html += F("<p style=\"color:#666;font-size:0.9em\">各チャンネルをクリックして設定を展開</p>");
+    html += F("<div id=\"channel-list\"></div></div>");
+    // Webhook Tab v2.0 - 5エンドポイント対応
     html += F("<div id=\"tab-webhook\" class=\"tab-content\">");
-    html += F("<h3>Webhook Configuration</h3><form id=\"webhook-form\">");
-    html += F("<div class=\"form-group\"><label><input type=\"checkbox\" id=\"webhook-enabled\"> Enable Webhook</label></div>");
-    html += F("<div class=\"form-group\"><label>Discord URL:</label>");
-    html += F("<input type=\"text\" id=\"discord-url\" placeholder=\"https://discord.com/api/webhooks/...\">");
-    html += F("<button type=\"button\" onclick=\"testWebhook('discord')\">Test</button></div>");
-    html += F("<div class=\"form-group\"><label>Slack URL:</label>");
-    html += F("<input type=\"text\" id=\"slack-url\" placeholder=\"https://hooks.slack.com/services/...\">");
-    html += F("<button type=\"button\" onclick=\"testWebhook('slack')\">Test</button></div>");
-    html += F("<div class=\"form-group\"><label>Generic URL:</label>");
-    html += F("<input type=\"text\" id=\"generic-url\" placeholder=\"https://your-server.com/webhook\">");
-    html += F("<button type=\"button\" onclick=\"testWebhook('generic')\">Test</button></div>");
+    html += F("<h3>Webhook Configuration</h3>");
+    // Stats
+    html += F("<div id=\"webhook-stats\" style=\"background:#f5f5f5;padding:12px;border-radius:6px;margin-bottom:16px;\">");
+    html += F("<span>送信: <b id=\"wh-sent\">0</b></span> ");
+    html += F("<span>失敗: <b id=\"wh-fail\">0</b></span> ");
+    html += F("<span>キュー: <b id=\"wh-queue\">0</b></span> ");
+    html += F("<span>破棄: <b id=\"wh-drop\">0</b></span></div>");
+    html += F("<form id=\"webhook-form\">");
+    html += F("<div class=\"form-group\"><label><input type=\"checkbox\" id=\"webhook-enabled\"> Webhook有効</label></div>");
+    // Queue/Interval settings
+    html += F("<div class=\"form-row\">");
+    html += F("<div class=\"form-group\"><label>キューサイズ:</label><input type=\"number\" id=\"wh-queue-size\" min=\"1\" max=\"10\" value=\"3\"></div>");
+    html += F("<div class=\"form-group\"><label>送信間隔(秒):</label><input type=\"number\" id=\"wh-interval\" min=\"1\" max=\"60\" value=\"10\"></div>");
+    html += F("</div>");
+    // 5 Endpoints
+    html += F("<h4>送信先エンドポイント (最大5件)</h4>");
+    for (int ep = 0; ep < 5; ep++) {
+        html += F("<div class=\"ep-panel\" style=\"background:#fafafa;border:1px solid #ddd;border-radius:6px;padding:12px;margin:8px 0;\">");
+        html += F("<div style=\"display:flex;align-items:center;gap:12px;margin-bottom:8px;\">");
+        html += F("<label><input type=\"checkbox\" id=\"ep");
+        html += String(ep);
+        html += F("-on\"> EP");
+        html += String(ep);
+        html += F("</label>");
+        html += F("<button type=\"button\" onclick=\"testEndpoint(");
+        html += String(ep);
+        html += F(")\">Test</button></div>");
+        html += F("<div class=\"form-group\"><label>URL:</label><input type=\"text\" id=\"ep");
+        html += String(ep);
+        html += F("-url\" placeholder=\"https://...\" style=\"width:100%\"></div>");
+        html += F("<div class=\"form-group\"><label>カスタムメッセージ:</label><input type=\"text\" id=\"ep");
+        html += String(ep);
+        html += F("-msg\" placeholder=\"{name}が{state}になりました (空欄時デフォルト)\" style=\"width:100%\"></div>");
+        html += F("<div class=\"form-group\"><label>通知対象ch:</label><div class=\"ch-mask-row\" id=\"ep");
+        html += String(ep);
+        html += F("-ch\">");
+        for (int ch = 1; ch <= 8; ch++) {
+            html += F("<label style=\"margin-right:8px\"><input type=\"checkbox\" data-ep=\"");
+            html += String(ep);
+            html += F("\" data-ch=\"");
+            html += String(ch);
+            html += F("\" checked> ");
+            html += String(ch);
+            html += F("</label>");
+        }
+        html += F("</div></div></div>");
+    }
+    // QuietMode
+    html += F("<h4>おやすみモード (QuietMode)</h4>");
+    html += F("<div class=\"form-group\"><label><input type=\"checkbox\" id=\"quiet-enabled\"> 有効にする</label></div>");
+    html += F("<div class=\"form-row\"><div class=\"form-group\"><label>開始時刻:</label>");
+    html += F("<select id=\"quiet-start\">");
+    for (int h = 0; h < 24; h++) {
+        html += F("<option value=\"");
+        html += String(h);
+        html += F("\">");
+        html += (h < 10 ? "0" : "") + String(h) + ":00";
+        html += F("</option>");
+    }
+    html += F("</select></div><div class=\"form-group\"><label>終了時刻:</label>");
+    html += F("<select id=\"quiet-end\">");
+    for (int h = 0; h < 24; h++) {
+        html += F("<option value=\"");
+        html += String(h);
+        html += F("\">");
+        html += (h < 10 ? "0" : "") + String(h) + ":00";
+        html += F("</option>");
+    }
+    html += F("</select></div></div>");
+    html += F("<p style=\"color:#aaa;font-size:0.9em\">※この時間帯はWebhook通知を送信しません</p>");
     html += F("<button type=\"submit\">Save Webhook Settings</button></form></div>");
 
     // Rules Tab
@@ -135,44 +217,125 @@ String HttpManagerIs05a::generateTypeSpecificTabContents() {
 String HttpManagerIs05a::generateTypeSpecificJS() {
     String js;
     js += F("<script>");
+    js += F("var chData={};var openPanels={};");  // 展開状態を保持
+    // Build channel panel HTML
+    js += F("function buildChPanel(ch){let d=chData[ch.ch];let lampClass='ch-lamp '+(ch.isOutput?(ch.outputActive?'output-on':'inactive'):(ch.active?'active':'inactive'));");
+    js += F("let badgeClass='ch-state-badge '+(ch.isOutput?(ch.outputActive?'on':'off'):(ch.active?'detecting':'idle'));");
+    js += F("let badgeText=ch.isOutput?(ch.outputActive?'ON':'OFF'):(ch.active?'検知':'待機');");
+    js += F("let html='<div class=\"ch-panel\" id=\"panel-'+ch.ch+'\">';");
+    js += F("html+='<div class=\"ch-header\" onclick=\"togglePanel('+ch.ch+')\">';");
+    js += F("html+='<span class=\"'+lampClass+'\"></span>';");
+    js += F("html+='<span class=\"ch-title\">ch'+ch.ch+': '+ch.name+'</span>';");
+    js += F("html+='<span class=\"'+badgeClass+'\">'+badgeText+'</span>';");
+    js += F("html+='<span class=\"ch-expand'+(openPanels[ch.ch]?' open':'')+'\" id=\"expand-'+ch.ch+'\">▼</span></div>';");
+    // Panel body (openPanels state restore)
+    js += F("let isOpen=openPanels[ch.ch]||false;");
+    js += F("html+='<div class=\"ch-body'+(isOpen?' open':'')+'\" id=\"body-'+ch.ch+'\">';");
+    // Name
+    js += F("html+='<div class=\"form-group\"><label>名前:</label><input type=\"text\" id=\"name-'+ch.ch+'\" value=\"'+ch.name+'\" onchange=\"saveChConfig('+ch.ch+')\"></div>';");
+    // Debounce
+    js += F("html+='<div class=\"form-group\"><label>デバウンス(ms):</label><input type=\"number\" id=\"debounce-'+ch.ch+'\" min=\"10\" max=\"10000\" value=\"'+(ch.debounceMs||100)+'\" onchange=\"saveChConfig('+ch.ch+')\"></div>';");
+    // ch7/ch8: IO toggle
+    js += F("if(ch.ch>=7){");
+    js += F("html+='<div class=\"toggle-row\"><span class=\"toggle-label\">出力モード:</span>';");
+    js += F("html+='<label class=\"toggle-switch\"><input type=\"checkbox\" id=\"output-'+ch.ch+'\" '+(ch.isOutput?'checked':'')+' onchange=\"toggleOutputMode('+ch.ch+')\">';");
+    js += F("html+='<span class=\"toggle-slider\"></span></label></div>';");
+    // Warning
+    js += F("html+='<div class=\"ch-warning\" id=\"warn-'+ch.ch+'\" style=\"display:'+(ch.isOutput?'block':'none')+'\">⚠️ 入力ピンを出力として使用する際はオプトカプラをバイパスして該当ピンをコネクタに接続する必要があります</div>';");
+    // Output controls
+    js += F("html+='<div class=\"output-controls\" id=\"outctrl-'+ch.ch+'\" style=\"display:'+(ch.isOutput?'block':'none')+'\">';");
+    js += F("html+='<div class=\"form-group\"><label>動作モード:</label><select id=\"outmode-'+ch.ch+'\" onchange=\"saveOutputCfg('+ch.ch+')\">';");
+    js += F("html+='<option value=\"0\"'+(ch.outputMode===0?' selected':'')+'>Momentary</option>';");
+    js += F("html+='<option value=\"1\"'+(ch.outputMode===1?' selected':'')+'>Alternate</option>';");
+    js += F("html+='<option value=\"2\"'+(ch.outputMode===2?' selected':'')+'>Interval</option></select></div>';");
+    // Duration (hide for Alternate)
+    js += F("html+='<div class=\"form-group\" id=\"dur-grp-'+ch.ch+'\" style=\"display:'+(ch.outputMode===1?'none':'block')+'\"><label>出力時間(ms):</label>';");
+    js += F("html+='<input type=\"number\" id=\"dur-'+ch.ch+'\" min=\"500\" max=\"10000\" value=\"'+(ch.durationMs||3000)+'\" onchange=\"saveOutputCfg('+ch.ch+')\"></div>';");
+    // Count (only for Interval)
+    js += F("html+='<div class=\"form-group\" id=\"cnt-grp-'+ch.ch+'\" style=\"display:'+(ch.outputMode===2?'block':'none')+'\"><label>回数:</label>';");
+    js += F("html+='<input type=\"number\" id=\"cnt-'+ch.ch+'\" min=\"1\" max=\"100\" value=\"'+(ch.intervalCnt||3)+'\" onchange=\"saveOutputCfg('+ch.ch+')\"></div>';");
+    // Buttons
+    js += F("html+='<div class=\"btn-group\"><button onclick=\"triggerOutput('+ch.ch+')\">ON</button><button onclick=\"stopOutput('+ch.ch+')\">OFF</button></div>';");
+    js += F("html+='</div>';}");
+    js += F("html+='</div></div>';return html;}");
+    // Load channels
     js += F("function loadChannels(){fetch('/api/channels').then(r=>r.json()).then(data=>{");
-    js += F("let html='<table><tr><th>Ch</th><th>Name</th><th>State</th><th>Mode</th><th>Updated</th></tr>';");
-    js += F("data.channels.forEach(ch=>{html+='<tr><td>ch'+ch.ch+'</td><td>'+ch.name+'</td><td>'+ch.state+'</td>';");
-    js += F("html+='<td>'+(ch.isOutput?'OUTPUT':'INPUT')+'</td><td>'+ch.lastUpdatedAt+'</td></tr>';});");
-    js += F("html+='</table>';document.getElementById('channel-list').innerHTML=html;");
-    js += F("data.channels.forEach(ch=>{if(ch.ch===7)document.getElementById('ch7-mode').value=ch.isOutput?'output':'input';");
-    js += F("if(ch.ch===8)document.getElementById('ch8-mode').value=ch.isOutput?'output':'input';});});}");
-    js += F("function setChannelMode(ch,mode){fetch('/api/channel',{method:'POST',");
-    js += F("headers:{'Content-Type':'application/json'},body:JSON.stringify({ch:ch,mode:mode})})");
-    js += F(".then(r=>r.json()).then(data=>{if(data.ok){showMessage('ch'+ch+' mode changed to '+mode);loadChannels();}");
-    js += F("else{showMessage('Error: '+data.error,'error');}});}");
-    js += F("function sendPulse(ch){fetch('/api/pulse',{method:'POST',headers:{'Content-Type':'application/json'},");
-    js += F("body:JSON.stringify({channel:ch,duration:3000})}).then(r=>r.json()).then(data=>{");
-    js += F("if(data.ok){showMessage('Pulse sent to ch'+ch);}else{showMessage('Error: '+data.error,'error');}});}");
+    js += F("let html='';data.channels.forEach(ch=>{chData[ch.ch]=ch;html+=buildChPanel(ch);});");
+    js += F("document.getElementById('channel-list').innerHTML=html;});}");
+    // Toggle panel expand (with state tracking)
+    js += F("function togglePanel(ch){let body=document.getElementById('body-'+ch);let exp=document.getElementById('expand-'+ch);");
+    js += F("if(body.classList.contains('open')){body.classList.remove('open');exp.classList.remove('open');openPanels[ch]=false;}");
+    js += F("else{body.classList.add('open');exp.classList.add('open');openPanels[ch]=true;}}");
+    // Toggle output mode (ch7/ch8)
+    js += F("function toggleOutputMode(ch){let checked=document.getElementById('output-'+ch).checked;");
+    js += F("if(checked&&!confirm('⚠️ 出力モードに変更します。\\n\\nオプトカプラをバイパスして該当ピンをコネクタに接続する必要があります。\\n\\n続行しますか？')){");
+    js += F("document.getElementById('output-'+ch).checked=false;return;}");
+    js += F("fetch('/api/channel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ch:ch,mode:checked?'output':'input'})})");
+    js += F(".then(r=>r.json()).then(d=>{if(d.ok){showMessage('ch'+ch+(checked?' OUTPUT':' INPUT'));loadChannels();}else{showMessage(d.error||'Error','error');document.getElementById('output-'+ch).checked=!checked;}});}");
+    // Save channel config (name, debounce)
+    js += F("function saveChConfig(ch){let body={ch:ch,name:document.getElementById('name-'+ch).value,debounce:parseInt(document.getElementById('debounce-'+ch).value)||100};");
+    js += F("fetch('/api/channel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).then(d=>{if(d.ok)showMessage('ch'+ch+' saved');else showMessage(d.error||'Error','error');});}");
+    // Save output config
+    js += F("function saveOutputCfg(ch){let mode=parseInt(document.getElementById('outmode-'+ch).value);");
+    js += F("document.getElementById('dur-grp-'+ch).style.display=mode===1?'none':'block';");
+    js += F("document.getElementById('cnt-grp-'+ch).style.display=mode===2?'block':'none';");
+    js += F("let body={ch:ch,outputMode:mode,durationMs:parseInt(document.getElementById('dur-'+ch).value)||3000,intervalCount:parseInt(document.getElementById('cnt-'+ch).value)||3};");
+    js += F("fetch('/api/output/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).then(d=>{if(!d.ok)showMessage(d.error||'Error','error');});}");
+    // Trigger and stop output
+    js += F("function triggerOutput(ch){fetch('/api/output/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ch:ch})}).then(r=>r.json()).then(d=>{if(d.ok)showMessage('ch'+ch+' ON');else showMessage(d.error||'Error','error');});}");
+    js += F("function stopOutput(ch){fetch('/api/output/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ch:ch})}).then(r=>r.json()).then(d=>{if(d.ok)showMessage('ch'+ch+' OFF');else showMessage(d.error||'Error','error');});}");
+    // Load webhook config v2.0
     js += F("function loadWebhookConfig(){fetch('/api/webhook/config').then(r=>r.json()).then(data=>{");
     js += F("document.getElementById('webhook-enabled').checked=data.enabled;");
-    js += F("document.getElementById('discord-url').value=data.discordUrl||'';");
-    js += F("document.getElementById('slack-url').value=data.slackUrl||'';");
-    js += F("document.getElementById('generic-url').value=data.genericUrl||'';});}");
-    js += F("function testWebhook(platform){fetch('/api/webhook/test',{method:'POST',");
-    js += F("headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:platform})})");
-    js += F(".then(r=>r.json()).then(data=>{if(data.ok){showMessage(platform+' webhook test sent');}");
-    js += F("else{showMessage('Error: '+data.error,'error');}});}");
+    js += F("document.getElementById('wh-queue-size').value=data.queueSize||3;");
+    js += F("document.getElementById('wh-interval').value=data.intervalSec||10;");
+    js += F("document.getElementById('wh-sent').textContent=data.sentCount||0;");
+    js += F("document.getElementById('wh-fail').textContent=data.failCount||0;");
+    js += F("document.getElementById('wh-queue').textContent=data.queueLength||0;");
+    js += F("document.getElementById('wh-drop').textContent=data.dropCount||0;");
+    // QuietMode
+    js += F("document.getElementById('quiet-enabled').checked=data.quietEnabled||false;");
+    js += F("document.getElementById('quiet-start').value=data.quietStart||22;");
+    js += F("document.getElementById('quiet-end').value=data.quietEnd||6;");
+    // Endpoints
+    js += F("if(data.endpoints){data.endpoints.forEach((ep,i)=>{");
+    js += F("document.getElementById('ep'+i+'-on').checked=ep.enabled;");
+    js += F("document.getElementById('ep'+i+'-url').value=ep.url||'';");
+    js += F("document.getElementById('ep'+i+'-msg').value=ep.message||'';");
+    js += F("let mask=ep.channelMask!==undefined?ep.channelMask:0xFF;");
+    js += F("document.querySelectorAll('#ep'+i+'-ch input').forEach(el=>{let ch=parseInt(el.dataset.ch);el.checked=(mask&(1<<(ch-1)))!==0;});});}});}");
+    // Test endpoint
+    js += F("function testEndpoint(idx){fetch('/api/webhook/test',{method:'POST',");
+    js += F("headers:{'Content-Type':'application/json'},body:JSON.stringify({index:idx})})");
+    js += F(".then(r=>r.json()).then(data=>{if(data.ok){showMessage('EP'+idx+' test sent');}");
+    js += F("else{showMessage('Error: '+(data.error||'failed'),'error');}});}");
+    // Save webhook v2.0
     js += F("document.getElementById('webhook-form').addEventListener('submit',function(e){e.preventDefault();");
+    js += F("let endpoints=[];for(let i=0;i<5;i++){let mask=0;");
+    js += F("document.querySelectorAll('#ep'+i+'-ch input').forEach(el=>{if(el.checked)mask|=(1<<(parseInt(el.dataset.ch)-1));});");
+    js += F("endpoints.push({enabled:document.getElementById('ep'+i+'-on').checked,");
+    js += F("url:document.getElementById('ep'+i+'-url').value,");
+    js += F("message:document.getElementById('ep'+i+'-msg').value,channelMask:mask});}");
     js += F("fetch('/api/webhook/config',{method:'POST',headers:{'Content-Type':'application/json'},");
     js += F("body:JSON.stringify({enabled:document.getElementById('webhook-enabled').checked,");
-    js += F("discordUrl:document.getElementById('discord-url').value,");
-    js += F("slackUrl:document.getElementById('slack-url').value,");
-    js += F("genericUrl:document.getElementById('generic-url').value})})");
+    js += F("queueSize:parseInt(document.getElementById('wh-queue-size').value)||3,");
+    js += F("intervalSec:parseInt(document.getElementById('wh-interval').value)||10,");
+    js += F("quietEnabled:document.getElementById('quiet-enabled').checked,");
+    js += F("quietStart:parseInt(document.getElementById('quiet-start').value),");
+    js += F("quietEnd:parseInt(document.getElementById('quiet-end').value),");
+    js += F("endpoints:endpoints})})");
     js += F(".then(r=>r.json()).then(data=>{if(data.ok){showMessage('Webhook settings saved');}");
     js += F("else{showMessage('Error saving settings','error');}});});");
+    // Tab switching
     js += F("var origShowTab=showTab;showTab=function(tab){origShowTab(tab);");
     js += F("if(tab==='channels')loadChannels();if(tab==='webhook')loadWebhookConfig();if(tab==='rules')loadRules();};");
+    // Rules functions
     js += F("function parseChList(v){return v.split(',').map(x=>parseInt(x.trim())).filter(x=>!isNaN(x));}");
     js += F("function loadRules(){fetch('/api/rules').then(r=>r.json()).then(data=>{let html='<table><tr><th>ID</th><th>Enabled</th><th>Src</th><th>State</th><th>Out</th><th>Pulse</th><th>Cooldown</th><th>Webhook</th></tr>';data.rules.forEach(r=>{");
     js += F("html+='<tr><td>'+r.id+'</td><td>'+(r.enabled?'ON':'OFF')+'</td><td>'+r.src.join(',')+'</td><td>'+r.state+'</td><td>'+r.outputs.join(',')+'</td><td>'+r.pulseMs+'</td><td>'+r.cooldownMs+'</td>';let wh=[];if(r.webhook.discord)wh.push('D');if(r.webhook.slack)wh.push('S');if(r.webhook.generic)wh.push('G');html+='<td>'+wh.join('/')+'</td></tr>';});html+='</table>';document.getElementById('rule-list').innerHTML=html;});}");
     js += F("function saveRule(){let id=parseInt(document.getElementById('rule-id').value)||0;let body={id:id,enabled:document.getElementById('rule-enabled').checked,src:parseChList(document.getElementById('rule-src').value),state:document.getElementById('rule-state').value,outputs:parseChList(document.getElementById('rule-out').value),pulseMs:parseInt(document.getElementById('rule-pulse').value)||3000,cooldownMs:parseInt(document.getElementById('rule-cooldown').value)||0,webhook:{discord:document.getElementById('rule-wh-discord').checked,slack:document.getElementById('rule-wh-slack').checked,generic:document.getElementById('rule-wh-generic').checked}};fetch('/api/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).then(res=>{if(res.ok){showMessage('Rule saved');loadRules();}else{showMessage(res.error||'Save failed','error');}});}");
     js += F("function deleteRule(){let id=parseInt(document.getElementById('rule-id').value)||0;if(!confirm('Delete rule '+id+'?'))return;fetch('/api/rules/'+id,{method:'DELETE'}).then(r=>r.json()).then(res=>{if(res.ok){showMessage('Rule deleted');loadRules();}else{showMessage(res.error||'Delete failed','error');}});}");
+    // Auto refresh
     js += F("setInterval(function(){var el=document.getElementById('tab-channels');if(el&&el.classList.contains('active'))loadChannels();},2000);");
     js += F("</script>");
     return js;
@@ -186,8 +349,13 @@ void HttpManagerIs05a::registerTypeSpecificEndpoints() {
     server_->on("/api/channel", HTTP_GET, [this]() { handleChannel(); });
     server_->on("/api/channel", HTTP_POST, [this]() { handleChannelConfig(); });
 
-    // パルス出力
+    // パルス出力（レガシー）
     server_->on("/api/pulse", HTTP_POST, [this]() { handlePulse(); });
+
+    // 出力制御（新規）
+    server_->on("/api/output/trigger", HTTP_POST, [this]() { handleOutputTrigger(); });
+    server_->on("/api/output/stop", HTTP_POST, [this]() { handleOutputStop(); });
+    server_->on("/api/output/config", HTTP_POST, [this]() { handleOutputConfig(); });
 
     // Webhook設定
     server_->on("/api/webhook/config", HTTP_GET, [this]() { handleWebhookConfig(); });
@@ -226,9 +394,9 @@ void HttpManagerIs05a::getTypeSpecificConfig(JsonObject& obj) {
 
     // Webhook設定
     obj["webhookEnabled"] = webhooks_->isEnabled();
-    obj["discordUrl"] = webhooks_->getDiscordUrl();
-    obj["slackUrl"] = webhooks_->getSlackUrl();
-    obj["genericUrl"] = webhooks_->getGenericUrl();
+    obj["webhookQueueSize"] = webhooks_->getQueueSize();
+    obj["webhookIntervalSec"] = webhooks_->getIntervalSec();
+    obj["webhookEndpointCount"] = webhooks_->getEndpointCount();
 }
 
 void HttpManagerIs05a::handleChannels() {
@@ -242,9 +410,18 @@ void HttpManagerIs05a::handleChannels() {
         auto cfg = channels_->getConfig(ch);
         chObj["ch"] = ch;
         chObj["name"] = cfg.name;
-        chObj["state"] = channels_->getStateString(ch);
+        chObj["active"] = channels_->isActive(ch);  // 検知状態 (boolean)
         chObj["isOutput"] = channels_->isOutputMode(ch);
+        chObj["outputActive"] = channels_->isOutputActive(ch);  // 出力状態
+        chObj["debounceMs"] = cfg.debounceMs;  // デバウンス設定
         chObj["lastUpdatedAt"] = channels_->getLastUpdatedAt(ch);
+
+        // ch7/ch8の出力モード情報を追加
+        if (ch >= 7) {
+            chObj["outputMode"] = static_cast<int>(cfg.outputMode);
+            chObj["durationMs"] = cfg.outputDurationMs;
+            chObj["intervalCnt"] = cfg.intervalCount;
+        }
     }
 
     String json;
@@ -336,11 +513,30 @@ void HttpManagerIs05a::handleWebhookConfig() {
     if (!checkAuth()) { requestAuth(); return; }
 
     if (server_->method() == HTTP_GET) {
-        DynamicJsonDocument doc(1024);
+        DynamicJsonDocument doc(2048);
         doc["enabled"] = webhooks_->isEnabled();
-        doc["discordUrl"] = webhooks_->getDiscordUrl();
-        doc["slackUrl"] = webhooks_->getSlackUrl();
-        doc["genericUrl"] = webhooks_->getGenericUrl();
+        doc["queueSize"] = webhooks_->getQueueSize();
+        doc["intervalSec"] = webhooks_->getIntervalSec();
+        // Stats
+        doc["sentCount"] = webhooks_->getSentCount();
+        doc["failCount"] = webhooks_->getFailCount();
+        doc["queueLength"] = webhooks_->getCurrentQueueLength();
+        doc["dropCount"] = webhooks_->getQueueDropCount();
+        doc["quietSkipCount"] = webhooks_->getQuietSkipCount();
+        // QuietMode
+        doc["quietEnabled"] = webhooks_->isQuietModeEnabled();
+        doc["quietStart"] = webhooks_->getQuietStartHour();
+        doc["quietEnd"] = webhooks_->getQuietEndHour();
+        // Endpoints
+        JsonArray endpoints = doc.createNestedArray("endpoints");
+        for (int i = 0; i < WebhookManager::MAX_ENDPOINTS; i++) {
+            auto ep = webhooks_->getEndpoint(i);
+            JsonObject epObj = endpoints.createNestedObject();
+            epObj["enabled"] = ep.enabled;
+            epObj["url"] = ep.url;
+            epObj["message"] = ep.message;
+            epObj["channelMask"] = ep.channelMask;
+        }
 
         String json;
         serializeJson(doc, json);
@@ -349,7 +545,7 @@ void HttpManagerIs05a::handleWebhookConfig() {
     }
 
     // POST
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(2048);
     DeserializationError error = deserializeJson(doc, server_->arg("plain"));
 
     if (error) {
@@ -358,9 +554,30 @@ void HttpManagerIs05a::handleWebhookConfig() {
     }
 
     if (doc.containsKey("enabled")) webhooks_->setEnabled(doc["enabled"]);
-    if (doc.containsKey("discordUrl")) webhooks_->setDiscordUrl(doc["discordUrl"].as<String>());
-    if (doc.containsKey("slackUrl")) webhooks_->setSlackUrl(doc["slackUrl"].as<String>());
-    if (doc.containsKey("genericUrl")) webhooks_->setGenericUrl(doc["genericUrl"].as<String>());
+    if (doc.containsKey("queueSize")) webhooks_->setQueueSize(doc["queueSize"]);
+    if (doc.containsKey("intervalSec")) webhooks_->setIntervalSec(doc["intervalSec"]);
+
+    // QuietMode設定
+    if (doc.containsKey("quietEnabled")) webhooks_->setQuietModeEnabled(doc["quietEnabled"]);
+    if (doc.containsKey("quietStart") && doc.containsKey("quietEnd")) {
+        webhooks_->setQuietModeHours(doc["quietStart"], doc["quietEnd"]);
+    }
+
+    // Endpoints設定
+    if (doc.containsKey("endpoints")) {
+        JsonArray arr = doc["endpoints"].as<JsonArray>();
+        int i = 0;
+        for (JsonObject epObj : arr) {
+            if (i >= WebhookManager::MAX_ENDPOINTS) break;
+            WebhookManager::Endpoint ep;
+            ep.enabled = epObj["enabled"] | false;
+            ep.url = epObj["url"].as<String>();
+            ep.message = epObj["message"].as<String>();
+            ep.channelMask = epObj["channelMask"] | 0xFF;
+            webhooks_->setEndpoint(i, ep);
+            i++;
+        }
+    }
 
     server_->send(200, "application/json", "{\"ok\":true}");
 }
@@ -376,23 +593,35 @@ void HttpManagerIs05a::handleWebhookTest() {
         return;
     }
 
-    String platform = doc["platform"].as<String>();
-
-    // プラットフォーム別にテスト送信
-    WebhookManager::Platform targetPlatform;
-    if (platform == "discord") {
-        targetPlatform = WebhookManager::Platform::DISCORD;
-    } else if (platform == "slack") {
-        targetPlatform = WebhookManager::Platform::SLACK;
-    } else if (platform == "generic") {
-        targetPlatform = WebhookManager::Platform::GENERIC;
-    } else {
-        server_->send(400, "application/json", "{\"error\":\"Invalid platform\"}");
+    // 新方式: index指定
+    if (doc.containsKey("index")) {
+        int idx = doc["index"];
+        if (idx < 0 || idx >= WebhookManager::MAX_ENDPOINTS) {
+            server_->send(400, "application/json", "{\"error\":\"Invalid index\"}");
+            return;
+        }
+        bool ok = webhooks_->sendTestToEndpoint(idx);
+        if (ok) {
+            server_->send(200, "application/json", "{\"ok\":true}");
+        } else {
+            server_->send(500, "application/json", "{\"ok\":false,\"error\":\"Send failed\"}");
+        }
         return;
     }
 
-    bool ok = webhooks_->sendTestTo(targetPlatform);
+    // レガシー互換: platform指定
+    String platform = doc["platform"].as<String>();
+    int idx = -1;
+    if (platform == "discord") idx = 0;
+    else if (platform == "slack") idx = 1;
+    else if (platform == "generic") idx = 2;
 
+    if (idx < 0) {
+        server_->send(400, "application/json", "{\"error\":\"Invalid platform or index\"}");
+        return;
+    }
+
+    bool ok = webhooks_->sendTestToEndpoint(idx);
     if (ok) {
         server_->send(200, "application/json", "{\"ok\":true}");
     } else {
@@ -543,6 +772,89 @@ void HttpManagerIs05a::handleRuleDelete() {
     } else {
         server_->send(500, "application/json", "{\"error\":\"Failed to delete\"}");
     }
+}
+
+// ========================================
+// 出力制御ハンドラ
+// ========================================
+void HttpManagerIs05a::handleOutputTrigger() {
+    if (!checkAuth()) { requestAuth(); return; }
+
+    DynamicJsonDocument doc(256);
+    DeserializationError error = deserializeJson(doc, server_->arg("plain"));
+
+    if (error) {
+        server_->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    int ch = doc["ch"] | 0;
+    if (ch < 7 || ch > 8) {
+        server_->send(400, "application/json", "{\"error\":\"Only ch7/ch8 support output\"}");
+        return;
+    }
+
+    if (!channels_->isOutputMode(ch)) {
+        server_->send(400, "application/json", "{\"error\":\"Channel not in output mode\"}");
+        return;
+    }
+
+    channels_->triggerOutput(ch);
+    server_->send(200, "application/json", "{\"ok\":true}");
+}
+
+void HttpManagerIs05a::handleOutputStop() {
+    if (!checkAuth()) { requestAuth(); return; }
+
+    DynamicJsonDocument doc(256);
+    DeserializationError error = deserializeJson(doc, server_->arg("plain"));
+
+    if (error) {
+        server_->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    int ch = doc["ch"] | 0;
+    if (ch < 7 || ch > 8) {
+        server_->send(400, "application/json", "{\"error\":\"Only ch7/ch8 support output\"}");
+        return;
+    }
+
+    channels_->stopOutput(ch);
+    server_->send(200, "application/json", "{\"ok\":true}");
+}
+
+void HttpManagerIs05a::handleOutputConfig() {
+    if (!checkAuth()) { requestAuth(); return; }
+
+    DynamicJsonDocument doc(512);
+    DeserializationError error = deserializeJson(doc, server_->arg("plain"));
+
+    if (error) {
+        server_->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    int ch = doc["ch"] | 0;
+    if (ch < 7 || ch > 8) {
+        server_->send(400, "application/json", "{\"error\":\"Only ch7/ch8 support output config\"}");
+        return;
+    }
+
+    int outputMode = doc["outputMode"] | 0;
+    int durationMs = doc["durationMs"] | 3000;
+    int intervalCount = doc["intervalCount"] | 3;
+
+    // 値の正規化
+    outputMode = constrain(outputMode, 0, 2);
+    durationMs = constrain(durationMs, 500, 10000);
+    intervalCount = constrain(intervalCount, 1, 100);
+
+    channels_->setOutputBehavior(ch,
+        static_cast<ChannelManager::OutputMode>(outputMode),
+        durationMs, intervalCount);
+
+    server_->send(200, "application/json", "{\"ok\":true}");
 }
 
 // ========================================

@@ -22,6 +22,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <esp_mac.h>
+#include <ArduinoJson.h>
+#include <vector>
 
 // ============================================================
 // Araneaモジュール一括インポート
@@ -71,6 +73,8 @@ ChannelManager channels;
 WebhookManager webhooks;
 HttpManagerIs05a httpMgr;
 StateReporterIs05a stateReporter;
+RuleManager ruleMgr;
+MqttManager mqtt;
 
 // 自機情報
 String myLacisId;
@@ -90,6 +94,11 @@ unsigned long lastHeartbeatTime = 0;
 unsigned long bootTime = 0;
 int heartbeatIntervalSec = 60;
 int bootGraceMs = 5000;
+
+// OLED表示用（複数検知時の切り替え表示）
+unsigned long lastDisplayCycleTime = 0;
+int displayCycleIndex = 0;
+static const unsigned long DISPLAY_CYCLE_MS = 500;  // 500ms切り替え
 
 // ========================================
 // APモードSSID生成
@@ -201,17 +210,148 @@ void updateDisplay() {
     String line1 = wifi.getIP() + " " + String(WiFi.RSSI()) + "dBm";
     String cicStr = myCic.length() > 0 ? myCic : "------";
 
-    // 最終変化チャンネル表示
-    int lastCh = channels.getLastChangedChannel();
+    // アクティブな検知と出力を収集
+    std::vector<String> displayItems;
+
+    // 検知中のチャンネル
+    for (int ch = 1; ch <= 8; ch++) {
+        if (!channels.isOutputMode(ch) && channels.isActive(ch)) {
+            displayItems.push_back("Detect:" + String(ch));
+        }
+    }
+
+    // 出力中のチャンネル（ch7/ch8）
+    for (int ch = 7; ch <= 8; ch++) {
+        if (channels.isOutputMode(ch) && channels.isOutputActive(ch)) {
+            auto cfg = channels.getConfig(ch);
+            String modeChar;
+            switch (cfg.outputMode) {
+                case ChannelManager::OutputMode::MOMENTARY: modeChar = "M"; break;
+                case ChannelManager::OutputMode::ALTERNATE: modeChar = "A"; break;
+                case ChannelManager::OutputMode::INTERVAL:  modeChar = "I"; break;
+            }
+            displayItems.push_back("Output:" + modeChar + String(ch));
+        }
+    }
+
+    // 表示内容決定
     String sensorLine;
-    if (lastCh > 0) {
-        auto cfg = channels.getConfig(lastCh);
-        sensorLine = cfg.name + "=" + channels.getStateString(lastCh);
-    } else {
+    if (displayItems.empty()) {
         sensorLine = "Ready";
+    } else if (displayItems.size() == 1) {
+        sensorLine = displayItems[0];
+    } else {
+        // 複数アイテム: 500msサイクル
+        unsigned long now = millis();
+        if (now - lastDisplayCycleTime >= DISPLAY_CYCLE_MS) {
+            displayCycleIndex = (displayCycleIndex + 1) % displayItems.size();
+            lastDisplayCycleTime = now;
+        }
+        if (displayCycleIndex >= (int)displayItems.size()) {
+            displayCycleIndex = 0;
+        }
+        sensorLine = displayItems[displayCycleIndex];
     }
 
     display.showIs02Main(line1, cicStr, sensorLine, false);
+}
+
+// ========================================
+// MQTTメッセージハンドラ
+// ========================================
+void handleMqttMessage(const String& topic, const char* data, int len) {
+    String payload(data, len);
+    Serial.printf("[MQTT] Received: %s -> %s\n", topic.c_str(), payload.c_str());
+
+    // トピック: aranea/{lacisId}/command
+    // コマンド形式: {"action":"...", "params":{...}}
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+        Serial.println("[MQTT] JSON parse error");
+        return;
+    }
+
+    String action = doc["action"].as<String>();
+
+    // 出力ON/OFF
+    if (action == "output_on") {
+        int ch = doc["params"]["ch"] | 0;
+        if (ch >= 7 && ch <= 8 && channels.isOutputMode(ch)) {
+            channels.triggerOutput(ch);
+            Serial.printf("[MQTT] Output ON: ch%d\n", ch);
+        }
+    }
+    else if (action == "output_off") {
+        int ch = doc["params"]["ch"] | 0;
+        if (ch >= 7 && ch <= 8) {
+            channels.stopOutput(ch);
+            Serial.printf("[MQTT] Output OFF: ch%d\n", ch);
+        }
+    }
+    // 設定変更
+    else if (action == "set_config") {
+        JsonObject params = doc["params"];
+
+        // Webhook設定
+        if (params.containsKey("webhookEnabled")) {
+            webhooks.setEnabled(params["webhookEnabled"]);
+        }
+        if (params.containsKey("quietEnabled")) {
+            webhooks.setQuietModeEnabled(params["quietEnabled"]);
+        }
+        if (params.containsKey("quietStart") && params.containsKey("quietEnd")) {
+            webhooks.setQuietModeHours(params["quietStart"], params["quietEnd"]);
+        }
+        if (params.containsKey("channelMask")) {
+            webhooks.setChannelMask(params["channelMask"].as<uint8_t>());
+        }
+
+        // 出力モード設定
+        if (params.containsKey("ch7_mode")) {
+            channels.setOutputMode(7, params["ch7_mode"].as<String>() == "output");
+        }
+        if (params.containsKey("ch8_mode")) {
+            channels.setOutputMode(8, params["ch8_mode"].as<String>() == "output");
+        }
+        if (params.containsKey("ch7_outMode")) {
+            channels.setOutputBehavior(7,
+                static_cast<ChannelManager::OutputMode>(params["ch7_outMode"].as<int>()),
+                params["ch7_duration"] | 3000,
+                params["ch7_count"] | 3);
+        }
+        if (params.containsKey("ch8_outMode")) {
+            channels.setOutputBehavior(8,
+                static_cast<ChannelManager::OutputMode>(params["ch8_outMode"].as<int>()),
+                params["ch8_duration"] | 3000,
+                params["ch8_count"] | 3);
+        }
+
+        Serial.println("[MQTT] Config updated");
+    }
+    // ステータス要求
+    else if (action == "get_status") {
+        // ステータスを返す
+        StaticJsonDocument<1024> resp;
+        resp["lacisId"] = myLacisId;
+        resp["cic"] = myCic;
+        JsonArray chArr = resp.createNestedArray("channels");
+        for (int ch = 1; ch <= 8; ch++) {
+            JsonObject chObj = chArr.createNestedObject();
+            chObj["ch"] = ch;
+            chObj["state"] = channels.getStateString(ch);
+            chObj["isOutput"] = channels.isOutputMode(ch);
+        }
+        resp["webhookEnabled"] = webhooks.isEnabled();
+        resp["quietEnabled"] = webhooks.isQuietModeEnabled();
+        resp["quietInPeriod"] = webhooks.isInQuietPeriod();
+
+        String respStr;
+        serializeJson(resp, respStr);
+
+        String respTopic = "aranea/" + myLacisId + "/status";
+        mqtt.publish(respTopic, respStr);
+    }
 }
 
 // ========================================
@@ -232,8 +372,33 @@ void onChannelChanged(int ch, bool active) {
     // Webhook通知
     webhooks.sendStateChange(ch, active);
 
+    // MQTT通知
+    if (mqtt.isConnected()) {
+        StaticJsonDocument<256> doc;
+        doc["event"] = "state_change";
+        doc["ch"] = ch;
+        doc["active"] = active;
+        doc["state"] = channels.getStateString(ch);
+        doc["timestamp"] = ntp.isSynced() ? ntp.getIso8601() : "";
+
+        String payload;
+        serializeJson(doc, payload);
+        String topic = "aranea/" + myLacisId + "/event";
+        mqtt.publish(topic, payload);
+    }
+
     // ディスプレイ更新
     httpMgr.setChannelStatus(ch, channels.getLastUpdatedAt(ch));
+
+    // 送信ステータス更新
+    httpMgr.setSendStatus(
+        stateReporter.getSentCount(),
+        stateReporter.getFailCount(),
+        stateReporter.getLastResult()
+    );
+
+    // ルール処理（入力→出力/Webhook）
+    ruleMgr.handleChannelEvent(ch, active);
 }
 
 // ========================================
@@ -295,7 +460,7 @@ void setup() {
         myTid = settings.getString("tid", ARANEA_DEFAULT_TID);
         myFid = settings.getString("fid", ARANEA_DEFAULT_FID);
 
-        String gateUrl = AraneaSettings::getGateUrl();
+        String gateUrl = settings.getString("gate_url", ARANEA_DEFAULT_GATE_URL);
         araneaReg.begin(gateUrl);
 
         TenantPrimaryAuth tenantAuth;
@@ -339,18 +504,21 @@ void setup() {
     webhooks.begin(&settings, &ntp, &channels);
     webhooks.setDeviceInfo(myLacisId, myHostname);
 
+    // RuleManager初期化
+    ruleMgr.begin(&settings, &channels, &webhooks);
+
     // StateReporter初期化
     stateReporter.begin(&settings, &ntp, &channels);
     stateReporter.setAuth(myTid, myLacisId, myCic);
     stateReporter.setMac(myMac);
     stateReporter.setRelayUrls(
-        AraneaSettings::getRelayPrimary(),
-        AraneaSettings::getRelaySecondary()
+        settings.getString("relay_pri", ARANEA_DEFAULT_RELAY_PRIMARY),
+        settings.getString("relay_sec", ARANEA_DEFAULT_RELAY_SECONDARY)
     );
-    stateReporter.setCloudUrl(AraneaSettings::getCloudUrl());
+    stateReporter.setCloudUrl(settings.getString("cloud_url", ARANEA_DEFAULT_CLOUD_URL));
 
     // HttpManager初期化
-    httpMgr.begin(&settings, &channels, &webhooks, 80);
+    httpMgr.begin(&settings, &channels, &webhooks, &ruleMgr, 80);
 
     AraneaDeviceInfo devInfo;
     devInfo.deviceType = DEVICE_SHORT_NAME;
@@ -397,6 +565,37 @@ void setup() {
         display.showError("HTTP OTA: " + err);
     });
 
+    // MQTT初期化（ブローカーが設定されている場合のみ）
+    String mqttBroker = AraneaSettings::getMqttBroker();
+    if (mqttBroker.length() > 0 && !apModeActive) {
+        display.showBoot("MQTT...");
+        Serial.printf("[MQTT] Connecting to %s\n", mqttBroker.c_str());
+
+        // コールバック設定
+        mqtt.onConnected([]() {
+            Serial.println("[MQTT] Connected!");
+            // コマンドトピック購読
+            String cmdTopic = "aranea/" + myLacisId + "/command";
+            mqtt.subscribe(cmdTopic);
+            Serial.printf("[MQTT] Subscribed: %s\n", cmdTopic.c_str());
+        });
+        mqtt.onDisconnected([]() {
+            Serial.println("[MQTT] Disconnected");
+        });
+        mqtt.onMessage(handleMqttMessage);
+        mqtt.onError([](const String& err) {
+            Serial.printf("[MQTT] Error: %s\n", err.c_str());
+        });
+
+        // 接続開始
+        bool mqttOk = mqtt.begin(mqttBroker, myLacisId, myCic);
+        if (!mqttOk) {
+            Serial.println("[MQTT] Connection failed (non-fatal)");
+        }
+    } else {
+        Serial.println("[MQTT] No broker configured, skipping");
+    }
+
     // RUNモードへ
     op.setMode(OperatorMode::RUN);
 
@@ -430,6 +629,9 @@ void loop() {
     // HTTP処理
     httpMgr.handle();
 
+    // MQTT処理
+    mqtt.handle();
+
     // APモードタイムアウト
     if (apModeActive && (now - apModeStartTime >= AP_MODE_TIMEOUT_MS)) {
         Serial.println("[AP] Timeout, attempting STA reconnect");
@@ -443,6 +645,9 @@ void loop() {
     // チャンネルサンプリング
     channels.sample();
     channels.update();
+
+    // Webhookキュー処理
+    webhooks.handle();
 
     // 心拍送信
     if (!apModeActive && (now - lastHeartbeatTime >= (unsigned long)heartbeatIntervalSec * 1000)) {

@@ -36,7 +36,7 @@
 
 // --- 通信モジュール ---
 #include "AraneaWebUI.h"          // Web UI基底クラス
-// #include "MqttManager.h"       // MQTT（is05aでは不要）
+#include "MqttManager.h"          // MQTT（設定変更・出力制御用）
 // #include "HttpRelayClient.h"   // Zero3中継（is05aでは直接HTTP POST）
 
 // --- OTA更新モジュール ---
@@ -53,6 +53,7 @@
 #include "AraneaSettings.h"       // 施設設定（大量生産用）
 #include "ChannelManager.h"       // 8ch入力管理
 #include "WebhookManager.h"       // Webhook通知
+#include "RuleManager.h"          // 入力→出力/Webhookルール
 #include "HttpManagerIs05a.h"     // Web UI実装
 #include "StateReporterIs05a.h"   // 状態レポート構築
 
@@ -65,7 +66,7 @@ inline void printAraneaGlobalModules() {
   Serial.println("=== Aranea Global Modules (is05a) ===");
   Serial.println("SettingManager, WiFiManager, NtpManager");
   Serial.println("LacisIDGenerator, AraneaRegister, DisplayManager");
-  Serial.println("Operator, AraneaWebUI, IOController");
+  Serial.println("Operator, AraneaWebUI, IOController, RuleManager");
   Serial.println("OtaManager, HttpOtaManager");
   Serial.println("=====================================");
 }

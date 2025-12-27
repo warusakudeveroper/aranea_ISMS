@@ -18,6 +18,8 @@ AraneaSDKは、mobes2.0とaraneaDeviceの連携を確実に行うための開発
 | [SCHEMA_SPEC.md](./SCHEMA_SPEC.md) | スキーマ定義・型システム | 全員 |
 | [API_REFERENCE.md](./API_REFERENCE.md) | API エンドポイント仕様 | ファーム/バックエンド |
 | [DEVICE_IMPLEMENTATION.md](./DEVICE_IMPLEMENTATION.md) | デバイスファームウェア実装ガイド | ファームウェア開発者 |
+| [ARANEA_WEB_UI.md](./ARANEA_WEB_UI.md) | 共通Web UIフレームワーク (v1.6.0) | ファームウェア開発者 |
+| [IS10_DEVELOPMENT_STATUS.md](./IS10_DEVELOPMENT_STATUS.md) | is10開発進捗・アーキテクチャ | ファームウェア開発者 |
 | [VALIDATION_TOOLS.md](./VALIDATION_TOOLS.md) | 検証ツール仕様 | 全員 |
 | [DEVELOPMENT_WORKFLOW.md](./DEVELOPMENT_WORKFLOW.md) | 開発ワークフロー | 全員 |
 | [TYPE_REGISTRY.md](./TYPE_REGISTRY.md) | ProductType/Type登録仕様 | 全員 |
@@ -28,6 +30,8 @@ AraneaSDKは、mobes2.0とaraneaDeviceの連携を確実に行うための開発
 
 | バージョン | 日付 | 変更内容 |
 |-----------|------|---------|
+| 0.2.1 | 2025-12-27 | IS10_DEVELOPMENT_STATUS.md追加 |
+| 0.2.0 | 2025-12-27 | ARANEA_WEB_UI.md追加 (v1.6.0) |
 | 0.1.0 | 2025-12-25 | 初版作成 |
 
 ---

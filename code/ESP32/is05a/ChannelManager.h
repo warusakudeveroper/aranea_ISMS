@@ -7,6 +7,11 @@
  * - ch1-ch6: 入力専用
  * - ch7-ch8: 入力/出力切替可能
  *
+ * 出力モード:
+ * - Momentary: 指定時間後にOFF
+ * - Alternate: トグル動作（ON/OFF切替）
+ * - Interval: 指定回数繰り返し
+ *
  * 設計原則:
  * - シングルタスク設計（loop()内でsample()/update()呼び出し）
  * - セマフォ/WDT不使用
@@ -25,6 +30,13 @@ class ChannelManager {
 public:
     static const int NUM_CHANNELS = 8;
 
+    // 出力モード定義
+    enum class OutputMode : uint8_t {
+        MOMENTARY = 0,   // 指定時間後にOFF
+        ALTERNATE = 1,   // トグル動作
+        INTERVAL = 2     // 指定回数繰り返し
+    };
+
     ChannelManager();
 
     // ========================================
@@ -36,7 +48,7 @@ public:
     // メインループ処理
     // ========================================
     void sample();   // 全チャンネルの入力サンプリング
-    void update();   // パルス終了チェック
+    void update();   // パルス終了チェック / インターバル処理
 
     // ========================================
     // 状態取得
@@ -57,9 +69,12 @@ public:
         int pin;
         String name;
         String meaning;    // "open" or "close"
-        int debounceMs;
+        int debounceMs;    // 10-10000ms
         bool inverted;
         bool isOutput;     // ch7/ch8のみ true可
+        OutputMode outputMode;     // 出力モード
+        int outputDurationMs;      // 出力時間(ms) 500-10000
+        int intervalCount;         // インターバル回数
     };
 
     ChannelConfig getConfig(int ch) const;
@@ -68,8 +83,20 @@ public:
     // ch7/ch8 出力モード
     bool setOutputMode(int ch, bool output);
     bool isOutputMode(int ch) const;
+
+    // 出力制御
     void setOutput(int ch, bool high);
+    bool getOutputState(int ch) const;
+    bool isOutputActive(int ch) const { return getOutputState(ch); }  // UI用エイリアス
     void pulse(int ch, int durationMs);
+
+    // 出力モード設定
+    void setOutputBehavior(int ch, OutputMode mode, int durationMs, int count);
+    OutputMode getOutputBehavior(int ch) const;
+
+    // 出力トリガー（モードに応じて動作）
+    void triggerOutput(int ch);
+    void stopOutput(int ch);
 
     // IOControllerへのアクセス
     IOController* getController(int ch);
@@ -95,8 +122,18 @@ private:
     int lastChangedCh_;
     std::function<void(int, bool)> onChangeCallback_;
 
+    // インターバル出力用状態
+    struct IntervalState {
+        bool active;
+        int remainingCount;
+        unsigned long lastToggleMs;
+        bool currentState;
+    };
+    IntervalState intervalState_[NUM_CHANNELS];
+
     void loadConfig();
     void initChannels();
+    void saveOutputConfig(int ch);
 };
 
 #endif // CHANNEL_MANAGER_H
