@@ -8,17 +8,16 @@ IS-20S統合 最終版合意連携仕様書 Phase A 実装
 - 指数バックオフによるリトライ
 
 Note: ridキーはlacisOathのuserObjectスキーマ共通仕様に準拠
+Note: CICはaraneaDeviceGateから取得（自己生成ではない）
 """
 
 import asyncio
 import gzip
-import hashlib
-import hmac
 import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -41,10 +40,12 @@ class IngestConfig:
     endpoint_url: str = "https://us-central1-mobesorder.cloudfunctions.net/celestialGlobe_ingest"
     fid: str = ""
 
-    # デバイス認証情報
+    # デバイス認証情報（araneaDeviceGateから取得）
     lacis_id: str = ""
     mac_address: str = ""  # 正規化済み12文字 (例: AABBCCDDEEFF)
-    cic_secret: str = ""   # CIC生成用シークレット
+    cic: str = ""          # CIC（araneaDeviceGateから取得、自己生成ではない）
+    state_endpoint: str = ""   # deviceStateReport URL
+    mqtt_endpoint: str = ""    # MQTT WebSocket URL（双方向デバイスのみ）
 
     # バッチ設定
     batch_interval_sec: int = 300  # 5分
@@ -63,13 +64,18 @@ class IngestConfig:
     # 辞書バージョン
     dict_version: str = ""
 
+    # 登録済みフラグ
+    registered: bool = False
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "endpoint_url": self.endpoint_url,
             "fid": self.fid,
             "lacis_id": self.lacis_id,
             "mac_address": self.mac_address,
-            "cic_secret": self.cic_secret,
+            "cic": self.cic,
+            "state_endpoint": self.state_endpoint,
+            "mqtt_endpoint": self.mqtt_endpoint,
             "batch_interval_sec": self.batch_interval_sec,
             "max_packets_per_batch": self.max_packets_per_batch,
             "max_payload_bytes": self.max_payload_bytes,
@@ -79,6 +85,7 @@ class IngestConfig:
             "timeout_sec": self.timeout_sec,
             "enabled": self.enabled,
             "dict_version": self.dict_version,
+            "registered": self.registered,
         }
 
     @classmethod
@@ -88,7 +95,9 @@ class IngestConfig:
             fid=data.get("fid", ""),
             lacis_id=data.get("lacis_id", ""),
             mac_address=data.get("mac_address", ""),
-            cic_secret=data.get("cic_secret", ""),
+            cic=data.get("cic", ""),
+            state_endpoint=data.get("state_endpoint", ""),
+            mqtt_endpoint=data.get("mqtt_endpoint", ""),
             batch_interval_sec=data.get("batch_interval_sec", 300),
             max_packets_per_batch=data.get("max_packets_per_batch", 10000),
             max_payload_bytes=data.get("max_payload_bytes", 5 * 1024 * 1024),
@@ -98,6 +107,7 @@ class IngestConfig:
             timeout_sec=data.get("timeout_sec", 60),
             enabled=data.get("enabled", False),
             dict_version=data.get("dict_version", ""),
+            registered=data.get("registered", False),
         )
 
 
@@ -357,29 +367,210 @@ class BatchCollector:
         return None
 
 
-class CICGenerator:
-    """CIC（認証コード）生成"""
+@dataclass
+class TenantPrimaryAuth:
+    """テナントPrimary認証情報（lacisOath 3要素）"""
+    lacis_id: str    # テナントPrimaryのlacisId
+    user_id: str     # テナントPrimaryのuserId（email）
+    cic: str         # テナントPrimaryのCIC
 
-    @staticmethod
-    def generate(lacis_id: str, secret: str, timestamp: str, nonce: str) -> str:
+
+@dataclass
+class AraneaRegisterResult:
+    """araneaDeviceGate登録結果"""
+    ok: bool = False
+    cic_code: str = ""           # 6桁CIC
+    state_endpoint: str = ""     # deviceStateReport URL
+    mqtt_endpoint: str = ""      # MQTT WebSocket URL（双方向デバイスのみ）
+    error: str = ""
+
+
+class AraneaRegister:
+    """
+    araneaDeviceGate APIを使用してデバイスをmobes2.0に登録
+    登録成功時にCICを取得し、ファイルに保存
+
+    【AraneaRegister.cpp と同等のPython実装】
+    """
+
+    DEFAULT_GATE_URL = "https://us-central1-mobesorder.cloudfunctions.net/araneaDeviceGate"
+    REGISTER_FILE = DATA_DIR / "aranea_register.json"
+
+    def __init__(self, gate_url: str = ""):
+        self.gate_url = gate_url or self.DEFAULT_GATE_URL
+        self.tenant_auth: Optional[TenantPrimaryAuth] = None
+        self._saved_data: Dict[str, Any] = {}
+        self._load()
+
+    def _load(self) -> None:
+        """保存済みデータを読み込み"""
+        if self.REGISTER_FILE.exists():
+            try:
+                with self.REGISTER_FILE.open() as f:
+                    self._saved_data = json.load(f)
+                logger.info("[ARANEA] Loaded saved registration data")
+            except Exception as e:
+                logger.warning("[ARANEA] Failed to load registration data: %s", e)
+
+    def _save(self) -> None:
+        """データをファイルに保存"""
+        try:
+            self.REGISTER_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with self.REGISTER_FILE.open("w") as f:
+                json.dump(self._saved_data, f, indent=2)
+        except Exception as e:
+            logger.error("[ARANEA] Failed to save registration data: %s", e)
+
+    def set_tenant_primary(self, auth: TenantPrimaryAuth) -> None:
+        """テナントPrimary認証情報を設定"""
+        self.tenant_auth = auth
+
+    def is_registered(self) -> bool:
+        """登録済みかチェック"""
+        return self._saved_data.get("registered", False)
+
+    def get_saved_cic(self) -> str:
+        """保存されたCICを取得"""
+        return self._saved_data.get("cic", "")
+
+    def get_saved_state_endpoint(self) -> str:
+        """保存されたstateEndpointを取得"""
+        return self._saved_data.get("state_endpoint", "")
+
+    def get_saved_mqtt_endpoint(self) -> str:
+        """保存されたmqttEndpointを取得"""
+        return self._saved_data.get("mqtt_endpoint", "")
+
+    def clear_registration(self) -> None:
+        """登録データをクリア（再登録を強制）"""
+        self._saved_data = {}
+        if self.REGISTER_FILE.exists():
+            self.REGISTER_FILE.unlink()
+        logger.info("[ARANEA] Registration cleared")
+
+    async def register_device(
+        self,
+        tid: str,
+        device_type: str,
+        lacis_id: str,
+        mac_address: str,
+        product_type: str,
+        product_code: str,
+    ) -> AraneaRegisterResult:
         """
-        HMAC-SHA256でCICを生成
+        デバイス登録
 
         Args:
-            lacis_id: デバイスLacisID
-            secret: CICシークレット
-            timestamp: ISO8601タイムスタンプ
-            nonce: リプレイ防止用ノンス
+            tid: テナントID
+            device_type: デバイスタイプ (例: "aranea_ar-is20s")
+            lacis_id: デバイスのlacisId
+            mac_address: MACアドレス (12桁HEX)
+            product_type: プロダクトタイプ (3桁)
+            product_code: プロダクトコード (4桁)
 
         Returns:
-            CICハッシュ（16進数文字列）
+            AraneaRegisterResult
         """
-        message = f"{lacis_id}:{timestamp}:{nonce}"
-        return hmac.new(
-            secret.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        result = AraneaRegisterResult()
+
+        # 既に登録済みの場合は保存データを返す
+        if self.is_registered():
+            saved_cic = self.get_saved_cic()
+            if saved_cic:
+                result.ok = True
+                result.cic_code = saved_cic
+                result.state_endpoint = self.get_saved_state_endpoint()
+                result.mqtt_endpoint = self.get_saved_mqtt_endpoint()
+                logger.info("[ARANEA] Already registered, using saved CIC: %s", saved_cic)
+                return result
+            else:
+                # CICが空の場合は再登録を試行
+                logger.info("[ARANEA] Registered flag set but CIC is empty, re-registering...")
+                self.clear_registration()
+
+        if not self.tenant_auth:
+            result.error = "Tenant primary auth not set"
+            return result
+
+        # JSON構築（AraneaRegister.cppと同じ形式）
+        payload = {
+            "lacisOath": {
+                "lacisId": self.tenant_auth.lacis_id,
+                "userId": self.tenant_auth.user_id,
+                "cic": self.tenant_auth.cic,
+                "method": "register",
+            },
+            "userObject": {
+                "lacisID": lacis_id,
+                "tid": tid,
+                "typeDomain": "araneaDevice",
+                "type": device_type,
+            },
+            "deviceMeta": {
+                "macAddress": mac_address,
+                "productType": product_type,
+                "productCode": product_code,
+            },
+        }
+
+        logger.info("[ARANEA] Registering device...")
+        logger.info("[ARANEA] URL: %s", self.gate_url)
+        logger.debug("[ARANEA] Payload: %s", json.dumps(payload))
+
+        # HTTP POST
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    self.gate_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+
+                logger.info("[ARANEA] Response code: %d", resp.status_code)
+                logger.debug("[ARANEA] Response body: %s", resp.text)
+
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    if data.get("ok"):
+                        result.ok = True
+                        result.cic_code = data.get("userObject", {}).get("cic_code", "")
+                        result.state_endpoint = data.get("stateEndpoint", "")
+                        result.mqtt_endpoint = data.get("mqttEndpoint", "")
+
+                        # ファイルに保存
+                        self._saved_data = {
+                            "cic": result.cic_code,
+                            "state_endpoint": result.state_endpoint,
+                            "mqtt_endpoint": result.mqtt_endpoint,
+                            "registered": True,
+                        }
+                        self._save()
+
+                        logger.info("[ARANEA] Registered! CIC: %s", result.cic_code)
+                        logger.info("[ARANEA] State endpoint: %s", result.state_endpoint)
+                        if result.mqtt_endpoint:
+                            logger.info("[ARANEA] MQTT endpoint: %s", result.mqtt_endpoint)
+                    else:
+                        result.error = data.get("error", "Unknown error")
+                        logger.error("[ARANEA] Registration failed: %s", result.error)
+
+                elif resp.status_code == 409:
+                    result.error = "Device already registered (409)"
+                    logger.warning("[ARANEA] Device already registered (conflict)")
+
+                else:
+                    try:
+                        data = resp.json()
+                        result.error = data.get("error", f"HTTP {resp.status_code}")
+                    except Exception:
+                        result.error = f"HTTP {resp.status_code}: {resp.text}"
+                    logger.error("[ARANEA] Error %d: %s", resp.status_code, result.error)
+
+        except Exception as e:
+            result.error = f"HTTP error: {e}"
+            logger.error("[ARANEA] HTTP error: %s", e)
+
+        return result
 
 
 class IngestClient:
@@ -520,22 +711,23 @@ class IngestClient:
         # gzip圧縮
         compressed = gzip.compress(ndjson_body.encode())
 
+        # CIC確認（araneaDeviceGateから取得済みのもの）
+        if not self.config.cic:
+            logger.error("CIC not set - device must be registered with araneaDeviceGate first")
+            self.stats["batches_failed"] += 1
+            self.stats["last_error"] = "CIC not set"
+            return False
+
         # ヘッダー生成
         timestamp = datetime.now(timezone.utc).isoformat()
         nonce = str(uuid.uuid4())
-        cic = CICGenerator.generate(
-            self.config.lacis_id,
-            self.config.cic_secret,
-            timestamp,
-            nonce
-        )
 
         headers = {
             "Content-Type": "application/x-ndjson",
             "Content-Encoding": "gzip",
             "X-Aranea-LacisId": self.config.lacis_id,
             "X-Aranea-Mac": self.config.mac_address,
-            "X-Aranea-CIC": cic,
+            "X-Aranea-CIC": self.config.cic,  # araneaDeviceGateから取得したCIC
             "X-Aranea-SourceType": "ar-is20s",
             "X-Aranea-Timestamp": timestamp,
             "X-Aranea-Nonce": nonce,
@@ -662,7 +854,9 @@ __all__ = [
     "IpRoomMapper",
     "DomainServiceResolver",
     "BatchCollector",
-    "CICGenerator",
+    "TenantPrimaryAuth",
+    "AraneaRegisterResult",
+    "AraneaRegister",
     "load_ingest_config",
     "save_ingest_config",
     "get_ingest_client",
