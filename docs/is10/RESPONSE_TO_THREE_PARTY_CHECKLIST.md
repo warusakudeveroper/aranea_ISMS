@@ -3,6 +3,38 @@
 **From**: Aranea Device開発実装チーム
 **Date**: 2025-12-29
 **Subject**: IS-10 / IS-10m チェックリスト確認結果と修正計画
+**Reference**:
+- WEBHOOK_COMMON_SPEC.md (92edf73b)
+- IS10_FINAL_INTEGRATION_SPEC.md (92edf73b)
+- IS10M_FINAL_INTEGRATION_SPEC.md (92edf73b)
+
+---
+
+## 0. Webhook共通仕様確認
+
+### エンドポイント
+```
+POST https://us-central1-mobesorder.cloudfunctions.net/celestialGlobe_ingest?fid={fid}&source=araneaDevice
+```
+
+### 必須ヘッダー確認
+
+| ヘッダー | 仕様 | IS-10現状 | 対応 |
+|---------|------|:--------:|------|
+| Content-Type | `application/json` | ☑ | OK |
+| X-Aranea-SourceType | `ar-is10` | ⚠️ | 現状 `aranea_ar-is10` → **要修正** |
+| X-Aranea-LacisId | LacisID | ☑ | OK |
+| X-Aranea-Mac | MAC (12桁HEX) | ⚠️ | **要確認**: ヘッダーで送信しているか |
+| X-Aranea-Timestamp | ISO8601 | ⚠️ | **要確認**: ヘッダーで送信しているか |
+
+### 現行送信先の相違
+
+| 項目 | 仕様 | 現状 |
+|-----|------|------|
+| 送信先 | `celestialGlobe_ingest` | `araneaDeviceGate` (deviceStateReport) |
+| 経由 | 直接 | araneaDeviceGate経由 |
+
+**質問**: IS-10はCelestialGlobeに直接送信すべきですか？現状はaraneaDeviceGateのdeviceStateReportエンドポイントに送信しています。
 
 ---
 
@@ -91,6 +123,30 @@
 - `docs/is10m/DESIGN.md` - is10m設計書
 - `docs/is10m/MODULE_ADAPTATION_PLAN.md` - 既存モジュール適応計画
 
+### CelestialGlobe要求ペイロード形式
+
+```typescript
+interface Is10mReportPayload {
+  report: {
+    observedAt: string;     // ISO8601
+    sourceType: 'ar-is10m';
+    accessPoint: {
+      mac: string;          // AP MAC
+      ip?: string;
+      ssid?: string;
+      clientCount: number;
+    };
+    clients: Array<{
+      mac: string;
+      hostname?: string;
+      ip?: string;
+      rssi?: number;
+      connected: boolean;
+    }>;
+  };
+}
+```
+
 ### 実装計画
 
 IS-10の実装をベースに、以下を変更：
@@ -101,6 +157,15 @@ IS-10の実装をベースに、以下を変更：
 | 認証方式 | SSH Password/Key | XORエンコードパスワード + セッショントークン |
 | AP/クライアント取得 | DHCPリース解析 | `/stm/client/list`, `/stm/ap/list` |
 | sourceType | ar-is10 | ar-is10m |
+| レポート構造 | report.router | report.accessPoint |
+
+### Mercury AC API対応（docs/is10m/API_GUIDE.md参照）
+
+| API | 用途 |
+|-----|------|
+| POST `/` (login) | セッション取得（XORパスワード + force=1） |
+| GET `/stm/client/list` | クライアントリスト取得（max 16件確認済み） |
+| GET `/stm/ap/list` | APリスト取得（max 18件確認済み） |
 
 ---
 
@@ -145,20 +210,31 @@ result.cic_code = resDoc["userObject"]["cic_code"].as<String>();
 
 ## 5. 次のアクション
 
-### 優先度: 高
+### 優先度: 高（仕様整合）
 
-1. [ ] IS-10 クライアントリスト取得機能の追加
-2. [ ] IS-10 report構造の仕様書準拠への変更
-3. [ ] IS-10 LacisID形式の変更 (`3010` → `4010`)
+| # | 項目 | 対象 |
+|---|-----|------|
+| 1 | 送信先エンドポイント確認 | IS-10/IS-10m |
+| 2 | X-Aranea-* ヘッダー追加 | IS-10 |
+| 3 | sourceType修正 (`aranea_ar-is10` → `ar-is10`) | IS-10 |
+| 4 | report.router構造追加 | IS-10 |
+| 5 | クライアントリスト取得・送信 | IS-10 |
 
-### 優先度: 中
+### 優先度: 中（新規実装）
 
-4. [ ] IS-10m 基本実装開始
-5. [ ] イベント駆動送信の実装
+| # | 項目 | 対象 |
+|---|-----|------|
+| 6 | IS-10m 基本実装開始 | IS-10m |
+| 7 | Mercury AC API連携 | IS-10m |
+| 8 | イベント駆動送信 | IS-10/IS-10m |
 
-### 確認待ち
+### 確認待ち（仕様確認依頼）
 
-6. [ ] CIC認証方式の最終確認
+| # | 質問 |
+|---|-----|
+| A | CIC認証方式: 登録時取得（6桁）vs リクエスト時生成（HMAC-SHA256）？ |
+| B | 送信先: CelestialGlobe直接 vs araneaDeviceGate経由？ |
+| C | LacisID prefix: `3010` vs `4010`？ |
 
 ---
 
