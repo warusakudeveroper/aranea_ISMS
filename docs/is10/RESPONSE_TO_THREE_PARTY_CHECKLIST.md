@@ -228,13 +228,58 @@ result.cic_code = resDoc["userObject"]["cic_code"].as<String>();
 | 7 | Mercury AC API連携 | IS-10m |
 | 8 | イベント駆動送信 | IS-10/IS-10m |
 
-### 確認待ち（仕様確認依頼）
+### 仕様確認結果（CelestialGlobe班より回答 2025-12-29）
 
-| # | 質問 |
-|---|-----|
-| A | CIC認証方式: 登録時取得（6桁）vs リクエスト時生成（HMAC-SHA256）？ |
-| B | 送信先: CelestialGlobe直接 vs araneaDeviceGate経由？ |
-| C | LacisID prefix: `3010` vs `4010`？ |
+| # | 質問 | 回答 |
+|---|-----|------|
+| A | CIC認証方式 | **登録時取得（6桁）**。CelestialGlobeでは検証しない。認証はaraneaDeviceGateの責務。 |
+| B | 送信先 | **CelestialGlobe直接**。WebhookはaraneaDeviceGate経由しない。 |
+| C | LacisID prefix | LacisOath標準仕様に従う（CelestialGlobe班の管轄外） |
+
+### ヘッダー仕様（確定）
+
+```
+X-Aranea-SourceType: ar-is10              ← prefixなし（aranea_なし）
+X-Aranea-LacisId: {LacisID}               ← LacisOath標準形式
+X-Aranea-Mac: AABBCCDDEEFF                ← コロン/ハイフンなし大文字
+X-Aranea-Timestamp: 2025-12-29T12:00:00Z  ← ISO8601
+```
+
+---
+
+## 6. IS-10 実装修正計画
+
+### 修正必要箇所
+
+| # | ファイル | 修正内容 |
+|---|---------|---------|
+| 1 | StateReporter.cpp | 送信先を`celestialGlobe_ingest`に変更 |
+| 2 | StateReporter.cpp | X-Aranea-* ヘッダー追加 |
+| 3 | StateReporterIs10.cpp | sourceType `ar-is10` に修正 |
+| 4 | StateReporterIs10.cpp | report.router構造追加 |
+| 5 | SshPollerIs10.cpp | クライアントリスト取得追加 |
+
+### 新ペイロード形式（CelestialGlobe要求準拠）
+
+```json
+{
+  "report": {
+    "observedAt": "2025-12-29T12:00:00Z",
+    "sourceType": "ar-is10",
+    "router": {
+      "mac": "AABBCCDDEEFF",
+      "wanIp": "xxx.xxx.xxx.xxx",
+      "lanIp": "192.168.x.1",
+      "ssid24": "MyWiFi_2G",
+      "ssid50": "MyWiFi_5G",
+      "clientCount": 5
+    },
+    "clients": [
+      { "mac": "112233445566", "hostname": "iPhone", "ip": "192.168.1.100", "connected": true }
+    ]
+  }
+}
+```
 
 ---
 
