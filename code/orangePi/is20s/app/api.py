@@ -26,6 +26,18 @@ from .system_config import (
     get_wifi_config_manager,
     MAX_WIFI_CONFIGS,
 )
+from .domain_services import (
+    get_domain_service_manager,
+    get_service_by_domain,
+    get_unknown_cache,
+    record_unknown_domain,
+)
+from .ingest_client import (
+    IngestConfig,
+    get_ingest_client,
+    load_ingest_config,
+    save_ingest_config,
+)
 
 
 def _tail_log(log_path: Path, lines: int) -> List[str]:
@@ -98,6 +110,9 @@ def create_router(
         # キャプチャステータス追加
         if capture_manager:
             result["capture"] = capture_manager.get_status()
+        # Ingestステータス追加
+        ingest_client = get_ingest_client()
+        result["ingest"] = ingest_client.get_stats()
         return result
 
     @router.get("/api/events")
@@ -254,7 +269,35 @@ def create_router(
             return {"ok": False, "error": "capture not configured", "events": []}
         limit = min(max(limit, 1), 500)
         # 表示用バッファから取得（送信キューとは独立）
-        events = capture_manager.display_buffer[-limit:] if capture_manager.display_buffer else []
+        raw_events = capture_manager.display_buffer[-limit:] if capture_manager.display_buffer else []
+
+        # 各イベントにservice/categoryを付与（バックエンドで解決）
+        events = []
+        for e in raw_events:
+            # イベントをコピー
+            event = dict(e) if isinstance(e, dict) else e
+            # ドメインを特定（優先順: http_host > tls_sni > resolved_domain > dns_qry）
+            domain = (
+                event.get("http_host")
+                or event.get("tls_sni")
+                or event.get("resolved_domain")
+                or event.get("dns_qry")
+                or ""
+            )
+            # service/categoryを解決
+            service, category = get_service_by_domain(domain)
+            event["domain_service"] = service
+            event["domain_category"] = category
+            events.append(event)
+
+            # 未検出ドメインをキャッシュに記録
+            if domain and not service:
+                record_unknown_domain(
+                    domain,
+                    src_ip=event.get("src_ip"),
+                    room_no=event.get("room_no"),
+                )
+
         return {
             "ok": True,
             "count": len(events),
@@ -534,6 +577,164 @@ def create_router(
         results = await sync_mgr.sync_all_peers()
         return {"ok": True, "results": results}
 
+    # ========== ドメインサービスAPI ==========
+
+    @router.get("/api/domain-services")
+    async def domain_services_list(request: Request):
+        """ドメイン→サービスマッピング一覧を取得"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        mgr = get_domain_service_manager()
+        return {
+            "ok": True,
+            "count": mgr.get_count(),
+            "services": mgr.get_all(),
+        }
+
+    @router.get("/api/domain-services/search")
+    async def domain_services_search(request: Request, q: str = ""):
+        """ドメイン→サービスマッピングを検索"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        if not q:
+            return {"ok": False, "error": "Query parameter 'q' required"}
+        mgr = get_domain_service_manager()
+        results = mgr.search(q)
+        return {"ok": True, "count": len(results), "results": results}
+
+    @router.post("/api/domain-services")
+    async def domain_services_add(payload: Dict[str, Any], request: Request):
+        """ドメイン→サービスマッピングを追加"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        pattern = payload.get("pattern", "")
+        service = payload.get("service", "")
+        category = payload.get("category", "")
+        if not pattern or not service:
+            return {"ok": False, "error": "pattern and service required"}
+        mgr = get_domain_service_manager()
+        return mgr.add(pattern, service, category)
+
+    @router.put("/api/domain-services/{pattern:path}")
+    async def domain_services_update(pattern: str, payload: Dict[str, Any], request: Request):
+        """ドメイン→サービスマッピングを更新"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        service = payload.get("service")
+        category = payload.get("category")
+        mgr = get_domain_service_manager()
+        return mgr.update(pattern, service=service, category=category)
+
+    @router.delete("/api/domain-services/{pattern:path}")
+    async def domain_services_delete(pattern: str, request: Request):
+        """ドメイン→サービスマッピングを削除"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        mgr = get_domain_service_manager()
+        return mgr.delete(pattern)
+
+    @router.get("/api/domain-services/lookup")
+    async def domain_services_lookup(request: Request, domain: str = ""):
+        """ドメインからサービス・カテゴリを検索（API確認用）"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        if not domain:
+            return {"ok": False, "error": "domain parameter required"}
+        service, category = get_service_by_domain(domain)
+        return {
+            "ok": True,
+            "domain": domain,
+            "service": service,
+            "category": category,
+            "found": service is not None,
+        }
+
+    # ===== 未検出ドメインAPI =====
+
+    @router.get("/api/unknown-domains")
+    async def get_unknown_domains(request: Request):
+        """
+        未検出ドメイン一覧を取得
+        - 最大100件のFIFOキャッシュ
+        - 出現回数降順でソート
+        """
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        cache = get_unknown_cache()
+        return {
+            "ok": True,
+            "count": cache.get_count(),
+            "total_hits": cache.get_total_hits(),
+            "domains": cache.get_all(),
+        }
+
+    @router.delete("/api/unknown-domains")
+    async def clear_unknown_domains(request: Request):
+        """未検出ドメインキャッシュをクリア"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        cache = get_unknown_cache()
+        cache.clear()
+        return {"ok": True, "message": "Unknown domains cache cleared"}
+
+    @router.delete("/api/unknown-domains/{domain:path}")
+    async def remove_unknown_domain(request: Request, domain: str):
+        """特定の未検出ドメインを削除"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        cache = get_unknown_cache()
+        if cache.remove(domain):
+            return {"ok": True, "message": f"Removed: {domain}"}
+        return {"ok": False, "error": f"Domain not found: {domain}"}
+
+    @router.post("/api/unknown-domains/register/{domain:path}")
+    async def register_unknown_domain(request: Request, domain: str):
+        """
+        未検出ドメインをサービスとして登録
+        Body: {"service": "...", "category": "..."}
+        """
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        try:
+            body = await request.json()
+        except Exception:
+            return {"ok": False, "error": "Invalid JSON body"}
+
+        service = body.get("service", "").strip()
+        category = body.get("category", "").strip()
+
+        if not service:
+            return {"ok": False, "error": "service is required"}
+
+        # パターンを抽出（最後の2パート）
+        parts = domain.split(".")
+        pattern = ".".join(parts[-2:]) if len(parts) >= 2 else domain
+
+        # サービスマッピングに追加
+        mgr = get_domain_service_manager()
+        result = mgr.add(pattern, service, category)
+
+        if result.get("ok"):
+            # 未検出キャッシュから削除
+            cache = get_unknown_cache()
+            cache.remove(domain)
+
+        return result
+
     # ===== SpeedDial API =====
     @router.get("/api/speeddial")
     async def get_speeddial(request: Request):
@@ -754,6 +955,128 @@ def create_router(
             "applied": applied,
             "errors": errors if errors else None
         }
+
+    # ========== CelestialGlobe Ingest API ==========
+    # IS-20S統合 最終版合意連携仕様書 Phase A
+    # Note: ridキーはlacisOathのuserObjectスキーマ共通仕様に準拠
+
+    @router.get("/api/ingest/config")
+    async def get_ingest_config(request: Request):
+        """Ingest設定を取得"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        config = load_ingest_config()
+        # シークレットはマスク
+        result = config.to_dict()
+        if result.get("cic_secret"):
+            result["cic_secret"] = "***"
+        return {"ok": True, "config": result}
+
+    @router.post("/api/ingest/config")
+    async def set_ingest_config(payload: Dict[str, Any], request: Request):
+        """Ingest設定を更新"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        current = load_ingest_config()
+
+        # 更新可能なフィールド
+        if "endpoint_url" in payload:
+            current.endpoint_url = payload["endpoint_url"]
+        if "fid" in payload:
+            current.fid = payload["fid"]
+        if "lacis_id" in payload:
+            current.lacis_id = payload["lacis_id"]
+        if "mac_address" in payload:
+            current.mac_address = payload["mac_address"]
+        if "cic_secret" in payload:
+            current.cic_secret = payload["cic_secret"]
+        if "batch_interval_sec" in payload:
+            current.batch_interval_sec = int(payload["batch_interval_sec"])
+        if "max_packets_per_batch" in payload:
+            current.max_packets_per_batch = int(payload["max_packets_per_batch"])
+        if "enabled" in payload:
+            current.enabled = bool(payload["enabled"])
+
+        if save_ingest_config(current):
+            # クライアントの設定を更新
+            ingest_client = get_ingest_client()
+            ingest_client.update_config(current)
+            return {"ok": True, "message": "Ingest config updated"}
+        else:
+            return {"ok": False, "error": "Failed to save config"}
+
+    @router.get("/api/ingest/stats")
+    async def get_ingest_stats(request: Request):
+        """Ingest統計を取得"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        ingest_client = get_ingest_client()
+        return {"ok": True, **ingest_client.get_stats()}
+
+    @router.post("/api/ingest/start")
+    async def start_ingest(request: Request):
+        """Ingestを開始"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        config = load_ingest_config()
+        if not config.fid or not config.lacis_id:
+            return {"ok": False, "error": "fid and lacis_id required"}
+
+        config.enabled = True
+        save_ingest_config(config)
+
+        ingest_client = get_ingest_client()
+        ingest_client.update_config(config)
+        await ingest_client.start()
+        return {"ok": True, "message": "Ingest started", **ingest_client.get_stats()}
+
+    @router.post("/api/ingest/stop")
+    async def stop_ingest(request: Request):
+        """Ingestを停止"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+
+        config = load_ingest_config()
+        config.enabled = False
+        save_ingest_config(config)
+
+        ingest_client = get_ingest_client()
+        await ingest_client.stop()
+        ingest_client.update_config(config)
+        return {"ok": True, "message": "Ingest stopped", **ingest_client.get_stats()}
+
+    @router.get("/api/ingest/room-mapping")
+    async def get_room_mapping(request: Request):
+        """IP→部屋ID（rid）マッピングを取得"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        ingest_client = get_ingest_client()
+        return {
+            "ok": True,
+            "mappings": ingest_client.ip_mapper.mappings,
+            "ranges": {
+                f"{start}-{end}": rid
+                for start, end, rid in ingest_client.ip_mapper.ranges
+            } if ingest_client.ip_mapper.ranges else {},
+        }
+
+    @router.post("/api/ingest/room-mapping")
+    async def set_room_mapping(payload: Dict[str, Any], request: Request):
+        """IP→部屋ID（rid）マッピングを更新"""
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        ingest_client = get_ingest_client()
+        ingest_client.ip_mapper.update(payload)
+        return {"ok": True, "message": "Room mapping updated"}
 
     return router
 
