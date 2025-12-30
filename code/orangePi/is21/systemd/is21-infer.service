@@ -1,0 +1,24 @@
+[Unit]
+Description=IS21 camimageEdge AI Inference Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/is21/src
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+Environment=PYTHONPATH=/opt/is21/src
+
+# リソース制限
+MemoryMax=4G
+CPUQuota=80%
+
+# ログ設定
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=is21-infer
+
+[Install]
+WantedBy=multi-user.target
