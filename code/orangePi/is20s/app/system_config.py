@@ -28,6 +28,7 @@ WIFI_CONFIG_FILE = DATA_DIR / "wifi_config.json"
 CACHE_FILES = [
     "dns_cache.json",
     "asn_cache.json",
+    "domain_services.json",  # ドメイン→サービスマッピング
 ]
 
 # WiFi設定の最大数

@@ -231,12 +231,26 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 <div style="margin-bottom:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center">
 <div><label style="font-size:12px;color:var(--text-muted);margin-right:4px">Room:</label><select id="cap-room-filter" onchange="refreshCaptureEvents()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px"><option value="">All</option></select></div>
 <div><label style="font-size:12px;color:var(--text-muted);margin-right:4px">Dir:</label><select id="cap-dir-filter" onchange="refreshCaptureEvents()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px"><option value="">All</option><option value="up">↑送信のみ</option><option value="down">↓受信のみ</option></select></div>
-<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="cap-filter-local" onchange="refreshCaptureEvents()" style="width:auto" checked>ローカル除外</label>
-<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="cap-filter-ptr" onchange="refreshCaptureEvents()" style="width:auto" checked>PTR除外</label>
+<details id="filter-dropdown" style="font-size:12px;position:relative">
+<summary style="cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary)">除外フィルタ ▾</summary>
+<div style="position:absolute;top:100%;left:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;box-shadow:0 2px 8px rgba(0,0,0,0.15);min-width:160px">
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-local" onchange="refreshCaptureEvents()" style="width:auto" checked>ローカル</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-ptr" onchange="refreshCaptureEvents()" style="width:auto" checked>PTR</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-photo" onchange="refreshCaptureEvents()" style="width:auto" checked>写真同期</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-oscheck" onchange="refreshCaptureEvents()" style="width:auto" checked>OS接続</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-ad" onchange="refreshCaptureEvents()" style="width:auto" checked>広告/計測</label>
+<hr style="margin:6px 0;border:0;border-top:1px solid var(--border)">
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-streaming" onchange="refreshCaptureEvents()" style="width:auto">Streaming</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-sns" onchange="refreshCaptureEvents()" style="width:auto">SNS</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-google" onchange="refreshCaptureEvents()" style="width:auto">Google</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-apple" onchange="refreshCaptureEvents()" style="width:auto">Apple</label>
+</div>
+</details>
+<div style="flex:1;min-width:120px"><input type="text" id="cap-filter-keyword" oninput="refreshCaptureEvents()" placeholder="Filter..." style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:monospace"></div>
 </div>
 <div style="overflow-y:auto;max-height:32000px">
 <table class="cap-tbl" style="table-layout:fixed;width:100%">
-<thead><tr><th style="width:58px">Time</th><th style="width:28px"></th><th style="width:42px">Room</th><th style="width:20px">↕</th><th style="width:90px">Service</th><th style="width:48px">Threat</th><th style="width:92px">SrcIP</th><th style="width:120px">DstIP:Port</th><th>Domain</th></tr></thead>
+<thead><tr><th style="width:58px">Time</th><th style="width:28px"></th><th style="width:42px">Room</th><th style="width:20px">↕</th><th style="width:80px">Service</th><th style="width:62px">Type</th><th style="width:92px">SrcIP</th><th style="width:120px">DstIP:Port</th><th>Domain</th></tr></thead>
 <tbody id="cap-events-body"><tr><td colspan="9" style="color:var(--text-muted)">No capture events</td></tr></tbody>
 </table>
 </div>
@@ -797,143 +811,8 @@ async function saveRooms(){{
   }}catch(e){{toast('Error: '+e);}}
 }}
 
-// 既知サービス判定（不正アクセス検知用：既知は薄く、未知を目立たせる）
-const KNOWN_SERVICES={{
-  // 動画・配信
-  'youtube':'YouTube','googlevideo':'YouTube','ytimg':'YouTube','yt3.ggpht':'YouTube',
-  'netflix':'Netflix','nflxvideo':'Netflix','nflximg':'Netflix','nflxext':'Netflix',
-  'nicovideo':'ニコニコ','nimg':'ニコニコ','niconi.co':'ニコニコ',
-  'twitchcdn':'Twitch','twitch.tv':'Twitch','jtvnw':'Twitch',
-  'abema':'ABEMA','ameba':'Ameba',
-  'hulu':'Hulu','huluim':'Hulu',
-  'dazn':'DAZN',
-  'primevideo':'Prime Video','aiv-cdn':'Prime Video',
-  'disneyplus':'Disney+',
-  // SNS
-  'facebook':'Facebook','fbcdn':'Facebook','fb.com':'Facebook',
-  'instagram':'Instagram','cdninstagram':'Instagram',
-  'twitter':'Twitter/X','x.com':'Twitter/X','twimg':'Twitter/X',
-  'threads.net':'Threads',
-  'tiktok':'TikTok','bytedance':'TikTok','tiktokcdn':'TikTok','musical.ly':'TikTok',
-  'pinterest':'Pinterest','pinimg':'Pinterest',
-  'linkedin':'LinkedIn',
-  'snapchat':'Snapchat','snapkit':'Snapchat',
-  // メッセンジャー
-  'line':'LINE','linecorp':'LINE','line-apps':'LINE','line-scdn':'LINE','naver':'LINE',
-  'wechat':'WeChat','weixin':'WeChat','qq.com':'QQ/WeChat','tencent':'Tencent',
-  'whatsapp':'WhatsApp',
-  'telegram':'Telegram','t.me':'Telegram',
-  'discord':'Discord','discordapp':'Discord',
-  'slack':'Slack','slack-edge':'Slack',
-  'kakaotalk':'KakaoTalk','kakao':'Kakao',
-  'signal':'Signal',
-  'viber':'Viber',
-  // Google
-  'google':'Google','googleapis':'Google','gstatic':'Google','ggpht':'Google',
-  'googleusercontent':'Google','googlesyndication':'GoogleAds','doubleclick':'GoogleAds',
-  'googleadservices':'GoogleAds','googlevideo':'YouTube','gvt1':'Google','gvt2':'Google',
-  'gmail':'Gmail','googlemail':'Gmail',
-  'drive.google':'GDrive','docs.google':'GDocs',
-  'meet.google':'GMeet','google-analytics':'GA',
-  // Apple
-  'apple':'Apple','icloud':'iCloud','mzstatic':'Apple','apple-cloudkit':'Apple',
-  'itunes':'iTunes','appstore':'AppStore',
-  // Microsoft
-  'microsoft':'Microsoft','msft':'Microsoft',
-  'azure':'Azure','windows':'Windows','msn':'MSN',
-  'office':'Office365','outlook':'Outlook','hotmail':'Outlook',
-  'live.com':'Microsoft','onedrive':'OneDrive',
-  'bing':'Bing','skype':'Skype',
-  'teams':'Teams',
-  // EC・ショッピング
-  'amazon':'Amazon','cloudfront':'AWS/CDN','amazonaws':'AWS','compute-1':'AWS','ec2-':'AWS',
-  'rakuten':'楽天',
-  'yahoo':'Yahoo','yimg':'Yahoo',
-  'mercari':'メルカリ',
-  'zozotown':'ZOZO','zozo':'ZOZO',
-  'paypay':'PayPay',
-  'shopify':'Shopify',
-  'aliexpress':'AliExpress','alibaba':'Alibaba',
-  // ゲーム
-  'steam':'Steam','steampowered':'Steam','steamcommunity':'Steam',
-  'playstation':'PlayStation','sony':'Sony',
-  'xbox':'Xbox',
-  'nintendo':'Nintendo',
-  'epicgames':'Epic Games','unrealengine':'Epic',
-  'riotgames':'Riot','leagueoflegends':'LoL',
-  'blizzard':'Blizzard','battle.net':'Blizzard',
-  'mihoyo':'miHoYo','hoyoverse':'HoYoverse',
-  'cygames':'Cygames',
-  // 音楽
-  'spotify':'Spotify','scdn':'Spotify',
-  'applemusic':'Apple Music',
-  'soundcloud':'SoundCloud',
-  // クラウド・ストレージ
-  'dropbox':'Dropbox',
-  'box.com':'Box',
-  'github':'GitHub','githubusercontent':'GitHub','githubassets':'GitHub',
-  'gitlab':'GitLab',
-  'bitbucket':'Bitbucket','atlassian':'Atlassian',
-  // ビデオ会議
-  'zoom':'Zoom','zoomcdn':'Zoom',
-  'webex':'Webex','cisco':'Cisco',
-  // CDN・インフラ
-  'cloudflare':'Cloudflare','cf-cdn':'Cloudflare',
-  'akamai':'Akamai/CDN','akadns':'Akamai/CDN','akamaized':'Akamai',
-  'fastly':'Fastly/CDN',
-  'edgecast':'Edgecast',
-  'jsdelivr':'jsDelivr',
-  'unpkg':'unpkg',
-  // AI
-  'chatgpt':'ChatGPT','openai':'OpenAI',
-  'anthropic':'Anthropic','claude':'Claude','statsig':'Analytics',
-  'gemini':'Gemini','bard':'Bard',
-  'copilot':'Copilot',
-  'cursor':'Cursor','cursor.sh':'Cursor',
-  // ニュース
-  'nhk':'NHK',
-  'asahi':'朝日新聞',
-  'yomiuri':'読売新聞',
-  'nikkei':'日経',
-  'cnn':'CNN',
-  'bbc':'BBC',
-  // アダルト（脅威DBでも検知するが念のため）
-  'pornhub':'PornHub','xvideos':'XVideos','xhamster':'xHamster','xnxx':'XNXX',
-  // Tor・匿名化
-  'tor':'Tor','onion':'Tor',
-  // 広告・トラッキング
-  'adtng':'AdTech','adnxs':'AdTech','adsrvr':'AdTech','criteo':'Criteo',
-  'bance':'広告(JP)','adjust':'Adjust','appsflyer':'AppsFlyer','branch':'Branch',
-  'amplitude':'Amplitude','segment':'Segment','mixpanel':'Mixpanel',
-  'taboola':'Taboola','outbrain':'Outbrain','smartnews-ads':'SmartNews',
-  'pubmatic':'PubMatic','rubiconproject':'Rubicon','openx':'OpenX',
-  'casalemedia':'Casale','advertising':'AdTech','adsafeprotected':'AdSafe',
-  'reflected':'AdTech','wcdnga':'AdTech','trafficjunky':'AdTech',
-  'adhigh':'AdTech','adcolony':'AdColony','unity3d':'Unity','unityads':'UnityAds',
-  'chartboost':'Chartboost','vungle':'Vungle','ironsrc':'IronSource',
-  'fyber':'Fyber','inmobi':'InMobi','mopub':'MoPub',
-  // アナリティクス
-  'hotjar':'Hotjar','mouseflow':'Mouseflow','fullstory':'FullStory',
-  'crazyegg':'CrazyEgg','heap':'Heap','intercom':'Intercom',
-  // その他
-  'wordpress':'WordPress',
-  'wix':'Wix',
-  'cloudinary':'Cloudinary','imgix':'imgix',
-}};
-function getServiceLabel(domain){{
-  if(!domain)return null;
-  const d=domain.toLowerCase();
-  // ドメイン境界を考慮したマッチング（x.comがdropbox.comにマッチしないように）
-  for(const[k,v]of Object.entries(KNOWN_SERVICES)){{
-    // ドット区切りでチェック（例：x.comは.x.comまたはx.com.で始まる場合のみ）
-    if(k.includes('.')){{
-      if(d===k||d.endsWith('.'+k)||d.includes('.'+k+'.'))return v;
-    }}else{{
-      if(d.includes(k))return v;
-    }}
-  }}
-  return null;
-}}
+// サービス・カテゴリ判定はバックエンド（domain_services.py）で行う
+// APIレスポンスの domain_service, domain_category フィールドを使用
 
 // 連続した同一ドメインをグループ化（ポート・IPは無視）
 function groupEvents(events){{
@@ -984,7 +863,6 @@ async function refreshThreatStatus(){{
 }}
 
 function showEventDetail(e){{
-  const domainSvc=getServiceLabel(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'');
   const lines=[
     '📅 Time: '+(e.time||'-'),
     '🏠 Room: '+(e.room_no||'UNK'),
@@ -997,7 +875,7 @@ function showEventDetail(e){{
     '🔒 TLS SNI: '+(e.tls_sni||'-'),
     '📋 PTR: '+(e.resolved_domain||'-'),
     '',
-    '🏷️ Service(Domain): '+(domainSvc||'-'),
+    '🏷️ Service(Domain): '+(e.domain_service||'-')+' ['+(e.domain_category||'-')+']',
     '🌐 ASN: '+(e.asn?'AS'+e.asn:'-'),
     '🏢 ASN Service: '+(e.asn_service||'-')+' ['+(e.asn_category||'-')+']',
     '',
@@ -1013,12 +891,17 @@ async function refreshCaptureEvents(){{
     if(!d.ok)return;
     document.getElementById('cap-event-count').textContent=d.count||0;
     document.getElementById('cap-event-info').textContent='Queue: '+d.total_queued+' events';
-    // Room フィルタのオプション更新
+    // Room フィルタのオプション更新（数値順ソート、UNKは最後）
     const filterEl=document.getElementById('cap-room-filter');
     const currentFilter=filterEl.value;
     const rooms=new Set((d.events||[]).map(e=>e.room_no).filter(r=>r));
+    const sortedRooms=[...rooms].sort((a,b)=>{{
+      if(a==='UNK')return 1;
+      if(b==='UNK')return -1;
+      return parseInt(a)-parseInt(b);
+    }});
     const opts=['<option value="">All</option>'];
-    rooms.forEach(r=>opts.push('<option value="'+r+'"'+(r===currentFilter?' selected':'')+'>'+r+'</option>'));
+    sortedRooms.forEach(r=>opts.push('<option value="'+r+'"'+(r===currentFilter?' selected':'')+'>'+r+'</option>'));
     filterEl.innerHTML=opts.join('');
     const tbody=document.getElementById('cap-events-body');
     tbody.innerHTML='';
@@ -1050,6 +933,95 @@ async function refreshCaptureEvents(){{
         return true;
       }});
     }}
+    // 写真同期除外 (iCloud/Google Photos)
+    if(document.getElementById('cap-filter-photo').checked){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        // Google Photos
+        if(domain.includes('googleusercontent.com'))return false;
+        if(domain.includes('photos.google.com'))return false;
+        if(domain.includes('lh3.google.com'))return false;
+        if(domain.includes('lh4.google.com'))return false;
+        if(domain.includes('lh5.google.com'))return false;
+        if(domain.includes('lh6.google.com'))return false;
+        // iCloud Photos
+        if(domain.includes('icloud.com'))return false;
+        if(domain.includes('aaplimg.com'))return false;
+        if(domain.includes('apple-dns.net'))return false;
+        if(domain.includes('mzstatic.com'))return false;
+        return true;
+      }});
+    }}
+    // OS接続チェック除外 (Windows/Android/iOS/Firefox)
+    if(document.getElementById('cap-filter-oscheck').checked){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        // Windows
+        if(domain.includes('msftncsi.com'))return false;
+        if(domain.includes('msftconnecttest.com'))return false;
+        // Android
+        if(domain.includes('connectivitycheck.gstatic.com'))return false;
+        if(domain.includes('connectivitycheck.android.com'))return false;
+        // iOS/macOS
+        if(domain.includes('captive.apple.com'))return false;
+        // Firefox
+        if(domain.includes('detectportal.firefox.com'))return false;
+        return true;
+      }});
+    }}
+    // 広告/計測除外
+    if(document.getElementById('cap-filter-ad').checked){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        const adPatterns=['googlesyndication','doubleclick','googleadservices','applovin','fivecdm','adtng','adnxs','adsrvr','criteo','bance','taboola','outbrain','pubmatic','rubiconproject','openx','casalemedia','adcolony','chartboost','vungle','ironsrc','fyber','inmobi','mopub','unityads','adjust','appsflyer','branch','amplitude','segment','mixpanel','google-analytics','hotjar','mouseflow','fullstory','crazyegg','heap'];
+        for(const p of adPatterns){{if(domain.includes(p))return false;}}
+        return true;
+      }});
+    }}
+    // Streaming除外
+    if(document.getElementById('cap-filter-streaming').checked){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        const streamPatterns=['youtube','googlevideo','youtubei','netflix','nflxvideo','nicovideo','twitch','abema','hulu','dazn','primevideo','disneyplus','spotify'];
+        for(const p of streamPatterns){{if(domain.includes(p))return false;}}
+        return true;
+      }});
+    }}
+    // SNS除外
+    if(document.getElementById('cap-filter-sns').checked){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        const snsPatterns=['instagram','facebook','fbcdn','twitter','x.com','twimg','threads','tiktok','bytedance','pinterest','linkedin','snapchat'];
+        for(const p of snsPatterns){{if(domain.includes(p))return false;}}
+        return true;
+      }});
+    }}
+    // Google除外
+    if(document.getElementById('cap-filter-google').checked){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        if(domain.includes('google')||domain.includes('gstatic')||domain.includes('googleapis')||domain.includes('ggpht')||domain.includes('gvt1')||domain.includes('gvt2'))return false;
+        return true;
+      }});
+    }}
+    // Apple除外
+    if(document.getElementById('cap-filter-apple').checked){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        if(domain.includes('apple')||domain.includes('icloud')||domain.includes('itunes')||domain.includes('mzstatic')||domain.includes('mac.com'))return false;
+        return true;
+      }});
+    }}
+    // キーワードフィルタ（入力があれば絞り込み）
+    const keyword=(document.getElementById('cap-filter-keyword').value||'').toLowerCase().trim();
+    if(keyword){{
+      events=events.filter(e=>{{
+        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+        const svc=(e.domain_service||e.asn_service||'').toLowerCase();
+        const cat=(e.domain_category||'').toLowerCase();
+        return domain.includes(keyword)||svc.includes(keyword)||cat.includes(keyword)||(e.src_ip||'').includes(keyword)||(e.dst_ip||'').includes(keyword)||(e.room_no||'').toLowerCase().includes(keyword);
+      }});
+    }}
     // グループ化
     const groups=groupEvents(events);
     const currentIds=new Set();
@@ -1060,10 +1032,10 @@ async function refreshCaptureEvents(){{
       const time=e.time?e.time.split('T')[1]?.substring(0,8)||'':'';
       // 方向: room_no!=UNK → 送信↑、UNK → 受信↓
       const dir=e.room_no&&e.room_no!=='UNK'?'<span style="color:#38a169;font-weight:bold">↑</span>':'<span style="color:#3182ce;font-weight:bold">↓</span>';
-      // サービス判定（ドメイン→ASNフォールバック）
+      // サービス判定（バックエンドで解決済み→ASNフォールバック）
       const domain=e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'';
-      let svc=getServiceLabel(domain);
-      let svcSource='domain';
+      let svc=e.domain_service||null;
+      let svcSource=e.domain_service?'domain':'';
       // ドメインで判定できなければASNを使用
       if(!svc&&e.asn_service){{
         svc=e.asn_service;
@@ -1077,10 +1049,27 @@ async function refreshCaptureEvents(){{
       }}else{{
         svcCell='<span style="color:#e53e3e;font-weight:bold;font-size:10px">???</span>';
       }}
-      // 脅威フラグ
+      // 脅威/カテゴリフラグ
       const threat=e.threat;
       const threatColors={{'malware':'#dc2626','adult':'#9333ea','gambling':'#ea580c','fakenews':'#ca8a04','tor':'#0891b2'}};
-      const threatCell=threat?'<span style="color:'+(threatColors[threat]||'#dc2626')+';font-weight:bold;font-size:10px">'+threat.toUpperCase()+'</span>':'';
+      const categoryColors={{'Streaming':'#2563eb','SNS':'#7c3aed','Photo':'#059669','Messenger':'#0891b2','Ad':'#ea580c','Tracker':'#ca8a04','VPN':'#dc2626'}};
+      let threatCell='';
+      if(threat){{
+        threatCell='<span style="color:'+(threatColors[threat]||'#dc2626')+';font-weight:bold;font-size:10px">'+threat.toUpperCase()+'</span>';
+      }}else{{
+        // カテゴリ判定（バックエンドで解決済み or ポート検出）
+        let category=e.domain_category||null;
+        // VPNポート検出
+        if(!category){{
+          const port=e.dst_port;
+          if(port===1194||port===443&&!svc)category='VPN?';
+          else if(port===51820)category='VPN';
+        }}
+        if(category){{
+          const catColor=categoryColors[category]||'#6b7280';
+          threatCell='<span style="color:'+catColor+';font-size:10px">'+category+'</span>';
+        }}
+      }}
       const dstDisplay=e.dst_ip+(e.dst_port?':'+e.dst_port:'');
       // Domain統合表示（優先順位: http_host > tls_sni > dns_qry > resolved_domain）
       let domainDisp=e.http_host||e.tls_sni||e.dns_qry||(e.resolved_domain?'['+e.resolved_domain+']':'')||'';
@@ -1523,6 +1512,11 @@ async function applySpeedDial(){{
 window.onload=()=>{{
   load();
   refreshStatus();
+  // 除外フィルタを外側クリックで閉じる
+  document.addEventListener('click',(e)=>{{
+    const dd=document.getElementById('filter-dropdown');
+    if(dd&&dd.open&&!dd.contains(e.target))dd.open=false;
+  }});
   refreshEvents();
   loadLogs(200);
   connectSSE();
