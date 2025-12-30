@@ -106,9 +106,9 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 </div>
 <div class="device-banner">
 <div class="device-banner-inner">
-<div class="device-model">ar-is20s Local Relay Gateway</div>
+<div class="device-model">ar-is20s Network Capture Gateway</div>
 <div class="device-name" id="device-name-display"><span class="unnamed">(loading...)</span></div>
-<div class="device-context">ローカルリレー・MQTT統合・エッジゲート</div>
+<div class="device-context">パケットキャプチャ・ドメイン分類・CelestialGlobe連携</div>
 </div>
 </div>
 <div class="container">
