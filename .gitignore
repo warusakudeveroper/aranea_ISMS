@@ -18,6 +18,11 @@ Temp/
 # Large binary files
 code/orangePi/discimage/
 
+# RKNN model files (too large for git)
+*.rknn
+code/orangePi/is21/models/
+code/orangePi/is21-22/models/
+
 # Environment variables (credentials)
 .env
 araneaSDK/.env
