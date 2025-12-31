@@ -42,6 +42,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/ipcamscan/jobs", post(create_scan_job))
         .route("/api/ipcamscan/jobs/:id", get(get_scan_job))
         .route("/api/ipcamscan/devices", get(list_scanned_devices))
+        .route("/api/ipcamscan/devices/:ip/verify", post(verify_device))
         .with_state(state)
 }
 
@@ -226,24 +227,92 @@ async fn system_status(State(state): State<AppState>) -> impl IntoResponse {
 // ========================================
 
 async fn create_scan_job(
-    State(_state): State<AppState>,
-    Json(_req): Json<crate::ipcam_scan::ScanJobRequest>,
+    State(state): State<AppState>,
+    Json(req): Json<crate::ipcam_scan::ScanJobRequest>,
 ) -> impl IntoResponse {
-    // TODO: Implement
-    Json(serde_json::json!({"error": "Not implemented"}))
+    let job = state.ipcam_scan.create_job(req).await;
+    let job_id = job.job_id;
+
+    // Spawn background task to run the scan
+    let scanner = state.ipcam_scan.clone();
+    tokio::spawn(async move {
+        if let Err(e) = scanner.run_job(job_id).await {
+            tracing::error!(job_id = %job_id, error = %e, "Scan job failed");
+        }
+    });
+
+    (StatusCode::CREATED, Json(ApiResponse::success(job)))
 }
 
 async fn get_scan_job(
-    State(_state): State<AppState>,
-    Path(_id): Path<String>,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
 ) -> impl IntoResponse {
-    // TODO: Implement
-    Json(serde_json::json!({"error": "Not implemented"}))
+    let job_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid UUID"}))).into_response(),
+    };
+
+    match state.ipcam_scan.get_job(&job_id).await {
+        Some(job) => Json(ApiResponse::success(job)).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Job not found"}))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct DeviceFilterQuery {
+    subnet: Option<String>,
+    family: Option<String>,
+    verified: Option<bool>,
 }
 
 async fn list_scanned_devices(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    Query(query): Query<DeviceFilterQuery>,
 ) -> impl IntoResponse {
-    // TODO: Implement
-    Json(serde_json::json!({"devices": [], "total": 0}))
+    let filter = crate::ipcam_scan::DeviceFilter {
+        subnet: query.subnet,
+        family: query.family.and_then(|f| match f.to_lowercase().as_str() {
+            "tapo" => Some(crate::ipcam_scan::CameraFamily::Tapo),
+            "vigi" => Some(crate::ipcam_scan::CameraFamily::Vigi),
+            "nest" => Some(crate::ipcam_scan::CameraFamily::Nest),
+            "other" => Some(crate::ipcam_scan::CameraFamily::Other),
+            "unknown" => Some(crate::ipcam_scan::CameraFamily::Unknown),
+            _ => None,
+        }),
+        verified: query.verified,
+    };
+
+    let devices = state.ipcam_scan.list_devices(filter).await;
+    let total = devices.len();
+
+    Json(serde_json::json!({
+        "devices": devices,
+        "total": total
+    }))
+}
+
+#[derive(Deserialize)]
+struct VerifyDeviceRequest {
+    credentials: VerifyCredentials,
+}
+
+#[derive(Deserialize)]
+struct VerifyCredentials {
+    username: String,
+    password: String,
+}
+
+async fn verify_device(
+    State(state): State<AppState>,
+    Path(device_ip): Path<String>,
+    Json(req): Json<VerifyDeviceRequest>,
+) -> impl IntoResponse {
+    match state.ipcam_scan.verify_device(&device_ip, &req.credentials.username, &req.credentials.password).await {
+        Ok(verified) => Json(serde_json::json!({
+            "ok": true,
+            "verified": verified
+        })).into_response(),
+        Err(e) => e.into_response(),
+    }
 }

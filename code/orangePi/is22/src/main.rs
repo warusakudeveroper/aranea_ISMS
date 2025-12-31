@@ -7,6 +7,7 @@ use is22_camserver::{
     ai_client::AIClient,
     config_store::ConfigStore,
     event_log_service::EventLogService,
+    ipcam_scan::IpcamScan,
     realtime_hub::RealtimeHub,
     snapshot_service::SnapshotService,
     stream_gateway::StreamGateway,
@@ -79,6 +80,8 @@ async fn main() -> anyhow::Result<()> {
     let suggest = Arc::new(SuggestEngine::new(suggest_policy));
 
     let snapshot_service = Arc::new(SnapshotService::new());
+    let ipcam_scan = Arc::new(IpcamScan::new());
+    tracing::info!("IpcamScan initialized");
 
     // Create application state
     let state = AppState {
@@ -91,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
         suggest,
         stream,
         realtime,
+        ipcam_scan,
         system_health,
     };
 

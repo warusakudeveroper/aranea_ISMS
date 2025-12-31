@@ -6,6 +6,7 @@ use crate::admission_controller::AdmissionController;
 use crate::ai_client::AIClient;
 use crate::config_store::ConfigStore;
 use crate::event_log_service::EventLogService;
+use crate::ipcam_scan::IpcamScan;
 use crate::realtime_hub::RealtimeHub;
 use crate::stream_gateway::StreamGateway;
 use crate::suggest_engine::SuggestEngine;
@@ -68,6 +69,8 @@ pub struct AppState {
     pub stream: Arc<StreamGateway>,
     /// RealtimeHub (WebSocket/SSE)
     pub realtime: Arc<RealtimeHub>,
+    /// IpcamScan (camera discovery)
+    pub ipcam_scan: Arc<IpcamScan>,
     /// System health status
     pub system_health: Arc<RwLock<SystemHealth>>,
 }
