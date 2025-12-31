@@ -1,0 +1,103 @@
+//! Application state
+//!
+//! Holds all shared components and state
+
+use crate::admission_controller::AdmissionController;
+use crate::ai_client::AIClient;
+use crate::config_store::ConfigStore;
+use crate::event_log_service::EventLogService;
+use crate::realtime_hub::RealtimeHub;
+use crate::stream_gateway::StreamGateway;
+use crate::suggest_engine::SuggestEngine;
+use sqlx::MySqlPool;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// Application configuration
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    /// Database URL
+    pub database_url: String,
+    /// IS21 AI server URL
+    pub is21_url: String,
+    /// go2rtc URL
+    pub go2rtc_url: String,
+    /// Server port
+    pub port: u16,
+    /// Server host
+    pub host: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            database_url: std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "mysql://root:mijeos12345@@localhost/camserver".to_string()),
+            is21_url: std::env::var("IS21_URL")
+                .unwrap_or_else(|_| "http://192.168.3.240:9000".to_string()),
+            go2rtc_url: std::env::var("GO2RTC_URL")
+                .unwrap_or_else(|_| "http://localhost:1984".to_string()),
+            port: std::env::var("PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(8080),
+            host: std::env::var("HOST")
+                .unwrap_or_else(|_| "0.0.0.0".to_string()),
+        }
+    }
+}
+
+/// Application state shared across handlers
+#[derive(Clone)]
+pub struct AppState {
+    /// Database pool
+    pub pool: MySqlPool,
+    /// Application config
+    pub config: AppConfig,
+    /// ConfigStore (SSoT)
+    pub config_store: Arc<ConfigStore>,
+    /// AdmissionController
+    pub admission: Arc<AdmissionController>,
+    /// AIClient (IS21 adapter)
+    pub ai_client: Arc<AIClient>,
+    /// EventLogService
+    pub event_log: Arc<EventLogService>,
+    /// SuggestEngine
+    pub suggest: Arc<SuggestEngine>,
+    /// StreamGateway (go2rtc adapter)
+    pub stream: Arc<StreamGateway>,
+    /// RealtimeHub (WebSocket/SSE)
+    pub realtime: Arc<RealtimeHub>,
+    /// System health status
+    pub system_health: Arc<RwLock<SystemHealth>>,
+}
+
+/// System health metrics
+#[derive(Debug, Clone, Default)]
+pub struct SystemHealth {
+    pub cpu_percent: f32,
+    pub memory_percent: f32,
+    pub overloaded: bool,
+    pub last_overload_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl SystemHealth {
+    /// Check and update overload status
+    pub fn update(&mut self, cpu: f32, memory: f32) {
+        self.cpu_percent = cpu;
+        self.memory_percent = memory;
+
+        if cpu > 85.0 || memory > 90.0 {
+            self.overloaded = true;
+            self.last_overload_at = Some(chrono::Utc::now());
+        } else if self.overloaded {
+            // Recovery with hysteresis
+            if let Some(last) = self.last_overload_at {
+                let elapsed = chrono::Utc::now() - last;
+                if elapsed > chrono::Duration::seconds(60) && cpu < 60.0 && memory < 70.0 {
+                    self.overloaded = false;
+                }
+            }
+        }
+    }
+}

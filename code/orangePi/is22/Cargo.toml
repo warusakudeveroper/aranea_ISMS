@@ -1,0 +1,69 @@
+[package]
+name = "is22-camserver"
+version = "0.1.0"
+edition = "2021"
+authors = ["Aranea ISMS Team"]
+description = "IS22 Camserver - mobes AIcam control Tower (mAcT)"
+license = "MIT"
+rust-version = "1.75"
+
+[dependencies]
+# Web Framework
+axum = { version = "0.7", features = ["ws", "multipart", "macros"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"] }
+
+# Async Runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "mysql", "chrono", "uuid", "json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# HTTP client (for IS21 communication)
+reqwest = { version = "0.11", features = ["json", "multipart", "stream"] }
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+
+# WebSocket
+tokio-tungstenite = "0.21"
+
+# System monitoring
+sysinfo = "0.30"
+
+# IP/Network
+ipnetwork = "0.20"
+
+# RTSP/Stream
+# go2rtc integration via HTTP API
+
+[[bin]]
+name = "camserver"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true
