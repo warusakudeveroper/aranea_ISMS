@@ -13,17 +13,18 @@ use std::time::Duration;
 /// SnapshotService instance
 pub struct SnapshotService {
     client: reqwest::Client,
+    go2rtc_url: String,
 }
 
 impl SnapshotService {
-    /// Create new SnapshotService
-    pub fn new() -> Self {
+    /// Create new SnapshotService with go2rtc URL
+    pub fn new(go2rtc_url: String) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
             .expect("Failed to create HTTP client");
 
-        Self { client }
+        Self { client, go2rtc_url }
     }
 
     /// Capture snapshot from camera
@@ -36,27 +37,19 @@ impl SnapshotService {
                     tracing::warn!(
                         camera_id = %camera.camera_id,
                         error = %e,
-                        "HTTP snapshot failed, trying RTSP"
+                        "HTTP snapshot failed, trying go2rtc"
                     );
                 }
             }
         }
 
-        // Try RTSP snapshot (via go2rtc)
-        if let Some(ref rtsp_url) = camera.rtsp_sub {
-            // For RTSP, we use go2rtc's frame API
-            // This assumes go2rtc is configured with the camera
-            let go2rtc_url = format!(
-                "http://localhost:1984/api/frame.jpeg?src={}",
-                camera.camera_id
-            );
-            return self.capture_http(&go2rtc_url).await;
-        }
-
-        Err(Error::Internal(format!(
-            "No snapshot source available for camera {}",
+        // Try go2rtc frame API (works for all cameras registered in go2rtc)
+        let go2rtc_snapshot_url = format!(
+            "{}/api/frame.jpeg?src={}",
+            self.go2rtc_url,
             camera.camera_id
-        )))
+        );
+        self.capture_http(&go2rtc_snapshot_url).await
     }
 
     /// Capture via HTTP
@@ -75,8 +68,5 @@ impl SnapshotService {
     }
 }
 
-impl Default for SnapshotService {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: SnapshotService requires go2rtc_url, so no Default impl
+// Use SnapshotService::new(go2rtc_url) instead

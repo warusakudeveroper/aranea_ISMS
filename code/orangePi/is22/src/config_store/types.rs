@@ -14,28 +14,77 @@ pub struct Camera {
     pub name: String,
     pub location: String,
     pub floor: Option<String>,
+    // === 管理用フィールド ===
+    pub rid: Option<String>,
     pub rtsp_main: Option<String>,
     pub rtsp_sub: Option<String>,
+    pub rtsp_username: Option<String>,
+    pub rtsp_password: Option<String>,
     pub snapshot_url: Option<String>,
-    pub family: CameraFamily,
+    /// Stored as VARCHAR in MySQL, converted to/from CameraFamily
+    pub family: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub ip_address: Option<String>,
     pub mac_address: Option<String>,
     pub lacis_id: Option<String>,
+    pub cic: Option<String>,
     pub enabled: bool,
     pub polling_enabled: bool,
     pub polling_interval_sec: i32,
     pub suggest_policy_weight: i32,
     pub camera_context: Option<serde_json::Value>,
+    pub rotation: i32,
+    pub fid: Option<String>,
+    pub tid: Option<String>,
+    pub sort_order: i32,
+    // === ONVIF デバイス情報 ===
+    pub serial_number: Option<String>,
+    pub hardware_id: Option<String>,
+    pub firmware_version: Option<String>,
+    pub onvif_endpoint: Option<String>,
+    // === ネットワーク情報 ===
+    pub rtsp_port: Option<i32>,
+    pub http_port: Option<i32>,
+    pub onvif_port: Option<i32>,
+    // === ビデオ能力（メイン） ===
+    pub resolution_main: Option<String>,
+    pub codec_main: Option<String>,
+    pub fps_main: Option<i32>,
+    pub bitrate_main: Option<i32>,
+    // === ビデオ能力（サブ） ===
+    pub resolution_sub: Option<String>,
+    pub codec_sub: Option<String>,
+    pub fps_sub: Option<i32>,
+    pub bitrate_sub: Option<i32>,
+    // === PTZ能力 ===
+    pub ptz_supported: bool,
+    pub ptz_continuous: bool,
+    pub ptz_absolute: bool,
+    pub ptz_relative: bool,
+    pub ptz_pan_range: Option<serde_json::Value>,
+    pub ptz_tilt_range: Option<serde_json::Value>,
+    pub ptz_zoom_range: Option<serde_json::Value>,
+    pub ptz_presets: Option<serde_json::Value>,
+    pub ptz_home_supported: bool,
+    // === 音声能力 ===
+    pub audio_input_supported: bool,
+    pub audio_output_supported: bool,
+    pub audio_codec: Option<String>,
+    // === ONVIFプロファイル ===
+    pub onvif_profiles: Option<serde_json::Value>,
+    // === 検出メタ情報 ===
+    pub discovery_method: Option<String>,
+    pub last_verified_at: Option<DateTime<Utc>>,
+    pub last_rescan_at: Option<DateTime<Utc>>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    // === タイムスタンプ ===
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-/// Camera family enum
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "VARCHAR")]
-#[sqlx(rename_all = "lowercase")]
+/// Camera family enum (for API serialization only, not for sqlx)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CameraFamily {
     Tapo,
@@ -51,6 +100,42 @@ pub enum CameraFamily {
 impl Default for CameraFamily {
     fn default() -> Self {
         Self::Unknown
+    }
+}
+
+impl From<&str> for CameraFamily {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "tapo" => Self::Tapo,
+            "vigi" => Self::Vigi,
+            "nest" => Self::Nest,
+            "axis" => Self::Axis,
+            "hikvision" => Self::Hikvision,
+            "dahua" => Self::Dahua,
+            "other" => Self::Other,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<String> for CameraFamily {
+    fn from(s: String) -> Self {
+        Self::from(s.as_str())
+    }
+}
+
+impl From<CameraFamily> for String {
+    fn from(f: CameraFamily) -> Self {
+        match f {
+            CameraFamily::Tapo => "tapo".to_string(),
+            CameraFamily::Vigi => "vigi".to_string(),
+            CameraFamily::Nest => "nest".to_string(),
+            CameraFamily::Axis => "axis".to_string(),
+            CameraFamily::Hikvision => "hikvision".to_string(),
+            CameraFamily::Dahua => "dahua".to_string(),
+            CameraFamily::Other => "other".to_string(),
+            CameraFamily::Unknown => "unknown".to_string(),
+        }
     }
 }
 
@@ -75,23 +160,74 @@ pub struct CreateCameraRequest {
 /// Camera update request
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UpdateCameraRequest {
+    // === 基本情報 ===
     pub name: Option<String>,
     pub location: Option<String>,
     pub floor: Option<String>,
+    pub rid: Option<String>,
+    // === ストリーム設定 ===
     pub rtsp_main: Option<String>,
     pub rtsp_sub: Option<String>,
+    pub rtsp_username: Option<String>,
+    pub rtsp_password: Option<String>,
     pub snapshot_url: Option<String>,
+    // === デバイス情報 ===
     pub family: Option<CameraFamily>,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub ip_address: Option<String>,
     pub mac_address: Option<String>,
     pub lacis_id: Option<String>,
+    pub cic: Option<String>,
+    // === ポリシー ===
     pub enabled: Option<bool>,
     pub polling_enabled: Option<bool>,
     pub polling_interval_sec: Option<i32>,
     pub suggest_policy_weight: Option<i32>,
+    // === カメラコンテキスト・表示 ===
     pub camera_context: Option<serde_json::Value>,
+    pub rotation: Option<i32>,
+    pub sort_order: Option<i32>,
+    // === 所属情報 ===
+    pub fid: Option<String>,
+    pub tid: Option<String>,
+    // === ONVIF デバイス情報 ===
+    pub serial_number: Option<String>,
+    pub hardware_id: Option<String>,
+    pub firmware_version: Option<String>,
+    pub onvif_endpoint: Option<String>,
+    // === ネットワーク情報 ===
+    pub rtsp_port: Option<i32>,
+    pub http_port: Option<i32>,
+    pub onvif_port: Option<i32>,
+    // === ビデオ能力（メイン） ===
+    pub resolution_main: Option<String>,
+    pub codec_main: Option<String>,
+    pub fps_main: Option<i32>,
+    pub bitrate_main: Option<i32>,
+    // === ビデオ能力（サブ） ===
+    pub resolution_sub: Option<String>,
+    pub codec_sub: Option<String>,
+    pub fps_sub: Option<i32>,
+    pub bitrate_sub: Option<i32>,
+    // === PTZ能力 ===
+    pub ptz_supported: Option<bool>,
+    pub ptz_continuous: Option<bool>,
+    pub ptz_absolute: Option<bool>,
+    pub ptz_relative: Option<bool>,
+    pub ptz_pan_range: Option<serde_json::Value>,
+    pub ptz_tilt_range: Option<serde_json::Value>,
+    pub ptz_zoom_range: Option<serde_json::Value>,
+    pub ptz_presets: Option<serde_json::Value>,
+    pub ptz_home_supported: Option<bool>,
+    // === 音声能力 ===
+    pub audio_input_supported: Option<bool>,
+    pub audio_output_supported: Option<bool>,
+    pub audio_codec: Option<String>,
+    // === ONVIFプロファイル ===
+    pub onvif_profiles: Option<serde_json::Value>,
+    // === 検出メタ情報 ===
+    pub discovery_method: Option<String>,
 }
 
 /// Schema version entity

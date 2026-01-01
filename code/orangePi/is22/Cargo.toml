@@ -58,6 +58,10 @@ ipnetwork = "0.20"
 # Base64 encoding for auth
 base64 = "0.21"
 
+# ONVIF WS-Security authentication
+sha1 = "0.10"
+rand = "0.8"
+
 # RTSP/Stream
 # go2rtc integration via HTTP API
 

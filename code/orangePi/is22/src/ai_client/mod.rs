@@ -26,18 +26,33 @@ pub struct InferRequest {
     pub hints: Option<serde_json::Value>,
 }
 
-/// Inference response
+/// Bounding box from IS21 detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BBox {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub label: String,
+    pub conf: f32,
+}
+
+/// Inference response (matches IS21 /v1/analyze response)
 #[derive(Debug, Clone, Deserialize)]
 pub struct InferResponse {
-    pub ok: bool,
-    pub frame_id: Option<String>,
-    pub primary_event: Option<String>,
+    pub schema_version: String,
+    pub camera_id: String,
+    pub captured_at: String,
+    pub analyzed: bool,
     pub detected: bool,
-    pub severity: i32,
+    pub primary_event: String,
     pub tags: Vec<String>,
+    pub confidence: f32,
+    pub severity: i32,
     pub unknown_flag: bool,
-    pub attributes: Option<serde_json::Value>,
-    pub processing_ms: i64,
+    pub count_hint: i32,
+    #[serde(default)]
+    pub bboxes: Vec<BBox>,
 }
 
 impl AIClient {

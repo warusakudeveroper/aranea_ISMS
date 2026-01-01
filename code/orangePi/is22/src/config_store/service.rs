@@ -69,7 +69,7 @@ impl ConfigService {
         self.repo.update_camera(camera_id, &req).await
     }
 
-    /// Delete camera
+    /// Delete camera (hard delete)
     pub async fn delete_camera(&self, camera_id: &str) -> Result<()> {
         // Check existence
         if self.repo.get_camera(camera_id).await?.is_none() {
@@ -80,6 +80,69 @@ impl ConfigService {
         }
 
         self.repo.delete_camera(camera_id).await
+    }
+
+    /// Soft delete camera (set deleted_at, MAC preserved for restore)
+    pub async fn soft_delete_camera(&self, camera_id: &str) -> Result<Camera> {
+        // Check existence
+        if self.repo.get_camera(camera_id).await?.is_none() {
+            return Err(crate::Error::NotFound(format!(
+                "Camera {} not found",
+                camera_id
+            )));
+        }
+
+        self.repo.soft_delete_camera(camera_id).await
+    }
+
+    /// Restore soft-deleted camera by MAC address
+    pub async fn restore_camera_by_mac(&self, mac_address: &str) -> Result<Camera> {
+        // Check if camera with this MAC exists
+        match self.repo.get_camera_by_mac(mac_address).await? {
+            Some(camera) if camera.deleted_at.is_some() => {
+                // Camera exists and is soft-deleted, restore it
+                self.repo.restore_camera_by_mac(mac_address).await
+            }
+            Some(_) => {
+                // Camera exists but is not deleted
+                Err(crate::Error::Conflict(format!(
+                    "Camera with MAC {} is not deleted",
+                    mac_address
+                )))
+            }
+            None => {
+                Err(crate::Error::NotFound(format!(
+                    "No camera found with MAC {}",
+                    mac_address
+                )))
+            }
+        }
+    }
+
+    /// Update camera IP (for rescan)
+    pub async fn update_camera_ip(&self, camera_id: &str, new_ip: &str) -> Result<Camera> {
+        // Check existence
+        if self.repo.get_camera(camera_id).await?.is_none() {
+            return Err(crate::Error::NotFound(format!(
+                "Camera {} not found",
+                camera_id
+            )));
+        }
+
+        self.repo.update_camera_ip(camera_id, new_ip).await
+    }
+
+    /// Update camera verified timestamp
+    pub async fn update_camera_verified(&self, camera_id: &str) -> Result<()> {
+        // Check existence
+        if self.repo.get_camera(camera_id).await?.is_none() {
+            return Err(crate::Error::NotFound(format!(
+                "Camera {} not found",
+                camera_id
+            )));
+        }
+
+        self.repo.update_camera_verified(camera_id).await
     }
 
     // ========================================

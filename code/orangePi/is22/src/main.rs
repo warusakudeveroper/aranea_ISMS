@@ -8,6 +8,7 @@ use is22_camserver::{
     config_store::ConfigStore,
     event_log_service::EventLogService,
     ipcam_scan::IpcamScan,
+    polling_orchestrator::PollingOrchestrator,
     realtime_hub::RealtimeHub,
     snapshot_service::SnapshotService,
     stream_gateway::StreamGateway,
@@ -79,9 +80,20 @@ async fn main() -> anyhow::Result<()> {
     let suggest_policy = config_store.service().get_suggest_policy().await?;
     let suggest = Arc::new(SuggestEngine::new(suggest_policy));
 
-    let snapshot_service = Arc::new(SnapshotService::new());
-    let ipcam_scan = Arc::new(IpcamScan::new());
-    tracing::info!("IpcamScan initialized");
+    let snapshot_service = Arc::new(SnapshotService::new(config.go2rtc_url.clone()));
+    let ipcam_scan = Arc::new(IpcamScan::new(pool.clone()));
+    tracing::info!("IpcamScan initialized with DB persistence");
+
+    // Create polling orchestrator
+    let polling = Arc::new(PollingOrchestrator::new(
+        config_store.clone(),
+        snapshot_service.clone(),
+        ai_client.clone(),
+        event_log.clone(),
+        suggest.clone(),
+        realtime.clone(),
+    ));
+    tracing::info!("PollingOrchestrator initialized");
 
     // Create application state
     let state = AppState {
@@ -122,6 +134,10 @@ async fn main() -> anyhow::Result<()> {
             suggest_cleanup.check_expiration().await;
         }
     });
+
+    // Start polling orchestrator (is21 AI integration)
+    polling.start().await;
+    tracing::info!("PollingOrchestrator started - AI integration active");
 
     // Start system health monitoring
     let health_monitor = state.system_health.clone();

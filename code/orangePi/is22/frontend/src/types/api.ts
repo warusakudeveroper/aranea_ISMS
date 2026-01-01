@@ -1,0 +1,401 @@
+export interface ApiResponse<T> {
+  ok: boolean;
+  data: T;
+  error: string | null;
+}
+
+export type CameraFamily = 'tapo' | 'vigi' | 'nest' | 'axis' | 'hikvision' | 'dahua' | 'other' | 'unknown';
+
+export interface Camera {
+  camera_id: string;
+  name: string;
+  location: string;
+  floor: string | null;
+  // === 管理用フィールド ===
+  rid: string | null;           // 部屋ID/設置場所識別子
+  rtsp_main: string | null;
+  rtsp_sub: string | null;
+  rtsp_username: string | null;
+  rtsp_password: string | null;
+  snapshot_url: string | null;
+  family: CameraFamily;
+  manufacturer: string | null;
+  model: string | null;
+  ip_address: string | null;
+  mac_address: string | null;
+  lacis_id: string | null;
+  cic: string | null;           // 6桁登録コード
+  enabled: boolean;
+  polling_enabled: boolean;
+  polling_interval_sec: number;
+  suggest_policy_weight: number;
+  camera_context: Record<string, unknown> | null;
+  rotation: number;             // 表示回転角度 (0/90/180/270)
+  fid: string | null;           // ファシリティID
+  tid: string | null;           // テナントID
+  sort_order: number;           // ドラッグ並べ替え用順序
+  // === ONVIF デバイス情報 ===
+  serial_number: string | null;
+  hardware_id: string | null;
+  firmware_version: string | null;
+  onvif_endpoint: string | null;
+  // === ネットワーク情報 ===
+  rtsp_port: number | null;
+  http_port: number | null;
+  onvif_port: number | null;
+  // === ビデオ能力（メイン） ===
+  resolution_main: string | null;
+  codec_main: string | null;
+  fps_main: number | null;
+  bitrate_main: number | null;
+  // === ビデオ能力（サブ） ===
+  resolution_sub: string | null;
+  codec_sub: string | null;
+  fps_sub: number | null;
+  bitrate_sub: number | null;
+  // === PTZ能力 ===
+  ptz_supported: boolean;
+  ptz_continuous: boolean;
+  ptz_absolute: boolean;
+  ptz_relative: boolean;
+  ptz_pan_range: { min: number; max: number } | null;
+  ptz_tilt_range: { min: number; max: number } | null;
+  ptz_zoom_range: { min: number; max: number } | null;
+  ptz_presets: string[] | null;
+  ptz_home_supported: boolean;
+  // === 音声能力 ===
+  audio_input_supported: boolean;
+  audio_output_supported: boolean;
+  audio_codec: string | null;
+  // === ONVIFプロファイル ===
+  onvif_profiles: Record<string, unknown>[] | null;
+  // === 検出メタ情報 ===
+  discovery_method: string | null;
+  last_verified_at: string | null;
+  last_rescan_at: string | null;
+  deleted_at: string | null;    // ソフトデリート日時
+  // === タイムスタンプ ===
+  created_at: string;
+  updated_at: string;
+}
+
+// カメラ更新リクエスト
+export interface UpdateCameraRequest {
+  // === 基本情報 ===
+  name?: string;
+  location?: string;
+  floor?: string;
+  rid?: string;
+  // === ストリーム設定 ===
+  rtsp_main?: string;
+  rtsp_sub?: string;
+  rtsp_username?: string;
+  rtsp_password?: string;
+  snapshot_url?: string;
+  // === デバイス情報 ===
+  family?: CameraFamily;
+  manufacturer?: string;
+  model?: string;
+  ip_address?: string;
+  mac_address?: string;
+  lacis_id?: string;
+  cic?: string;
+  // === ポリシー ===
+  enabled?: boolean;
+  polling_enabled?: boolean;
+  polling_interval_sec?: number;
+  suggest_policy_weight?: number;
+  // === カメラコンテキスト・表示 ===
+  camera_context?: Record<string, unknown>;
+  rotation?: number;
+  sort_order?: number;
+  // === 所属情報 ===
+  fid?: string;
+  tid?: string;
+  // === ONVIF デバイス情報 ===
+  serial_number?: string;
+  hardware_id?: string;
+  firmware_version?: string;
+  onvif_endpoint?: string;
+  // === ネットワーク情報 ===
+  rtsp_port?: number;
+  http_port?: number;
+  onvif_port?: number;
+  // === ビデオ能力（メイン） ===
+  resolution_main?: string;
+  codec_main?: string;
+  fps_main?: number;
+  bitrate_main?: number;
+  // === ビデオ能力（サブ） ===
+  resolution_sub?: string;
+  codec_sub?: string;
+  fps_sub?: number;
+  bitrate_sub?: number;
+  // === PTZ能力 ===
+  ptz_supported?: boolean;
+  ptz_continuous?: boolean;
+  ptz_absolute?: boolean;
+  ptz_relative?: boolean;
+  ptz_pan_range?: { min: number; max: number };
+  ptz_tilt_range?: { min: number; max: number };
+  ptz_zoom_range?: { min: number; max: number };
+  ptz_presets?: string[];
+  ptz_home_supported?: boolean;
+  // === 音声能力 ===
+  audio_input_supported?: boolean;
+  audio_output_supported?: boolean;
+  audio_codec?: string;
+  // === ONVIFプロファイル ===
+  onvif_profiles?: Record<string, unknown>[];
+  // === 検出メタ情報 ===
+  discovery_method?: string;
+}
+
+// 認証テスト結果
+export interface AuthTestResult {
+  rtsp_success: boolean;
+  onvif_success: boolean;
+  model: string | null;
+  message: string;
+}
+
+// 再スキャン結果
+export interface RescanResult {
+  found: boolean;
+  old_ip: string | null;
+  new_ip: string | null;
+  updated: boolean;
+}
+
+// ソフトデリート結果
+export interface SoftDeleteResult {
+  camera_id: string;
+  mac_address: string | null;
+  deleted_at: string;
+  recoverable: boolean;
+}
+
+// MAC復元リクエスト
+export interface RestoreByMacRequest {
+  mac_address: string;
+}
+
+export interface StreamInfo {
+  camera_id: string;
+  webrtc_url: string;
+  hls_url: string;
+  snapshot_url: string;
+}
+
+export interface Event {
+  event_id: number;
+  camera_id: string;
+  frame_id: string;
+  captured_at: string;
+  primary_event: string;
+  severity: number;
+  tags: string[];
+  unknown_flag: boolean;
+  attributes: Record<string, unknown> | null;
+  thumbnail_url: string | null;
+  created_at: string;
+}
+
+// Alias for compatibility with components
+export type EventWithAliases = Event & {
+  started_at: string;  // alias for captured_at
+  severity_max: number; // alias for severity
+  tags_summary: string[]; // alias for tags
+}
+
+// Connection status for user feedback
+export type ConnectionStatus =
+  | 'not_tested'
+  | 'success'
+  | 'auth_required'
+  | 'auth_failed'
+  | 'timeout'
+  | 'refused'
+  | 'port_open_only'
+  | 'unknown';
+
+// Device classification
+export type DeviceType =
+  | 'unknown'
+  | 'camera_confirmed'
+  | 'camera_likely'
+  | 'camera_possible'
+  | 'nvr_likely'
+  | 'network_device'
+  | 'other_device';
+
+// Suggested action for user
+export type SuggestedAction =
+  | 'none'
+  | 'set_credentials'
+  | 'retry_with_auth'
+  | 'check_network'
+  | 'manual_check'
+  | 'ignore';
+
+// Credential trial status (from backend scan)
+export type CredentialStatus =
+  | 'not_tried'   // クレデンシャル未設定/試行なし
+  | 'success'     // 認証成功、モデル情報取得済み
+  | 'failed';     // 全クレデンシャル試行失敗
+
+// Detection reason - why we think this is a camera
+export interface DetectionReason {
+  oui_match: string | null;
+  camera_ports: number[];
+  onvif_status: ConnectionStatus;
+  rtsp_status: ConnectionStatus;
+  device_type: DeviceType;
+  user_message: string;
+  suggested_action: SuggestedAction;
+}
+
+// ScannedDevice - Backend API応答と完全一致
+// GET /api/ipcamscan/devices の devices[] 要素
+export interface ScannedDevice {
+  device_id: string;
+  ip: string;                    // Backend: "ip" (NOT "ip_address")
+  mac: string | null;            // Backend: "mac" (NOT "mac_address")
+  family: 'tapo' | 'vigi' | 'nest' | 'other' | 'unknown';  // lowercase from backend
+  manufacturer: string | null;
+  model: string | null;
+  firmware: string | null;
+  oui_vendor: string | null;
+  hostnames: string[];
+  open_ports: { port: number; status: string }[];  // Backend structure
+  rtsp_uri: string | null;
+  verified: boolean;
+  status: 'discovered' | 'verifying' | 'verified' | 'rejected' | 'approved';
+  first_seen: string;            // Backend: "first_seen" (NOT "discovered_at")
+  last_seen: string;
+  subnet: string;
+  score: number;
+  confidence: number;
+  detection: DetectionReason | null;
+  // Credential trial result (from Stage 7)
+  credential_status: CredentialStatus;
+  credential_username: string | null;  // 成功時のユーザー名
+  credential_password: string | null;  // 成功時のパスワード
+}
+
+// Scan log entry for detailed progress visibility (IS22_UI_DETAILED_SPEC Section 3.2)
+export interface ScanLogEntry {
+  timestamp: string;
+  ip_address: string;
+  event_type: 'arp_response' | 'port_open' | 'oui_match' | 'onvif_probe' | 'rtsp_probe' | 'device_classified' | 'credential_trial' | 'info' | 'warning' | 'error';
+  message: string;
+  port?: number;
+  oui_vendor?: string;
+}
+
+// Scan job progress tracking (aligned with backend response)
+export interface ScanJobSummary {
+  total_ips: number;
+  hosts_alive: number;
+  cameras_found: number;
+  cameras_verified: number;
+}
+
+export interface ScanJob {
+  job_id: string;
+  targets: string[];
+  mode: string;
+  ports: number[];
+  timeout_ms: number;
+  concurrency: number;
+  status: 'queued' | 'running' | 'success' | 'failed';
+  started_at: string | null;
+  ended_at: string | null;
+  summary: ScanJobSummary | null;
+  created_at: string;
+  // Frontend-only fields for progress display
+  progress_percent?: number;
+  current_phase?: string;
+  devices_found?: number;
+  logs?: ScanLogEntry[];
+}
+
+export interface SystemStatus {
+  healthy: boolean;
+  cpu_percent: number;
+  memory_percent: number;
+  active_modals: number;
+  modal_budget_remaining: number;
+  suggest_active: boolean;
+}
+
+export interface LeaseRequest {
+  consumer: string;
+  camera_id: string;
+  quality: 'hd' | 'sd';
+}
+
+export interface LeaseResponse {
+  lease_id: string;
+  allowed_quality: 'hd' | 'sd';
+  expires_at: string;
+  stream_url: string;
+}
+
+// =============================================================================
+// Subnet Settings & Device Categorization (is22_ScanModal_Enhancement_Spec.md)
+// =============================================================================
+
+// Trial credential for subnet authentication
+export interface TrialCredential {
+  username: string;
+  password: string;
+  priority: number;  // 試行順序 (1-10)
+}
+
+// Subnet with settings - GET /api/subnets
+export interface Subnet {
+  subnet_id: string;
+  cidr: string;
+  fid: string;
+  tid?: string;  // テナントID（カメラに継承される）
+  description: string;
+  enabled: boolean;
+  last_scanned_at: string | null;
+  created_at: string;
+  // Extended settings (optional, may not exist on older records)
+  facility_name?: string;
+  credentials?: TrialCredential[];
+}
+
+// Device category for scan results
+// a: 登録済み - cameras テーブルに存在
+// b: 登録可能 - カメラ確認済み + 認証OK + 未登録 ★強調
+// c: 認証必要 - カメラ検出 + 認証未実施/失敗
+// d: その他カメラ - カメラ可能性あり + 条件不足 (折りたたみ)
+// e: 非カメラ - カメラでないデバイス (折りたたみ)
+export type DeviceCategory = 'a' | 'b' | 'c' | 'd' | 'e';
+
+// Category metadata for UI display
+export interface CategoryMeta {
+  id: DeviceCategory;
+  label: string;
+  description: string;
+  bgClass: string;       // Tailwind background class
+  collapsed: boolean;    // Default collapsed state
+}
+
+// All category definitions
+export const DEVICE_CATEGORIES: CategoryMeta[] = [
+  { id: 'a', label: '登録済み', description: 'camerasテーブルに存在', bgClass: 'bg-green-100', collapsed: false },
+  { id: 'b', label: '登録可能', description: 'カメラ確認済み + 認証OK + 未登録', bgClass: 'bg-blue-200 border-2 border-blue-500', collapsed: false },
+  { id: 'c', label: '認証必要', description: 'カメラ検出 + 認証未実施/失敗', bgClass: 'bg-yellow-100', collapsed: false },
+  { id: 'd', label: 'その他カメラ', description: 'カメラ可能性あり + 条件不足', bgClass: 'bg-gray-100', collapsed: true },
+  { id: 'e', label: '非カメラ', description: 'カメラでないデバイス', bgClass: 'bg-gray-100', collapsed: true },
+];
+
+// ScannedDevice with category (Frontend enriched)
+export interface CategorizedDevice extends ScannedDevice {
+  category: DeviceCategory;
+  isRegistered: boolean;  // cameras テーブルに存在するか
+}

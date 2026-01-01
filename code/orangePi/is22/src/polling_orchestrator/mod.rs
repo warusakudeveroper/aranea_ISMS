@@ -159,16 +159,30 @@ impl PollingOrchestrator {
 
         // Only log if detection occurred
         if result.detected {
+            // Convert bboxes to attributes JSON
+            let attributes = if !result.bboxes.is_empty() {
+                Some(serde_json::json!({
+                    "bboxes": result.bboxes,
+                    "confidence": result.confidence,
+                    "count_hint": result.count_hint,
+                }))
+            } else {
+                None
+            };
+
+            // Generate frame_id from captured_at timestamp
+            let frame_id = result.captured_at.replace([':', '-', 'T', 'Z'], "");
+
             let event = DetectionEvent {
                 event_id: 0, // Will be set by EventLogService
                 camera_id: camera.camera_id.clone(),
-                frame_id: result.frame_id.unwrap_or_default(),
+                frame_id,
                 captured_at: Utc::now(),
-                primary_event: result.primary_event.unwrap_or_default(),
+                primary_event: result.primary_event.clone(),
                 severity: result.severity,
                 tags: result.tags.clone(),
                 unknown_flag: result.unknown_flag,
-                attributes: result.attributes.clone(),
+                attributes,
                 thumbnail_url: None,
                 created_at: Utc::now(),
             };
