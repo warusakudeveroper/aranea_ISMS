@@ -2,17 +2,16 @@
  * EventLogPane - AI Event Log with Patrol Feedback
  *
  * Features:
- * - Real-time patrol feedback ("動いてる安心感")
- * - Detection log list from MySQL
- * - Severity-based styling
- * - Auto-fade for non-detection items
+ * - Single-slot patrol ticker ("動いてる安心感") - subtle, no background
+ * - Detection log list from MySQL (severity > 0 only)
+ * - Severity-based styling for actual detections
  */
 
-import { useEffect, useRef, useState, useMemo } from "react"
-import type { DetectionLog, PatrolFeedback, Camera } from "@/types/api"
-import { useEventLogStore, PATROL_FEEDBACK_TTL_MS } from "@/stores/eventLogStore"
+import { useEffect, useRef, useMemo } from "react"
+import type { DetectionLog, Camera } from "@/types/api"
+import { useEventLogStore } from "@/stores/eventLogStore"
 import { Badge } from "@/components/ui/badge"
-import { Activity, Camera as CameraIcon, RefreshCw, Eye, EyeOff } from "lucide-react"
+import { Activity, Camera as CameraIcon, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Props
@@ -21,16 +20,14 @@ interface EventLogPaneProps {
   onLogClick?: (log: DetectionLog) => void
 }
 
-// Severity color mapping
+// Severity color mapping (for actual detections only)
 function getSeverityColor(severity: number): string {
-  if (severity === 0) return "bg-zinc-100 dark:bg-zinc-800/60"
   if (severity === 1) return "bg-blue-50 dark:bg-blue-900/40 border-l-2 border-l-blue-500 dark:border-l-blue-400"
   if (severity === 2) return "bg-amber-50 dark:bg-amber-900/40 border-l-2 border-l-amber-500 dark:border-l-amber-400"
   return "bg-red-50 dark:bg-red-900/50 border-l-2 border-l-red-500 dark:border-l-red-400"
 }
 
-function getSeverityBadgeVariant(severity: number): "severity0" | "severity1" | "severity2" | "severity3" {
-  if (severity === 0) return "severity0"
+function getSeverityBadgeVariant(severity: number): "severity1" | "severity2" | "severity3" {
   if (severity === 1) return "severity1"
   if (severity === 2) return "severity2"
   return "severity3"
@@ -46,62 +43,7 @@ function formatTime(dateStr: string): string {
   })
 }
 
-// Patrol Feedback Item (transient, fades out)
-function PatrolFeedbackItem({ feedback }: { feedback: PatrolFeedback }) {
-  const [opacity, setOpacity] = useState(1)
-
-  // Fade out animation
-  useEffect(() => {
-    const startTime = Date.now()
-    const fadeStartAt = PATROL_FEEDBACK_TTL_MS * 0.6 // Start fading at 60%
-
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime
-      if (elapsed > fadeStartAt) {
-        const remaining = PATROL_FEEDBACK_TTL_MS - elapsed
-        const newOpacity = Math.max(0, remaining / (PATROL_FEEDBACK_TTL_MS - fadeStartAt))
-        setOpacity(newOpacity)
-      }
-    }, 50)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  return (
-    <div
-      className={cn(
-        "p-1.5 rounded text-xs transition-all",
-        feedback.is_detection
-          ? getSeverityColor(feedback.severity || 0)
-          : "bg-zinc-50 dark:bg-zinc-900/40"
-      )}
-      style={{ opacity }}
-    >
-      <div className="flex items-center gap-1.5">
-        {feedback.is_detection ? (
-          <Eye className="h-3 w-3 text-primary flex-shrink-0" />
-        ) : (
-          <RefreshCw className="h-3 w-3 text-muted-foreground flex-shrink-0 animate-spin" style={{ animationDuration: '3s' }} />
-        )}
-        <span className="font-medium truncate max-w-[100px]">
-          {feedback.camera_name}
-        </span>
-        <span className="text-muted-foreground">
-          {formatTime(feedback.timestamp)}
-        </span>
-        {feedback.is_detection ? (
-          <Badge variant={getSeverityBadgeVariant(feedback.severity || 0)} className="text-[10px] py-0 px-1 ml-auto">
-            {feedback.primary_event}
-          </Badge>
-        ) : (
-          <span className="text-muted-foreground/60 ml-auto">検出なし</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// Detection Log Item (persistent)
+// Detection Log Item (persistent, severity > 0 only)
 function DetectionLogItem({
   log,
   cameraName,
@@ -126,9 +68,6 @@ function DetectionLogItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <span>{formatTime(log.captured_at)}</span>
-            {log.processing_ms && (
-              <span className="text-muted-foreground/50">({log.processing_ms}ms)</span>
-            )}
           </div>
           <div className="flex items-center gap-1 mt-0.5">
             <CameraIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
@@ -152,7 +91,7 @@ function DetectionLogItem({
           )}
         </div>
       </div>
-      {log.tags.length > 0 && (
+      {log.tags && log.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
           {log.tags.slice(0, 3).map((tag, i) => (
             <Badge key={i} variant="outline" className="text-[10px] py-0 px-1">
@@ -167,7 +106,6 @@ function DetectionLogItem({
 
 export function EventLogPane({ cameras, onLogClick }: EventLogPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [showNonDetections, setShowNonDetections] = useState(true)
 
   // Store state
   const {
@@ -188,9 +126,9 @@ export function EventLogPane({ cameras, onLogClick }: EventLogPaneProps) {
     }
   }, [cameras, setCameraNames])
 
-  // Initial fetch
+  // Initial fetch - only actual detections (severity > 0)
   useEffect(() => {
-    fetchLogs({ detected_only: true, limit: 100 })
+    fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
     fetchStats()
   }, [fetchLogs, fetchStats])
 
@@ -199,14 +137,21 @@ export function EventLogPane({ cameras, onLogClick }: EventLogPaneProps) {
     return cameraNames[cameraId] || cameraId.substring(0, 12) + '...'
   }
 
-  // Filter patrol feedback based on showNonDetections
-  const visibleFeedback = useMemo(() => {
-    if (showNonDetections) return patrolFeedback
-    return patrolFeedback.filter(f => f.is_detection)
-  }, [patrolFeedback, showNonDetections])
+  // Filter logs to only show severity > 0 (actual detections)
+  const detectionLogs = useMemo(() => {
+    return logs.filter(log => log.severity > 0)
+  }, [logs])
 
-  // Empty state
-  if (logs.length === 0 && patrolFeedback.length === 0 && !isLoading) {
+  // Get latest patrol feedback (single slot, non-detection only)
+  const latestPatrol = useMemo(() => {
+    const nonDetection = patrolFeedback.find(f => !f.is_detection)
+    return nonDetection || null
+  }, [patrolFeedback])
+
+  // Empty state - show only if no detections AND no patrol feedback
+  const hasContent = detectionLogs.length > 0 || latestPatrol !== null
+
+  if (!hasContent && !isLoading) {
     return (
       <div className="h-full flex flex-col">
         <div className="flex items-center gap-2 p-3 border-b">
@@ -216,8 +161,8 @@ export function EventLogPane({ cameras, onLogClick }: EventLogPaneProps) {
         <div className="flex-1 flex items-center justify-center text-muted-foreground">
           <div className="text-center">
             <Activity className="h-12 w-12 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No events yet</p>
-            <p className="text-xs mt-1">Events will stream here</p>
+            <p className="text-sm">検出イベントなし</p>
+            <p className="text-xs mt-1">検出時にここに表示されます</p>
           </div>
         </div>
       </div>
@@ -233,28 +178,23 @@ export function EventLogPane({ cameras, onLogClick }: EventLogPaneProps) {
           <span className="text-sm font-medium">AI Event Log</span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Toggle non-detection visibility */}
-          <button
-            onClick={() => setShowNonDetections(!showNonDetections)}
-            className={cn(
-              "p-1 rounded hover:bg-muted transition-colors",
-              !showNonDetections && "text-muted-foreground"
-            )}
-            title={showNonDetections ? "検出なしを非表示" : "検出なしを表示"}
-          >
-            {showNonDetections ? (
-              <Eye className="h-3.5 w-3.5" />
-            ) : (
-              <EyeOff className="h-3.5 w-3.5" />
-            )}
-          </button>
           {stats && (
             <Badge variant="secondary" className="text-xs">
-              {stats.total_logs}
+              {detectionLogs.length}
             </Badge>
           )}
         </div>
       </div>
+
+      {/* Patrol Ticker - single fixed slot, very subtle */}
+      {latestPatrol && (
+        <div className="px-3 py-1.5 border-b flex items-center gap-1.5 text-[11px] text-muted-foreground/50">
+          <RefreshCw className="h-2.5 w-2.5 animate-spin flex-shrink-0" style={{ animationDuration: '4s' }} />
+          <span className="truncate">{latestPatrol.camera_name}</span>
+          <span>{formatTime(latestPatrol.timestamp)}</span>
+          <span className="ml-auto">検出なし</span>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-auto" ref={scrollRef}>
@@ -266,17 +206,8 @@ export function EventLogPane({ cameras, onLogClick }: EventLogPaneProps) {
             </div>
           )}
 
-          {/* Patrol Feedback (transient) */}
-          {visibleFeedback.length > 0 && (
-            <div className="space-y-0.5 mb-2 pb-2 border-b border-dashed">
-              {visibleFeedback.map((feedback, i) => (
-                <PatrolFeedbackItem key={`${feedback.camera_id}-${feedback.timestamp}-${i}`} feedback={feedback} />
-              ))}
-            </div>
-          )}
-
-          {/* Detection Logs (persistent) */}
-          {logs.map((log) => (
+          {/* Detection Logs (severity > 0 only) */}
+          {detectionLogs.map((log) => (
             <DetectionLogItem
               key={log.log_id}
               log={log}
@@ -284,6 +215,13 @@ export function EventLogPane({ cameras, onLogClick }: EventLogPaneProps) {
               onClick={() => onLogClick?.(log)}
             />
           ))}
+
+          {/* No detections message */}
+          {detectionLogs.length === 0 && !isLoading && (
+            <div className="text-center py-8 text-muted-foreground">
+              <p className="text-sm">検出イベントなし</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

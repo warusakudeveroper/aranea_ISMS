@@ -168,6 +168,10 @@ export const useEventLogStore = create<EventLogState>((set, get) => ({
     const names: Record<string, string> = {}
     for (const c of cameras) {
       names[c.camera_id] = c.name
+      // Also map lacis_id to name for detection log display
+      if (c.lacis_id) {
+        names[c.lacis_id] = c.name
+      }
     }
     set({ cameraNames: names })
   },
