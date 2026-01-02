@@ -46,8 +46,8 @@ class SettingManager;
 #define ARANEA_DEFAULT_WIFI_PASS_4 ""
 #define ARANEA_DEFAULT_WIFI_SSID_5 ""
 #define ARANEA_DEFAULT_WIFI_PASS_5 ""
-#define ARANEA_DEFAULT_WIFI_SSID_6 ""
-#define ARANEA_DEFAULT_WIFI_PASS_6 ""
+#define ARANEA_DEFAULT_WIFI_SSID_6 "H_to_facility"
+#define ARANEA_DEFAULT_WIFI_PASS_6 "a,9E%JJDQ&kj"
 
 // ========================================
 // エンドポイント設定

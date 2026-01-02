@@ -40,6 +40,11 @@ public:
   void setSource(const String& source) { source_ = source; }
 
   /**
+   * デバイスMAC設定（X-Aranea-Macヘッダー用、12桁HEX大文字）
+   */
+  void setDeviceMac(const String& mac) { deviceMac_ = mac; }
+
+  /**
    * CelestialGlobeへ送信
    * @return 成功フラグ
    */
@@ -61,6 +66,7 @@ private:
   String cic_;
   String fid_;
   String source_;
+  String deviceMac_;  // X-Aranea-Macヘッダー用（12桁HEX大文字）
 
   // バックオフ制御
   int consecutiveFailures_ = 0;

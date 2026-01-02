@@ -81,9 +81,41 @@ public:
     reportSentCallback_ = cb;
   }
 
+  // ========================================
+  // X-Aranea-* ヘッダー設定（CelestialGlobe Webhook用）
+  // ========================================
+
+  /**
+   * X-Aranea-SourceType設定
+   * @param sourceType "ar-is10", "ar-is10m", "ar-is20s" 等
+   */
+  void setSourceType(const String& sourceType) { sourceType_ = sourceType; }
+
+  /**
+   * X-Aranea-LacisId設定
+   */
+  void setLacisId(const String& lacisId) { lacisId_ = lacisId; }
+
+  /**
+   * X-Aranea-Mac設定（12桁HEX、コロン/ハイフンなし）
+   */
+  void setMac(const String& mac) { mac_ = mac; }
+
+  /**
+   * Webhookモード有効化
+   * trueの場合、X-Aranea-* ヘッダーを追加
+   */
+  void setWebhookMode(bool enabled) { webhookMode_ = enabled; }
+
 private:
   String endpoint_;
   unsigned long heartbeatIntervalMs_ = 60000;
+
+  // X-Aranea-* ヘッダー（Webhookモード用）
+  bool webhookMode_ = false;
+  String sourceType_;
+  String lacisId_;
+  String mac_;
   unsigned long lastHeartbeat_ = 0;
   bool initialReportSent_ = false;
   bool enabled_ = true;

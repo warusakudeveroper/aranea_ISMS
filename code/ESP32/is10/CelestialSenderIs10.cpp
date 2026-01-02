@@ -150,7 +150,23 @@ bool CelestialSenderIs10::send() {
     HTTPClient http;
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
+
+    // CelestialGlobe認証（既存）
     http.addHeader("X-Celestial-Secret", secret);
+
+    // X-Aranea-* ヘッダー（Webhook共通仕様）
+    http.addHeader("X-Aranea-SourceType", source_);  // "ar-is10"
+    http.addHeader("X-Aranea-LacisId", lacisId_);
+    if (deviceMac_.length() > 0) {
+      http.addHeader("X-Aranea-Mac", deviceMac_);  // ESP32 MAC（12桁HEX大文字）
+    }
+    // ISO8601タイムスタンプ
+    char timestamp[32];
+    time_t now_t = time(nullptr);
+    struct tm* timeinfo = gmtime(&now_t);
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
+    http.addHeader("X-Aranea-Timestamp", timestamp);
+
     http.setTimeout(HTTP_TIMEOUT_MS);
 
     int httpCode = http.POST(json);

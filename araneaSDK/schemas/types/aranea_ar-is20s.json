@@ -1,0 +1,237 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/aranea_ar-is20s.json",
+  "title": "aranea_ar-is20s Network Capture Gateway",
+  "description": "ネットワークキャプチャ・エッジゲートウェイ",
+  "type": "aranea_ar-is20s",
+  "displayName": "Network Capture Gateway",
+  "productType": "020",
+  "productCodes": ["0096"],
+  "capabilities": ["capture", "relay", "dns", "threat_intel", "asn"],
+  "semanticTags": ["ネットワーク", "キャプチャ", "セキュリティ", "エッジ"],
+  "features": [
+    "パケットキャプチャ (TCP SYN)",
+    "DNSキャッシュ・逆引き",
+    "脅威インテリジェンス",
+    "ASN情報取得",
+    "ルームマッピング",
+    "Web UI",
+    "ローカルログ保存"
+  ],
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["capture"],
+    "properties": {
+      "capture": {
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "description": "キャプチャ実行中"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "キャプチャ有効"
+          },
+          "queueSize": {
+            "type": "integer",
+            "description": "送信キューサイズ"
+          },
+          "dropCount": {
+            "type": "integer",
+            "description": "ドロップ数"
+          },
+          "sentCount": {
+            "type": "integer",
+            "description": "送信済み数"
+          },
+          "roomsCount": {
+            "type": "integer",
+            "description": "設定済みルーム数"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "ドライランモード"
+          },
+          "synOnly": {
+            "type": "boolean",
+            "description": "SYNパケットのみ"
+          }
+        }
+      },
+      "dnsCache": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "description": "キャッシュエントリ数"
+          },
+          "maxEntries": {
+            "type": "integer",
+            "description": "最大エントリ数"
+          }
+        }
+      },
+      "threatIntel": {
+        "type": "object",
+        "properties": {
+          "lastUpdate": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "最終更新日時"
+          },
+          "malwareDomains": {
+            "type": "integer",
+            "description": "マルウェアドメイン数"
+          },
+          "torExitIps": {
+            "type": "integer",
+            "description": "Tor出口ノード数"
+          }
+        }
+      },
+      "asn": {
+        "type": "object",
+        "properties": {
+          "cacheSize": {
+            "type": "integer",
+            "description": "ASNキャッシュサイズ"
+          },
+          "hits": {
+            "type": "integer",
+            "description": "キャッシュヒット数"
+          },
+          "misses": {
+            "type": "integer",
+            "description": "キャッシュミス数"
+          }
+        }
+      },
+      "forwarder": {
+        "type": "object",
+        "properties": {
+          "lastOkAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "failures": {
+            "type": "integer"
+          },
+          "queued": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "capture": {
+        "type": "object",
+        "properties": {
+          "iface": {
+            "type": "string",
+            "description": "キャプチャインターフェース",
+            "default": "end0"
+          },
+          "synOnly": {
+            "type": "boolean",
+            "description": "SYNパケットのみ",
+            "default": true
+          },
+          "ports": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "監視ポート",
+            "default": [53, 80, 443]
+          }
+        }
+      },
+      "rooms": {
+        "type": "object",
+        "additionalProperties": { "type": "string" },
+        "description": "IPアドレス→部屋番号マッピング"
+      },
+      "post": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "送信先URL"
+          },
+          "batchMaxEvents": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 500
+          },
+          "batchMaxSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300,
+            "default": 30
+          },
+          "gzip": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "mode": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "ドライラン (送信しない)"
+          }
+        }
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "get_status": {
+        "type": "object",
+        "properties": {},
+        "description": "ステータス取得"
+      },
+      "start_capture": {
+        "type": "object",
+        "properties": {},
+        "description": "キャプチャ開始"
+      },
+      "stop_capture": {
+        "type": "object",
+        "properties": {},
+        "description": "キャプチャ停止"
+      },
+      "update_threat_intel": {
+        "type": "object",
+        "properties": {},
+        "description": "脅威インテリジェンス更新"
+      },
+      "set_rooms": {
+        "type": "object",
+        "properties": {
+          "rooms": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "IPアドレス→部屋番号マッピング"
+          }
+        },
+        "required": ["rooms"],
+        "description": "ルームマッピング設定"
+      }
+    }
+  }
+}

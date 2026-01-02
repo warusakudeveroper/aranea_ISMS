@@ -35,7 +35,15 @@ public:
      */
     void setSendStatus(int successCount, int failCount, const String& lastResult);
 
+    /**
+     * MQTT接続状態設定
+     */
+    void setMqttConnected(bool connected) { mqttConnected_ = connected; }
+    bool isMqttConnected() const { return mqttConnected_; }
+
 protected:
+    // クラウド状態オーバーライド
+    AraneaCloudStatus getCloudStatus() override;
     // ========================================
     // AraneaWebUI オーバーライド
     // ========================================
@@ -54,6 +62,7 @@ private:
     ChannelManager* channels_;
     WebhookManager* webhooks_;
     RuleManager* rules_;
+    bool mqttConnected_ = false;
 
     // ステータス
     int lastChangedChannel_;

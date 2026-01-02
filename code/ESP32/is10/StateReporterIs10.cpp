@@ -120,22 +120,16 @@ String StateReporterIs10::sanitizeDeviceName(const String& raw) {
 }
 
 // ========================================
-// ペイロード構築（is10固有）
+// ペイロード構築（araneaDeviceGate deviceStateReport形式）
 // ========================================
 String StateReporterIs10::buildPayload() {
-  if (!araneaReg_) return "";
-
-  String stateEndpoint = araneaReg_->getSavedStateEndpoint();
-  if (stateEndpoint.length() == 0) {
-    // Gate APIがstateEndpointを返さない場合はデフォルト使用
-    stateEndpoint = ARANEA_DEFAULT_CLOUD_URL;
-  }
-
   String observedAt = (ntp_ && ntp_->isSynced()) ? ntp_->getIso8601() : "1970-01-01T00:00:00Z";
-  String deviceName = getDeviceName();
-  bool reportFullConfig = settings_ ? settings_->getBool(Is10Keys::kReportFull, false) : false;
 
-  // P1: StaticJsonDocumentで動的アロケーション回避
+  // ルーター情報取得（SshPollerから）
+  RouterInfo* routerInfos = sshPoller_ ? sshPoller_->getRouterInfos() : nullptr;
+  int routerInfoCount = sshPoller_ ? sshPoller_->getRouterInfoCount() : 0;
+
+  // deviceStateReportペイロード構築
   StaticJsonDocument<4096> doc;
 
   // auth
@@ -147,65 +141,48 @@ String StateReporterIs10::buildPayload() {
   // report
   JsonObject report = doc.createNestedObject("report");
   report["lacisId"] = lacisId_;
-  report["type"] = deviceType_;
+  report["type"] = deviceType_;  // "aranea_ar-is10"
   report["observedAt"] = observedAt;
 
   // state
   JsonObject state = report.createNestedObject("state");
-
-  // 基本情報
-  state["deviceName"] = deviceName;
+  state["deviceName"] = getDeviceName();
   state["IPAddress"] = WiFi.localIP().toString();
-  state["MacAddress"] = mac_;
-  state["RSSI"] = WiFi.RSSI();
+  state["hostname"] = hostname_;
+  state["mac"] = mac_;
+  state["rssi"] = WiFi.RSSI();
+  state["routerCount"] = routerInfoCount;
 
-  // ルーター統計（sshPollerから取得）
-  int routerCount = routerCount_ ? *routerCount_ : 0;
-  state["routerCount"] = routerCount;
-  state["successCount"] = sshPoller_ ? sshPoller_->getSuccessCount() : 0;
-  state["failCount"] = sshPoller_ ? sshPoller_->getFailCount() : 0;
-  state["lastPollResult"] = "---";  // TODO: 状態保持
-  state["mqttConnected"] = mqtt_ ? mqtt_->isConnected() : false;
-  state["heap"] = ESP.getFreeHeap();
-
-  // Applied情報（SSOT必須）
-  state["appliedConfigSchemaVersion"] = schemaVersion_;
-  state["appliedConfigHash"] = configHash_;
-  if (lastAppliedAt_.length() > 0) {
-    state["lastConfigAppliedAt"] = lastAppliedAt_;
+  // SSOT: 適用済み設定情報
+  if (schemaVersion_ > 0) {
+    state["schemaVersion"] = schemaVersion_;
+    state["configHash"] = configHash_;
+    state["lastAppliedAt"] = lastAppliedAt_;
   }
   if (lastApplyError_.length() > 0) {
-    state["lastConfigApplyError"] = lastApplyError_;
+    state["lastApplyError"] = lastApplyError_;
   }
 
-  // ReportedConfig
-  state["reportedConfigSchemaVersion"] = schemaVersion_;
-  state["reportedConfigHash"] = configHash_;
-
-  // reportedConfig.is10
+  // reportedConfig: is10固有設定
   JsonObject reportedConfig = state.createNestedObject("reportedConfig");
-  JsonObject is10Cfg = reportedConfig.createNestedObject("is10");
+  JsonObject is10Config = reportedConfig.createNestedObject("is10");
 
-  is10Cfg["scanInterval"] = settings_ ? settings_->getInt(Is10Keys::kScanIntv, 60) : 60;
-  is10Cfg["reportClientList"] = settings_ ? settings_->getBool(Is10Keys::kReportClnt, true) : true;
+  // scanInterval取得
+  int scanInterval = settings_ ? settings_->getInt(Is10Keys::kScanIntv, 60) : 60;
+  is10Config["scanInterval"] = scanInterval;
 
-  // routers配列
+  // ルーター設定配列
+  JsonArray routersArray = is10Config.createNestedArray("routers");
   if (routers_ && routerCount_) {
-    JsonArray routersArr = is10Cfg.createNestedArray("routers");
     for (int i = 0; i < *routerCount_; i++) {
-      JsonObject r = routersArr.createNestedObject();
-      r["rid"] = routers_[i].rid;
-      r["ipAddr"] = routers_[i].ipAddr;
-      r["sshPort"] = routers_[i].sshPort;
-      r["enabled"] = routers_[i].enabled;
-      r["platform"] = (routers_[i].osType == RouterOsType::ASUSWRT) ? "asuswrt" : "openwrt";
-
-      if (reportFullConfig) {
-        r["sshUser"] = routers_[i].username;
-        r["password"] = routers_[i].password;
-        if (routers_[i].publicKey.length() > 0) {
-          r["privateKey"] = routers_[i].publicKey;
-        }
+      JsonObject routerObj = routersArray.createNestedObject();
+      routerObj["rid"] = routers_[i].rid;
+      routerObj["ipAddr"] = routers_[i].ipAddr;
+      routerObj["osType"] = (int)routers_[i].osType;
+      // online状態を追加（ポーリング結果から）
+      if (routerInfos && i < routerInfoCount) {
+        routerObj["online"] = routerInfos[i].online;
+        routerObj["clientCount"] = routerInfos[i].clientCount;
       }
     }
   }
@@ -216,15 +193,11 @@ String StateReporterIs10::buildPayload() {
   serializeJson(doc, json);
 
   // ログ出力
-  String hashShort = configHash_.length() > 8
-    ? configHash_.substring(0, 8) + "..."
-    : configHash_;
-  Serial.printf("[STATE-IS10] deviceName=\"%s\", schema=%d, hash=%s\n",
-                deviceName.c_str(), schemaVersion_, hashShort.c_str());
+  Serial.printf("[STATE-IS10] deviceStateReport: routers=%d\n", routerInfoCount);
 
   // HttpManagerに反映（UI用）
   if (httpMgr_) {
-    httpMgr_->setLastStateReport(observedAt, 0);  // httpCodeは送信後に更新
+    httpMgr_->setLastStateReport(observedAt, 0);
   }
 
   return json;

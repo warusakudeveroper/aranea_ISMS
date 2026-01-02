@@ -263,7 +263,7 @@ void handleMqttMessage(const String& topic, const char* data, int len) {
     String payload(data, len);
     Serial.printf("[MQTT] Received: %s -> %s\n", topic.c_str(), payload.c_str());
 
-    // トピック: aranea/{lacisId}/command
+    // トピック: aranea/{tid}/{lacisId}/command
     // コマンド形式: {"action":"...", "params":{...}}
     StaticJsonDocument<512> doc;
     DeserializationError error = deserializeJson(doc, payload);
@@ -272,18 +272,22 @@ void handleMqttMessage(const String& topic, const char* data, int len) {
         return;
     }
 
-    String action = doc["action"].as<String>();
+    // SDKフォーマット: type/parameters, デバイスフォーマット: action/params
+    String action = doc["type"].as<String>();
+    if (action.isEmpty()) action = doc["action"].as<String>();
+    JsonObject params = doc["parameters"];
+    if (params.isNull()) params = doc["params"];
 
     // 出力ON/OFF
     if (action == "output_on") {
-        int ch = doc["params"]["ch"] | 0;
+        int ch = params["ch"] | 0;
         if (ch >= 7 && ch <= 8 && channels.isOutputMode(ch)) {
             channels.triggerOutput(ch);
             Serial.printf("[MQTT] Output ON: ch%d\n", ch);
         }
     }
     else if (action == "output_off") {
-        int ch = doc["params"]["ch"] | 0;
+        int ch = params["ch"] | 0;
         if (ch >= 7 && ch <= 8) {
             channels.stopOutput(ch);
             Serial.printf("[MQTT] Output OFF: ch%d\n", ch);
@@ -291,8 +295,7 @@ void handleMqttMessage(const String& topic, const char* data, int len) {
     }
     // 設定変更
     else if (action == "set_config") {
-        JsonObject params = doc["params"];
-
+        // paramsは上で定義済み
         // Webhook設定
         if (params.containsKey("webhookEnabled")) {
             webhooks.setEnabled(params["webhookEnabled"]);
@@ -349,7 +352,7 @@ void handleMqttMessage(const String& topic, const char* data, int len) {
         String respStr;
         serializeJson(resp, respStr);
 
-        String respTopic = "aranea/" + myLacisId + "/status";
+        String respTopic = "aranea/" + myTid + "/" + myLacisId + "/status";
         mqtt.publish(respTopic, respStr);
     }
 }
@@ -383,7 +386,7 @@ void onChannelChanged(int ch, bool active) {
 
         String payload;
         serializeJson(doc, payload);
-        String topic = "aranea/" + myLacisId + "/event";
+        String topic = "aranea/" + myTid + "/" + myLacisId + "/event";
         mqtt.publish(topic, payload);
     }
 
@@ -530,7 +533,7 @@ void setup() {
     devInfo.hostname = myHostname;
     devInfo.firmwareVersion = FIRMWARE_VERSION;
     devInfo.buildDate = __DATE__ " " __TIME__;
-    devInfo.modules = "WiFi,NTP,HTTP,Webhook";
+    devInfo.modules = "WiFi,NTP,HTTP,MQTT,Webhook";
     httpMgr.setDeviceInfo(devInfo);
 
     // OTA初期化
@@ -574,13 +577,15 @@ void setup() {
         // コールバック設定
         mqtt.onConnected([]() {
             Serial.println("[MQTT] Connected!");
+            httpMgr.setMqttConnected(true);
             // コマンドトピック購読
-            String cmdTopic = "aranea/" + myLacisId + "/command";
+            String cmdTopic = "aranea/" + myTid + "/" + myLacisId + "/command";
             mqtt.subscribe(cmdTopic);
             Serial.printf("[MQTT] Subscribed: %s\n", cmdTopic.c_str());
         });
         mqtt.onDisconnected([]() {
             Serial.println("[MQTT] Disconnected");
+            httpMgr.setMqttConnected(false);
         });
         mqtt.onMessage(handleMqttMessage);
         mqtt.onError([](const String& err) {

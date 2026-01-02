@@ -169,12 +169,12 @@ String ChannelManager::getStateString(int ch) const {
     const ChannelConfig& cfg = configs_[ch - 1];
     bool active = channels_[ch - 1].isActive();
 
-    // アクティブ時はmeaningをそのまま、非アクティブ時は逆
-    if (active) {
-        return cfg.meaning;
-    } else {
-        return (cfg.meaning == "open") ? "close" : "open";
+    // 出力チャンネル（ch7/ch8）は on/off
+    if (cfg.isOutput) {
+        return active ? "on" : "off";
     }
+    // 入力チャンネルは detect/idle
+    return active ? "detect" : "idle";
 }
 
 String ChannelManager::getLastUpdatedAt(int ch) const {

@@ -44,6 +44,16 @@ void HttpManagerIs05a::setSendStatus(int successCount, int failCount, const Stri
     lastSendResult_ = lastResult;
 }
 
+AraneaCloudStatus HttpManagerIs05a::getCloudStatus() {
+    AraneaCloudStatus status;
+    status.registered = deviceInfo_.cic.length() > 0;
+    status.mqttConnected = mqttConnected_;
+    status.lastStateReport = "";
+    status.lastStateReportCode = 0;
+    status.schemaVersion = 0;
+    return status;
+}
+
 void HttpManagerIs05a::getTypeSpecificStatus(JsonObject& obj) {
     // チャンネル状態
     JsonArray channelsArr = obj.createNestedArray("channels");

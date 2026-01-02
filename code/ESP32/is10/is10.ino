@@ -737,6 +737,7 @@ void setup() {
   celestialSender.begin(&settings, &ntp, &sshPoller);
   celestialSender.setAuth(myTid, myLacisId, myCic, myFid);
   celestialSender.setSource(CELESTIAL_SOURCE);  // "ar-is10"
+  celestialSender.setDeviceMac(myMac);          // X-Aranea-Macヘッダー用
 
   // ========================================
   // MqttConfigHandler初期化

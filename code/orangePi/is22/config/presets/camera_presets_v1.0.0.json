@@ -1,0 +1,557 @@
+{
+  "version": "1.0.0",
+  "created_at": "2026-01-02",
+  "description": "is21/is22共有プリセット定義ファイル。カメラ設定・解析パラメータ・UI表示を統合管理。",
+  "presets": {
+    "person_priority": {
+      "_meta": {
+        "description": "人物の詳細特徴を最大限取得するプリセット。服装、体型、持ち物、髪型など26種類以上の属性を検出。",
+        "use_cases": [
+          "防犯カメラでの人物特定補助",
+          "不審者の特徴記録",
+          "スタッフ識別（制服検出）"
+        ],
+        "detection_tendency": {
+          "strength": ["人物の詳細属性", "服装色・パターン", "持ち物検出", "体格推定"],
+          "weakness": ["車両検出なし", "動物検出なし", "処理負荷高め"]
+        },
+        "recommended_locations": ["エントランス", "受付", "廊下", "警戒区域"],
+        "false_positive_risk": "低",
+        "processing_load": "高"
+      },
+      "detection_targets": ["human"],
+      "par_enabled": true,
+      "par_full_attributes": true,
+      "vehicle_detection": false,
+      "animal_detection": false,
+      "output_schema": "person_detailed",
+      "conf_threshold": 0.4,
+      "iou_threshold": 0.45,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "time_factor": 1.0,
+          "posture_factor": 1.5,
+          "duration_factor": 1.0,
+          "count_factor": 0.8
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - {event_icon} {count}名検知",
+          "detail_format": "{gender} | {top_color}上着 | {bottom_color}下 | {accessories}"
+        },
+        "warning": {
+          "condition": "suspicious.level in ['high', 'critical']",
+          "format": "[{time}] {camera} - {alert_icon} 不審人物！{suspicious_factors}",
+          "detail_format": "{gender} | {posture} | 滞在{duration}秒"
+        },
+        "icons": {
+          "person": "🧍",
+          "alert": "🚨"
+        }
+      }
+    },
+    "balanced": {
+      "_meta": {
+        "description": "人物・車両・動物をバランスよく検出する汎用プリセット。多目的監視に最適。",
+        "use_cases": [
+          "一般的な監視カメラ",
+          "マルチ用途エリア",
+          "初期設定として推奨"
+        ],
+        "detection_tendency": {
+          "strength": ["汎用性", "バランスの良い検出", "処理負荷適正"],
+          "weakness": ["特化プリセットほどの詳細取得なし"]
+        },
+        "recommended_locations": ["共用エリア", "ロビー", "通路"],
+        "false_positive_risk": "中",
+        "processing_load": "中"
+      },
+      "detection_targets": ["human", "vehicle", "animal"],
+      "par_enabled": true,
+      "par_full_attributes": false,
+      "vehicle_detection": true,
+      "animal_detection": true,
+      "output_schema": "balanced",
+      "conf_threshold": 0.5,
+      "iou_threshold": 0.45,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "time_factor": 1.0,
+          "posture_factor": 1.0,
+          "duration_factor": 1.0,
+          "count_factor": 1.0
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - {event_icon} {primary_event}検知 ({count})",
+          "detail_format": "conf: {confidence}% | severity: {severity}"
+        },
+        "icons": {
+          "person": "🧍",
+          "vehicle": "🚗",
+          "animal": "🐾",
+          "alert": "⚠️"
+        }
+      }
+    },
+    "parking": {
+      "_meta": {
+        "description": "駐車場専用プリセット。車両検出・ナンバー認識・駐車時間追跡に特化。",
+        "use_cases": [
+          "駐車場監視",
+          "入退場記録",
+          "違法駐車検出"
+        ],
+        "detection_tendency": {
+          "strength": ["車両検出", "ナンバー認識(OCR)", "車種・色判定"],
+          "weakness": ["人物詳細なし", "動物検出限定的"]
+        },
+        "recommended_locations": ["駐車場", "車路", "ゲート前"],
+        "false_positive_risk": "低",
+        "processing_load": "中"
+      },
+      "detection_targets": ["vehicle", "human"],
+      "par_enabled": false,
+      "par_full_attributes": false,
+      "vehicle_detection": true,
+      "vehicle_ocr": true,
+      "animal_detection": false,
+      "output_schema": "parking",
+      "conf_threshold": 0.5,
+      "iou_threshold": 0.5,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "duration_factor": 2.0,
+          "time_factor": 1.5
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - {vehicle_icon} {vehicle_color}{vehicle_type} [{plate}] {action}",
+          "detail_format": "駐車時間: {duration}分 | 空き: {available}/{total}台"
+        },
+        "warning": {
+          "condition": "duration > 120",
+          "format": "[{time}] {camera} - ⚠️ 長時間駐車 [{plate}] {duration}分",
+          "detail_format": ""
+        },
+        "icons": {
+          "vehicle": "🚗",
+          "alert": "⚠️"
+        }
+      }
+    },
+    "corridor": {
+      "_meta": {
+        "description": "廊下・通路用プリセット。通過人数カウント・異常行動検知に最適化。",
+        "use_cases": [
+          "廊下監視",
+          "通行量計測",
+          "うろつき検知"
+        ],
+        "detection_tendency": {
+          "strength": ["通過カウント", "移動方向検出", "滞留検知"],
+          "weakness": ["静止人物の詳細低め"]
+        },
+        "recommended_locations": ["廊下", "通路", "階段踊り場"],
+        "false_positive_risk": "中",
+        "processing_load": "低"
+      },
+      "detection_targets": ["human"],
+      "par_enabled": true,
+      "par_full_attributes": false,
+      "vehicle_detection": false,
+      "animal_detection": false,
+      "output_schema": "corridor",
+      "conf_threshold": 0.45,
+      "iou_threshold": 0.4,
+      "motion_tracking": true,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "duration_factor": 2.0,
+          "direction_change_factor": 1.5
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 🚶 通過 {count}名 ({direction})",
+          "detail_format": ""
+        },
+        "warning": {
+          "condition": "loitering_detected",
+          "format": "[{time}] {camera} - ⚠️ うろつき検知 滞在{duration}秒",
+          "detail_format": ""
+        },
+        "icons": {
+          "person": "🚶",
+          "alert": "⚠️"
+        }
+      }
+    },
+    "restricted": {
+      "_meta": {
+        "description": "立入制限区域用プリセット。高感度検知・即時アラート・詳細記録。",
+        "use_cases": [
+          "サーバールーム",
+          "金庫室",
+          "立入禁止区域"
+        ],
+        "detection_tendency": {
+          "strength": ["高感度人物検知", "即時アラート", "詳細特徴記録"],
+          "weakness": ["誤検知リスクやや高め"]
+        },
+        "recommended_locations": ["サーバー室", "倉庫", "制限区域"],
+        "false_positive_risk": "中〜高",
+        "processing_load": "高"
+      },
+      "detection_targets": ["human"],
+      "par_enabled": true,
+      "par_full_attributes": true,
+      "vehicle_detection": false,
+      "animal_detection": true,
+      "output_schema": "restricted",
+      "conf_threshold": 0.3,
+      "iou_threshold": 0.4,
+      "suspicious_config": {
+        "enable": true,
+        "base_score": 50,
+        "weights": {
+          "time_factor": 2.0,
+          "posture_factor": 2.0,
+          "duration_factor": 1.5,
+          "any_detection_bonus": 30
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 🚨 人物検知！{gender}・{top_color}上着・{posture}",
+          "detail_format": "滞在: {duration}秒 | suspicious: {suspicious_score}/100"
+        },
+        "icons": {
+          "person": "🚨",
+          "alert": "🔴"
+        }
+      }
+    },
+    "entrance": {
+      "_meta": {
+        "description": "出入口用プリセット。入退室記録・来訪者識別に最適化。",
+        "use_cases": [
+          "玄関・エントランス",
+          "受付",
+          "入退室管理"
+        ],
+        "detection_tendency": {
+          "strength": ["入退室検知", "人物特徴記録", "来訪者識別"],
+          "weakness": ["屋外光の影響を受けやすい"]
+        },
+        "recommended_locations": ["玄関", "エントランス", "受付"],
+        "false_positive_risk": "低",
+        "processing_load": "中"
+      },
+      "detection_targets": ["human", "vehicle"],
+      "par_enabled": true,
+      "par_full_attributes": true,
+      "vehicle_detection": true,
+      "animal_detection": false,
+      "output_schema": "entrance",
+      "conf_threshold": 0.45,
+      "iou_threshold": 0.45,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "time_factor": 1.5,
+          "duration_factor": 1.2
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 🚪 {action} {count}名",
+          "detail_format": "{gender} | {top_color} | {accessories}"
+        },
+        "icons": {
+          "person": "🚪",
+          "vehicle": "🚗",
+          "alert": "⚠️"
+        }
+      }
+    },
+    "dining": {
+      "_meta": {
+        "description": "食堂・レストラン用プリセット。混雑度・座席利用状況の監視に最適化。",
+        "use_cases": [
+          "社員食堂",
+          "レストラン",
+          "カフェテリア"
+        ],
+        "detection_tendency": {
+          "strength": ["人数カウント", "混雑度算出", "座席利用状況"],
+          "weakness": ["個人特徴の詳細低め"]
+        },
+        "recommended_locations": ["食堂", "レストラン", "休憩室"],
+        "false_positive_risk": "低",
+        "processing_load": "低"
+      },
+      "detection_targets": ["human"],
+      "par_enabled": false,
+      "par_full_attributes": false,
+      "vehicle_detection": false,
+      "animal_detection": false,
+      "output_schema": "dining",
+      "conf_threshold": 0.5,
+      "iou_threshold": 0.5,
+      "crowd_counting": true,
+      "suspicious_config": {
+        "enable": false
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 🍽️ 利用者 {count}名 | 混雑度: {occupancy}%",
+          "detail_format": ""
+        },
+        "warning": {
+          "condition": "occupancy > 80",
+          "format": "[{time}] {camera} - ⚠️ 混雑 {count}名 ({occupancy}%)",
+          "detail_format": ""
+        },
+        "icons": {
+          "person": "🍽️",
+          "alert": "⚠️"
+        }
+      }
+    },
+    "kitchen": {
+      "_meta": {
+        "description": "厨房用プリセット。衛生管理（帽子・マスク・エプロン・手袋）検出に特化。",
+        "use_cases": [
+          "厨房監視",
+          "衛生チェック",
+          "HACCP対応"
+        ],
+        "detection_tendency": {
+          "strength": ["衛生装備検出", "調理服チェック", "手袋検出"],
+          "weakness": ["蒸気・煙で精度低下の可能性"]
+        },
+        "recommended_locations": ["厨房", "調理場", "食品加工エリア"],
+        "false_positive_risk": "中",
+        "processing_load": "中"
+      },
+      "detection_targets": ["human"],
+      "par_enabled": true,
+      "par_full_attributes": true,
+      "par_focus": ["hat", "mask", "apron", "gloves"],
+      "vehicle_detection": false,
+      "animal_detection": false,
+      "output_schema": "kitchen",
+      "conf_threshold": 0.45,
+      "iou_threshold": 0.45,
+      "hygiene_check": true,
+      "suspicious_config": {
+        "enable": false
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 👨‍🍳 スタッフ{count}名 | 衛生チェック",
+          "detail_format": "{hat_status}帽子 {mask_status}マスク {apron_status}エプロン {gloves_status}手袋"
+        },
+        "warning": {
+          "condition": "hygiene_violation",
+          "format": "[{time}] {camera} - ⚠️ 衛生違反検知 {violation_details}",
+          "detail_format": ""
+        },
+        "icons": {
+          "person": "👨‍🍳",
+          "alert": "⚠️",
+          "check": "✅",
+          "cross": "❌"
+        }
+      }
+    },
+    "campsite": {
+      "_meta": {
+        "description": "キャンプ場・屋外施設用プリセット。人物・動物・車両を広範囲で検出。",
+        "use_cases": [
+          "キャンプ場",
+          "グランピング施設",
+          "屋外イベント会場"
+        ],
+        "detection_tendency": {
+          "strength": ["広範囲検出", "動物検知", "テント周辺監視"],
+          "weakness": ["夜間精度低下", "遠距離検出限界"]
+        },
+        "recommended_locations": ["キャンプ場", "屋外施設", "イベント会場"],
+        "false_positive_risk": "中〜高",
+        "processing_load": "中"
+      },
+      "detection_targets": ["human", "vehicle", "animal"],
+      "par_enabled": true,
+      "par_full_attributes": false,
+      "vehicle_detection": true,
+      "animal_detection": true,
+      "output_schema": "campsite",
+      "conf_threshold": 0.4,
+      "iou_threshold": 0.45,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "time_factor": 2.0,
+          "animal_proximity_factor": 1.5
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - ⛺ {primary_event}検知 ({count})",
+          "detail_format": ""
+        },
+        "warning": {
+          "condition": "primary_event == 'animal'",
+          "format": "[{time}] {camera} - 🐻 動物出没！{animal_type}",
+          "detail_format": ""
+        },
+        "icons": {
+          "person": "🧍",
+          "vehicle": "🚗",
+          "animal": "🐾",
+          "alert": "🐻"
+        }
+      }
+    },
+    "outdoor": {
+      "_meta": {
+        "description": "屋外一般用プリセット。外周監視・侵入検知に最適化。",
+        "use_cases": [
+          "外周監視",
+          "駐輪場",
+          "建物外壁"
+        ],
+        "detection_tendency": {
+          "strength": ["屋外環境対応", "侵入検知", "広角カバー"],
+          "weakness": ["天候の影響", "夜間精度低下"]
+        },
+        "recommended_locations": ["屋外", "外周", "駐輪場"],
+        "false_positive_risk": "中",
+        "processing_load": "中"
+      },
+      "detection_targets": ["human", "vehicle", "animal"],
+      "par_enabled": true,
+      "par_full_attributes": false,
+      "vehicle_detection": true,
+      "animal_detection": true,
+      "output_schema": "outdoor",
+      "conf_threshold": 0.45,
+      "iou_threshold": 0.45,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "time_factor": 1.5,
+          "duration_factor": 1.5
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 🌳 {primary_event}検知 ({count})",
+          "detail_format": ""
+        },
+        "icons": {
+          "person": "🧍",
+          "vehicle": "🚗",
+          "animal": "🐾",
+          "alert": "⚠️"
+        }
+      }
+    },
+    "road": {
+      "_meta": {
+        "description": "道路・通り用プリセット。交通量計測・歩行者安全監視に最適化。",
+        "use_cases": [
+          "道路監視",
+          "交差点",
+          "歩道"
+        ],
+        "detection_tendency": {
+          "strength": ["車両カウント", "歩行者検知", "交通量計測"],
+          "weakness": ["高速移動車両のブレ"]
+        },
+        "recommended_locations": ["道路", "交差点", "歩道"],
+        "false_positive_risk": "低",
+        "processing_load": "中"
+      },
+      "detection_targets": ["vehicle", "human"],
+      "par_enabled": false,
+      "par_full_attributes": false,
+      "vehicle_detection": true,
+      "vehicle_ocr": true,
+      "animal_detection": false,
+      "output_schema": "road",
+      "conf_threshold": 0.5,
+      "iou_threshold": 0.5,
+      "motion_tracking": true,
+      "suspicious_config": {
+        "enable": false
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 🚦 車両{vehicle_count}台 | 歩行者{pedestrian_count}名",
+          "detail_format": ""
+        },
+        "icons": {
+          "vehicle": "🚗",
+          "person": "🚶",
+          "alert": "⚠️"
+        }
+      }
+    },
+    "high_detection": {
+      "_meta": {
+        "description": "高感度検出プリセット。conf閾値を下げ、取りこぼしを最小化。",
+        "use_cases": [
+          "重要監視エリア",
+          "見逃し厳禁の場所",
+          "デバッグ・チューニング用"
+        ],
+        "detection_tendency": {
+          "strength": ["高感度検出", "取りこぼし最小化"],
+          "weakness": ["誤検知リスク高め", "処理負荷高め"]
+        },
+        "recommended_locations": ["重要エリア", "テスト環境"],
+        "false_positive_risk": "高",
+        "processing_load": "高"
+      },
+      "detection_targets": ["human", "vehicle", "animal"],
+      "par_enabled": true,
+      "par_full_attributes": true,
+      "vehicle_detection": true,
+      "animal_detection": true,
+      "output_schema": "high_detection",
+      "conf_threshold": 0.25,
+      "iou_threshold": 0.35,
+      "suspicious_config": {
+        "enable": true,
+        "weights": {
+          "time_factor": 1.0,
+          "posture_factor": 1.0,
+          "duration_factor": 1.0,
+          "count_factor": 1.0
+        }
+      },
+      "display_template": {
+        "normal": {
+          "format": "[{time}] {camera} - 🔍 {primary_event}検知 conf:{confidence}%",
+          "detail_format": "bbox数: {bbox_count} | tags: {tag_count}"
+        },
+        "icons": {
+          "person": "🧍",
+          "vehicle": "🚗",
+          "animal": "🐾",
+          "alert": "🔍"
+        }
+      }
+    }
+  }
+}

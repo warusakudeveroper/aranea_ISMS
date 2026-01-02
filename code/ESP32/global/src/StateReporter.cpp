@@ -76,7 +76,28 @@ bool StateReporter::sendReport(const String& jsonPayload) {
   HTTPClient http;
   http.begin(endpoint_);
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(HTTP_TIMEOUT_MS);  // P0: 10s→3sに短縮
+  http.setTimeout(HTTP_TIMEOUT_MS);
+
+  // Webhookモード: X-Aranea-* ヘッダー追加
+  if (webhookMode_) {
+    if (sourceType_.length() > 0) {
+      http.addHeader("X-Aranea-SourceType", sourceType_);
+    }
+    if (lacisId_.length() > 0) {
+      http.addHeader("X-Aranea-LacisId", lacisId_);
+    }
+    if (mac_.length() > 0) {
+      http.addHeader("X-Aranea-Mac", mac_);
+    }
+    // ISO8601タイムスタンプ（簡易版）
+    char timestamp[32];
+    time_t now_t = time(nullptr);
+    struct tm* timeinfo = gmtime(&now_t);
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", timeinfo);
+    http.addHeader("X-Aranea-Timestamp", timestamp);
+
+    Serial.printf("[STATE-REPORTER] Webhook mode: sourceType=%s\n", sourceType_.c_str());
+  }
 
   int httpCode = http.POST(jsonPayload);
   yield();  // P0: WDT対策
