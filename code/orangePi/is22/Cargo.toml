@@ -35,6 +35,9 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# Decimal (for MySQL DECIMAL columns)
+rust_decimal = { version = "1.33", features = ["serde"] }
+
 # Error handling
 thiserror = "1.0"
 anyhow = "1.0"

@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS detection_logs (
     synced_at DATETIME(3) NULL COMMENT 'BQ同期日時',
 
     -- ========================================
+    -- 仮想カラム（JSONインデックス用）
+    -- ========================================
+    suspicious_score DECIMAL(5,4) AS (JSON_VALUE(suspicious, '$.score')) STORED COMMENT '不審スコア（仮想カラム）',
+
+    -- ========================================
     -- インデックス
     -- ========================================
     INDEX idx_logs_tid_fid (tid, fid),
@@ -92,7 +97,7 @@ CREATE TABLE IF NOT EXISTS detection_logs (
     INDEX idx_logs_captured (captured_at),
     INDEX idx_logs_primary_event (primary_event, captured_at),
     INDEX idx_logs_severity (severity, captured_at),
-    INDEX idx_logs_suspicious (JSON_EXTRACT(suspicious, '$.score'), captured_at),
+    INDEX idx_logs_suspicious_score (suspicious_score, captured_at),
     INDEX idx_logs_sync (synced_to_bq, created_at),
     INDEX idx_logs_preset (preset_id, captured_at),
     INDEX idx_logs_output_schema (output_schema, captured_at),
