@@ -399,3 +399,104 @@ export interface CategorizedDevice extends ScannedDevice {
   category: DeviceCategory;
   isRegistered: boolean;  // cameras テーブルに存在するか
 }
+
+// =============================================================================
+// AI Event Log (detection_logs) - MySQL永続化検知ログ
+// =============================================================================
+
+// Detection log entry from MySQL (GET /api/detection-logs)
+export interface DetectionLog {
+  log_id: number;
+  tid: string;
+  fid: string;
+  lacis_id: string | null;
+  captured_at: string;
+  primary_event: string;
+  detected: boolean;
+  severity: number;
+  confidence: number;
+  count_hint: number;
+  tags: string[];
+  unknown_flag: boolean;
+  bboxes: BoundingBox[] | null;
+  person_details: PersonDetail[] | null;
+  suspicious: SuspiciousInfo | null;
+  frame_diff: FrameDiff | null;
+  preset_id: string | null;
+  preset_version: string | null;
+  camera_context: CameraContext | null;
+  image_path: string | null;
+  image_size_bytes: number | null;
+  processing_ms: number | null;
+  synced_to_bq: boolean;
+  created_at: string;
+}
+
+// Bounding box from AI analysis
+export interface BoundingBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  confidence: number;
+}
+
+// Person attribute details
+export interface PersonDetail {
+  gender: string | null;
+  age_group: string | null;
+  clothing_color: string | null;
+  posture: string | null;
+}
+
+// Suspicious behavior info
+export interface SuspiciousInfo {
+  score: number;
+  reasons: string[];
+}
+
+// Frame diff analysis
+export interface FrameDiff {
+  has_change: boolean;
+  change_percent: number;
+  motion_regions: number;
+}
+
+// Camera context for AI analysis
+export interface CameraContext {
+  location?: string;
+  purpose?: string;
+  normal_occupancy?: string;
+  time_context?: string;
+  previous_frame?: PreviousFrameInfo;
+}
+
+// Previous frame info for diff analysis
+export interface PreviousFrameInfo {
+  captured_at: string;
+  primary_event: string;
+  count_hint: number;
+  severity: number;
+}
+
+// Detection log statistics
+export interface DetectionLogStats {
+  total_logs: number;
+  detected_count: number;
+  detection_rate: number;
+  by_severity: Record<string, number>;
+  by_event_type: Record<string, number>;
+  pending_bq_sync: number;
+  last_detection_at: string | null;
+}
+
+// Patrol feedback item (for UI "動いてる安心感")
+export interface PatrolFeedback {
+  camera_id: string;
+  camera_name: string;
+  timestamp: string;
+  primary_event: string | null;
+  severity: number | null;
+  is_detection: boolean;
+}

@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react"
-import type { Camera, SystemStatus, Event } from "@/types/api"
+import type { Camera, SystemStatus, DetectionLog } from "@/types/api"
 import { CameraGrid } from "@/components/CameraGrid"
 import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage } from "@/hooks/useWebSocket"
 import { SuggestPane } from "@/components/SuggestPane"
@@ -7,6 +7,7 @@ import { EventLogPane } from "@/components/EventLogPane"
 import { ScanModal } from "@/components/ScanModal"
 import { CameraDetailModal } from "@/components/CameraDetailModal"
 import { useApi } from "@/hooks/useApi"
+import { useEventLogStore } from "@/stores/eventLogStore"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -50,26 +51,39 @@ function App() {
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null)
   const [cameraDetailOpen, setCameraDetailOpen] = useState(false)
   const [scanModalOpen, setScanModalOpen] = useState(false)
-  // Real-time events from WebSocket (for AI Event Log)
-  const [_realtimeEvents, setRealtimeEvents] = useState<EventLogMessage[]>([])
   // Per-camera snapshot timestamps (from WebSocket notifications)
   // Key: camera_id, Value: Unix timestamp (ms)
   const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>({})
 
+  // Event log store for patrol feedback
+  const { addPatrolFeedback, logs: detectionLogs } = useEventLogStore()
+
+  // Camera list (needed for patrol feedback camera names)
+  const { data: cameras, loading: camerasLoading, refetch: refetchCameras } = useApi<Camera[]>(
+    "/api/cameras",
+    30000
+  )
+
   // Handle real-time event log updates from WebSocket
-  const handleEventLog = useCallback((msg: EventLogMessage) => {
-    setRealtimeEvents((prev) => [msg, ...prev].slice(0, 100))
-    // TODO: Integrate with EventLogPane for real-time updates
+  const handleEventLog = useCallback((_msg: EventLogMessage) => {
+    // Detection events are persisted to MySQL and fetched via API
+    // This handler can be used for additional real-time UI updates if needed
   }, [])
 
   // Handle snapshot update notifications from WebSocket
   // Each camera is notified individually when its snapshot is updated
   const handleSnapshotUpdated = useCallback((msg: SnapshotUpdatedMessage) => {
+    // Update snapshot timestamp for CameraGrid
     setSnapshotTimestamps((prev) => ({
       ...prev,
       [msg.camera_id]: Date.now(),
     }))
-  }, [])
+
+    // Add to patrol feedback for "動いてる安心感"
+    if (cameras) {
+      addPatrolFeedback(msg, cameras)
+    }
+  }, [cameras, addPatrolFeedback])
 
   // WebSocket connection for real-time notifications
   const { connected: wsConnected } = useWebSocket({
@@ -77,36 +91,28 @@ function App() {
     onSnapshotUpdated: handleSnapshotUpdated,
   })
 
-  const { data: cameras, loading: camerasLoading, refetch: refetchCameras } = useApi<Camera[]>(
-    "/api/cameras",
-    30000
-  )
-
   const { data: systemStatus } = useApi<SystemStatus>(
     "/api/system/status",
     5000
   )
 
-  // Mock events for now - will be replaced with WebSocket
-  const { data: events } = useApi<Event[]>(
-    "/api/events?limit=100",
-    10000
-  )
-
-  // Get the most recent event for suggest pane
+  // Get the most recent detection for suggest pane (from store)
   const currentEvent = useMemo(() => {
-    if (!events || events.length === 0) return null
-    // Find the most recent event with severity > 0
-    const significantEvent = events.find(e => e.severity > 0)
-    return significantEvent || events[0]
-  }, [events])
+    if (detectionLogs.length === 0) return null
+    // Find the most recent detection with severity > 0
+    const significantEvent = detectionLogs.find(e => e.severity > 0)
+    return significantEvent || detectionLogs[0]
+  }, [detectionLogs])
 
-  // Get camera name for suggest pane
-  const suggestCameraName = useMemo(() => {
+  // Get camera info for suggest pane
+  const suggestCamera = useMemo(() => {
     if (!currentEvent || !cameras) return undefined
-    const camera = cameras.find(c => c.camera_id === currentEvent.camera_id)
-    return camera?.name
+    // Find by lacis_id since that's what detection logs use
+    return cameras.find(c => c.lacis_id === currentEvent.lacis_id)
   }, [currentEvent, cameras])
+
+  const suggestCameraName = suggestCamera?.name
+  const suggestCameraId = suggestCamera?.camera_id
 
   // Camera card click - for future video modal playback
   const handleCameraClick = useCallback((camera: Camera) => {
@@ -133,9 +139,10 @@ function App() {
     setCameraDetailOpen(false)
   }, [refetchCameras])
 
-  const handleEventClick = useCallback((event: Event) => {
+  // Handle detection log click - find camera by lacis_id
+  const handleLogClick = useCallback((log: DetectionLog) => {
     if (!cameras) return
-    const camera = cameras.find(c => c.camera_id === event.camera_id)
+    const camera = cameras.find(c => c.lacis_id === log.lacis_id)
     if (camera) {
       setSelectedCamera(camera)
       setCameraDetailOpen(true)
@@ -192,6 +199,7 @@ function App() {
           <SuggestPane
             currentEvent={currentEvent}
             cameraName={suggestCameraName}
+            cameraId={suggestCameraId}
           />
         </aside>
 
@@ -221,8 +229,8 @@ function App() {
         {/* Right Pane - Event Log (25%) */}
         <aside className="w-[25%] min-w-[280px] max-w-[360px] border-l bg-card overflow-hidden">
           <EventLogPane
-            events={events || []}
-            onEventClick={handleEventClick}
+            cameras={cameras || []}
+            onLogClick={handleLogClick}
           />
         </aside>
       </div>

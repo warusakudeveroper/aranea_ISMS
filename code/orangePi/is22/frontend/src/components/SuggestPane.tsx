@@ -1,12 +1,13 @@
-import type { Event } from "@/types/api"
+import type { DetectionLog } from "@/types/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Video, AlertCircle } from "lucide-react"
 import { API_BASE_URL } from "@/lib/config"
 
 interface SuggestPaneProps {
-  currentEvent: Event | null
+  currentEvent: DetectionLog | null
   cameraName?: string
+  cameraId?: string
 }
 
 function getSeverityVariant(severity: number): "severity0" | "severity1" | "severity2" | "severity3" {
@@ -27,7 +28,7 @@ function getSeverityLabel(severity: number, primaryEvent: string): string {
   return "Alert"
 }
 
-export function SuggestPane({ currentEvent, cameraName }: SuggestPaneProps) {
+export function SuggestPane({ currentEvent, cameraName, cameraId }: SuggestPaneProps) {
   if (!currentEvent) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-4">
@@ -39,6 +40,7 @@ export function SuggestPane({ currentEvent, cameraName }: SuggestPaneProps) {
   }
 
   const severityVariant = getSeverityVariant(currentEvent.severity)
+  const displayCameraId = cameraId || currentEvent.lacis_id || 'unknown'
 
   return (
     <div className="h-full flex flex-col p-2">
@@ -57,15 +59,21 @@ export function SuggestPane({ currentEvent, cameraName }: SuggestPaneProps) {
         <CardContent className="flex-1 flex flex-col gap-2 overflow-hidden">
           {/* Camera snapshot/video area */}
           <div className="flex-1 bg-muted rounded overflow-hidden relative min-h-0">
-            <img
-              src={`${API_BASE_URL}/api/streams/${currentEvent.camera_id}/snapshot`}
-              alt={cameraName || currentEvent.camera_id}
-              className="h-full w-full object-contain"
-            />
+            {cameraId ? (
+              <img
+                src={`${API_BASE_URL}/api/snapshots/${cameraId}/latest.jpg`}
+                alt={cameraName || displayCameraId}
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <div className="h-full w-full flex items-center justify-center">
+                <Video className="h-12 w-12 text-muted-foreground/50" />
+              </div>
+            )}
             {/* Event overlay */}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3">
               <p className="text-white text-sm font-medium truncate">
-                {cameraName || currentEvent.camera_id}
+                {cameraName || displayCameraId}
               </p>
               <p className="text-white/80 text-xs">
                 {currentEvent.primary_event}
@@ -79,7 +87,7 @@ export function SuggestPane({ currentEvent, cameraName }: SuggestPaneProps) {
               <span className="text-muted-foreground">Captured:</span>
               <span>{new Date(currentEvent.captured_at).toLocaleTimeString()}</span>
             </div>
-            {currentEvent.tags.length > 0 && (
+            {currentEvent.tags && currentEvent.tags.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {currentEvent.tags.slice(0, 3).map((tag, i) => (
                   <Badge key={i} variant="outline" className="text-xs py-0">
