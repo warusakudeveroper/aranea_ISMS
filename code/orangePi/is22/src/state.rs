@@ -5,8 +5,11 @@
 use crate::admission_controller::AdmissionController;
 use crate::ai_client::AIClient;
 use crate::config_store::ConfigStore;
+use crate::detection_log_service::DetectionLogService;
 use crate::event_log_service::EventLogService;
 use crate::ipcam_scan::IpcamScan;
+use crate::prev_frame_cache::PrevFrameCache;
+use crate::preset_loader::PresetLoader;
 use crate::realtime_hub::RealtimeHub;
 use crate::snapshot_service::SnapshotService;
 use crate::stream_gateway::StreamGateway;
@@ -73,8 +76,14 @@ pub struct AppState {
     pub admission: Arc<AdmissionController>,
     /// AIClient (IS21 adapter)
     pub ai_client: Arc<AIClient>,
-    /// EventLogService
+    /// EventLogService (legacy in-memory ring buffer)
     pub event_log: Arc<EventLogService>,
+    /// DetectionLogService (MySQL persistence for AI Event Log)
+    pub detection_log: Arc<DetectionLogService>,
+    /// PrevFrameCache (frame diff support)
+    pub prev_frame_cache: Arc<PrevFrameCache>,
+    /// PresetLoader (AI analysis presets)
+    pub preset_loader: Arc<PresetLoader>,
     /// SuggestEngine
     pub suggest: Arc<SuggestEngine>,
     /// StreamGateway (go2rtc adapter)

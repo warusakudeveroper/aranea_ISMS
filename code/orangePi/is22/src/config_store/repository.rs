@@ -29,6 +29,7 @@ impl ConfigRepository {
         family, manufacturer, model, ip_address, mac_address, lacis_id, cic,
         enabled, polling_enabled, polling_interval_sec, suggest_policy_weight,
         camera_context, rotation, fid, tid, sort_order,
+        preset_id, preset_version, ai_enabled, ai_interval_sec,
         serial_number, hardware_id, firmware_version, onvif_endpoint,
         rtsp_port, http_port, onvif_port,
         resolution_main, codec_main, fps_main, bitrate_main,
@@ -162,6 +163,8 @@ impl ConfigRepository {
         if req.cic.is_some() { set_clauses.push("cic = ?".to_string()); }
         if req.fid.is_some() { set_clauses.push("fid = ?".to_string()); }
         if req.tid.is_some() { set_clauses.push("tid = ?".to_string()); }
+        if req.preset_id.is_some() { set_clauses.push("preset_id = ?".to_string()); }
+        if req.preset_version.is_some() { set_clauses.push("preset_version = ?".to_string()); }
         if req.serial_number.is_some() { set_clauses.push("serial_number = ?".to_string()); }
         if req.hardware_id.is_some() { set_clauses.push("hardware_id = ?".to_string()); }
         if req.firmware_version.is_some() { set_clauses.push("firmware_version = ?".to_string()); }
@@ -176,6 +179,7 @@ impl ConfigRepository {
         // Boolean fields
         if req.enabled.is_some() { set_clauses.push("enabled = ?".to_string()); }
         if req.polling_enabled.is_some() { set_clauses.push("polling_enabled = ?".to_string()); }
+        if req.ai_enabled.is_some() { set_clauses.push("ai_enabled = ?".to_string()); }
         if req.ptz_supported.is_some() { set_clauses.push("ptz_supported = ?".to_string()); }
         if req.ptz_continuous.is_some() { set_clauses.push("ptz_continuous = ?".to_string()); }
         if req.ptz_absolute.is_some() { set_clauses.push("ptz_absolute = ?".to_string()); }
@@ -187,6 +191,7 @@ impl ConfigRepository {
         // Integer fields
         if req.polling_interval_sec.is_some() { set_clauses.push("polling_interval_sec = ?".to_string()); }
         if req.suggest_policy_weight.is_some() { set_clauses.push("suggest_policy_weight = ?".to_string()); }
+        if req.ai_interval_sec.is_some() { set_clauses.push("ai_interval_sec = ?".to_string()); }
         if req.rotation.is_some() { set_clauses.push("rotation = ?".to_string()); }
         if req.sort_order.is_some() { set_clauses.push("sort_order = ?".to_string()); }
         if req.rtsp_port.is_some() { set_clauses.push("rtsp_port = ?".to_string()); }
@@ -241,6 +246,8 @@ impl ConfigRepository {
         if let Some(ref v) = req.cic { q = q.bind(v); }
         if let Some(ref v) = req.fid { q = q.bind(v); }
         if let Some(ref v) = req.tid { q = q.bind(v); }
+        if let Some(ref v) = req.preset_id { q = q.bind(v); }
+        if let Some(ref v) = req.preset_version { q = q.bind(v); }
         if let Some(ref v) = req.serial_number { q = q.bind(v); }
         if let Some(ref v) = req.hardware_id { q = q.bind(v); }
         if let Some(ref v) = req.firmware_version { q = q.bind(v); }
@@ -255,6 +262,7 @@ impl ConfigRepository {
         // Boolean fields
         if let Some(v) = req.enabled { q = q.bind(v); }
         if let Some(v) = req.polling_enabled { q = q.bind(v); }
+        if let Some(v) = req.ai_enabled { q = q.bind(v); }
         if let Some(v) = req.ptz_supported { q = q.bind(v); }
         if let Some(v) = req.ptz_continuous { q = q.bind(v); }
         if let Some(v) = req.ptz_absolute { q = q.bind(v); }
@@ -266,6 +274,7 @@ impl ConfigRepository {
         // Integer fields
         if let Some(v) = req.polling_interval_sec { q = q.bind(v); }
         if let Some(v) = req.suggest_policy_weight { q = q.bind(v); }
+        if let Some(v) = req.ai_interval_sec { q = q.bind(v); }
         if let Some(v) = req.rotation { q = q.bind(v); }
         if let Some(v) = req.sort_order { q = q.bind(v); }
         if let Some(v) = req.rtsp_port { q = q.bind(v); }

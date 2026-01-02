@@ -449,7 +449,7 @@ impl DetectionLogService {
             SELECT
                 log_id, tid, fid, camera_id, lacis_id,
                 captured_at, analyzed_at,
-                primary_event, severity, confidence, count_hint, unknown_flag,
+                primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
@@ -477,7 +477,7 @@ impl DetectionLogService {
             SELECT
                 log_id, tid, fid, camera_id, lacis_id,
                 captured_at, analyzed_at,
-                primary_event, severity, confidence, count_hint, unknown_flag,
+                primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
@@ -512,7 +512,7 @@ impl DetectionLogService {
             SELECT
                 log_id, tid, fid, camera_id, lacis_id,
                 captured_at, analyzed_at,
-                primary_event, severity, confidence, count_hint, unknown_flag,
+                primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
@@ -543,7 +543,7 @@ impl DetectionLogService {
             SELECT
                 log_id, tid, fid, camera_id, lacis_id,
                 captured_at, analyzed_at,
-                primary_event, severity, confidence, count_hint, unknown_flag,
+                primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
@@ -606,7 +606,7 @@ impl DetectionLogService {
         let created_at: chrono::NaiveDateTime = row.try_get("created_at")?;
         let synced_at: Option<chrono::NaiveDateTime> = row.try_get("synced_at")?;
 
-        // Get confidence as f64 first, then convert
+        // Get confidence as f64 (CAST from DECIMAL in SQL query)
         let confidence: f64 = row.try_get("confidence")?;
 
         Ok(DetectionLog {

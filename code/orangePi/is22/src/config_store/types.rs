@@ -38,6 +38,11 @@ pub struct Camera {
     pub fid: Option<String>,
     pub tid: Option<String>,
     pub sort_order: i32,
+    // === AI分析設定（migration 009） ===
+    pub preset_id: Option<String>,
+    pub preset_version: Option<String>,
+    pub ai_enabled: bool,
+    pub ai_interval_sec: i32,
     // === ONVIF デバイス情報 ===
     pub serial_number: Option<String>,
     pub hardware_id: Option<String>,
@@ -191,6 +196,11 @@ pub struct UpdateCameraRequest {
     // === 所属情報 ===
     pub fid: Option<String>,
     pub tid: Option<String>,
+    // === AI分析設定 ===
+    pub preset_id: Option<String>,
+    pub preset_version: Option<String>,
+    pub ai_enabled: Option<bool>,
+    pub ai_interval_sec: Option<i32>,
     // === ONVIF デバイス情報 ===
     pub serial_number: Option<String>,
     pub hardware_id: Option<String>,

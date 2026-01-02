@@ -42,8 +42,13 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/suggest", get(get_suggest))
         .route("/api/suggest/manual", post(set_manual_suggest))
         .route("/api/suggest", delete(clear_suggest))
-        // Events
+        // Events (legacy in-memory)
         .route("/api/events", get(list_events))
+        // Detection Logs (AI Event Log - MySQL persistence)
+        .route("/api/detection-logs", get(list_detection_logs))
+        .route("/api/detection-logs/stats", get(detection_log_stats))
+        .route("/api/detection-logs/camera/:camera_id", get(detection_logs_by_camera))
+        .route("/api/detection-logs/severity/:threshold", get(detection_logs_by_severity))
         // System
         .route("/api/system/status", get(system_status))
         // IpcamScan
@@ -412,6 +417,177 @@ async fn list_events(
     };
 
     Json(ApiResponse::success(events))
+}
+
+// ========================================
+// Detection Log Handlers (AI Event Log)
+// ========================================
+
+/// Query parameters for detection logs
+#[derive(Deserialize)]
+struct DetectionLogQuery {
+    limit: Option<u32>,
+    camera_id: Option<String>,
+    severity_min: Option<i32>,
+    start: Option<String>,  // ISO8601 datetime
+    end: Option<String>,    // ISO8601 datetime
+}
+
+/// List detection logs with filtering
+async fn list_detection_logs(
+    State(state): State<AppState>,
+    Query(query): Query<DetectionLogQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(100);
+
+    // Time range filter
+    if let (Some(start_str), Some(end_str)) = (&query.start, &query.end) {
+        let start = match chrono::DateTime::parse_from_rfc3339(start_str) {
+            Ok(dt) => dt.with_timezone(&chrono::Utc),
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid start datetime format"}))).into_response(),
+        };
+        let end = match chrono::DateTime::parse_from_rfc3339(end_str) {
+            Ok(dt) => dt.with_timezone(&chrono::Utc),
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid end datetime format"}))).into_response(),
+        };
+
+        match state.detection_log.get_by_time_range(start, end, limit).await {
+            Ok(logs) => return Json(ApiResponse::success(serde_json::json!({
+                "logs": logs,
+                "total": logs.len(),
+                "filter": {
+                    "start": start_str,
+                    "end": end_str,
+                    "limit": limit
+                }
+            }))).into_response(),
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        }
+    }
+
+    // Camera filter
+    if let Some(camera_id) = &query.camera_id {
+        match state.detection_log.get_by_camera(camera_id, limit).await {
+            Ok(logs) => return Json(ApiResponse::success(serde_json::json!({
+                "logs": logs,
+                "total": logs.len(),
+                "filter": {
+                    "camera_id": camera_id,
+                    "limit": limit
+                }
+            }))).into_response(),
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        }
+    }
+
+    // Severity filter
+    if let Some(threshold) = query.severity_min {
+        match state.detection_log.get_high_severity(threshold, limit).await {
+            Ok(logs) => return Json(ApiResponse::success(serde_json::json!({
+                "logs": logs,
+                "total": logs.len(),
+                "filter": {
+                    "severity_min": threshold,
+                    "limit": limit
+                }
+            }))).into_response(),
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        }
+    }
+
+    // Default: latest logs
+    match state.detection_log.get_latest(limit).await {
+        Ok(logs) => Json(ApiResponse::success(serde_json::json!({
+            "logs": logs,
+            "total": logs.len(),
+            "filter": {
+                "limit": limit
+            }
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// Get detection log statistics
+async fn detection_log_stats(State(state): State<AppState>) -> impl IntoResponse {
+    let stats = state.detection_log.get_stats().await;
+
+    // Get count from database
+    let count_result: Result<i64, sqlx::Error> = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM detection_logs"
+    )
+    .fetch_one(&state.pool)
+    .await;
+
+    let total_logs = count_result.unwrap_or(0);
+
+    // Get today's count
+    let today_result: Result<i64, sqlx::Error> = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM detection_logs WHERE DATE(captured_at) = CURDATE()"
+    )
+    .fetch_one(&state.pool)
+    .await;
+
+    let today_logs = today_result.unwrap_or(0);
+
+    // Get pending BQ sync count
+    let pending_bq: Result<i64, sqlx::Error> = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bq_sync_queue WHERE status = 'pending'"
+    )
+    .fetch_one(&state.pool)
+    .await;
+
+    let pending_bq_sync = pending_bq.unwrap_or(0);
+
+    Json(ApiResponse::success(serde_json::json!({
+        "service_stats": {
+            "logs_saved": stats.logs_saved,
+            "bq_queued": stats.bq_queued,
+            "images_saved": stats.images_saved,
+            "errors": stats.errors,
+        },
+        "database": {
+            "total_logs": total_logs,
+            "today_logs": today_logs,
+            "pending_bq_sync": pending_bq_sync,
+        }
+    })))
+}
+
+/// Get detection logs by camera
+async fn detection_logs_by_camera(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    Query(query): Query<EventQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(100) as u32;
+
+    match state.detection_log.get_by_camera(&camera_id, limit).await {
+        Ok(logs) => Json(ApiResponse::success(serde_json::json!({
+            "camera_id": camera_id,
+            "logs": logs,
+            "total": logs.len(),
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// Get detection logs by severity threshold
+async fn detection_logs_by_severity(
+    State(state): State<AppState>,
+    Path(threshold): Path<i32>,
+    Query(query): Query<EventQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(100) as u32;
+
+    match state.detection_log.get_high_severity(threshold, limit).await {
+        Ok(logs) => Json(ApiResponse::success(serde_json::json!({
+            "severity_threshold": threshold,
+            "logs": logs,
+            "total": logs.len(),
+        }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
 }
 
 // ========================================

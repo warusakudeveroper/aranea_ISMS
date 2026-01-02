@@ -6,9 +6,12 @@ use is22_camserver::{
     admission_controller::AdmissionController,
     ai_client::AIClient,
     config_store::ConfigStore,
+    detection_log_service::DetectionLogService,
     event_log_service::EventLogService,
     ipcam_scan::IpcamScan,
     polling_orchestrator::PollingOrchestrator,
+    prev_frame_cache::PrevFrameCache,
+    preset_loader::PresetLoader,
     realtime_hub::RealtimeHub,
     snapshot_service::SnapshotService,
     stream_gateway::StreamGateway,
@@ -79,6 +82,12 @@ async fn main() -> anyhow::Result<()> {
     let event_log = Arc::new(EventLogService::new(2000));
     let realtime = Arc::new(RealtimeHub::new());
 
+    // AI Event Log components
+    let detection_log = Arc::new(DetectionLogService::with_pool(pool.clone()));
+    let prev_frame_cache = Arc::new(PrevFrameCache::with_defaults());
+    let preset_loader = Arc::new(PresetLoader::new());
+    tracing::info!("AI Event Log components initialized (DetectionLogService, PrevFrameCache, PresetLoader)");
+
     let suggest_policy = config_store.service().get_suggest_policy().await?;
     let suggest = Arc::new(SuggestEngine::new(suggest_policy));
 
@@ -98,16 +107,27 @@ async fn main() -> anyhow::Result<()> {
     let ipcam_scan = Arc::new(IpcamScan::new(pool.clone()));
     tracing::info!("IpcamScan initialized with DB persistence");
 
-    // Create polling orchestrator
+    // Get default TID/FID from environment or use defaults
+    let default_tid = std::env::var("DEFAULT_TID")
+        .unwrap_or_else(|_| "T0000000000000000000".to_string());
+    let default_fid = std::env::var("DEFAULT_FID")
+        .unwrap_or_else(|_| "0000".to_string());
+
+    // Create polling orchestrator with AI Event Log pipeline
     let polling = Arc::new(PollingOrchestrator::new(
         config_store.clone(),
         snapshot_service.clone(),
         ai_client.clone(),
         event_log.clone(),
+        detection_log.clone(),
+        prev_frame_cache.clone(),
+        preset_loader.clone(),
         suggest.clone(),
         realtime.clone(),
+        default_tid,
+        default_fid,
     ));
-    tracing::info!("PollingOrchestrator initialized");
+    tracing::info!("PollingOrchestrator initialized with AI Event Log pipeline");
 
     // Create application state
     let state = AppState {
@@ -117,6 +137,9 @@ async fn main() -> anyhow::Result<()> {
         admission,
         ai_client,
         event_log,
+        detection_log,
+        prev_frame_cache,
+        preset_loader,
         suggest,
         stream,
         realtime,
