@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react"
 import type { Camera, SystemStatus, Event } from "@/types/api"
 import { CameraGrid } from "@/components/CameraGrid"
+import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage } from "@/hooks/useWebSocket"
 import { SuggestPane } from "@/components/SuggestPane"
 import { EventLogPane } from "@/components/EventLogPane"
 import { ScanModal } from "@/components/ScanModal"
@@ -16,6 +17,8 @@ import {
   Video,
   RefreshCw,
   Search,
+  Wifi,
+  WifiOff,
 } from "lucide-react"
 
 // Blank card component for empty state (IS22_UI_DETAILED_SPEC Section 2.2)
@@ -47,6 +50,32 @@ function App() {
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null)
   const [cameraDetailOpen, setCameraDetailOpen] = useState(false)
   const [scanModalOpen, setScanModalOpen] = useState(false)
+  // Real-time events from WebSocket (for AI Event Log)
+  const [_realtimeEvents, setRealtimeEvents] = useState<EventLogMessage[]>([])
+  // Per-camera snapshot timestamps (from WebSocket notifications)
+  // Key: camera_id, Value: Unix timestamp (ms)
+  const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>({})
+
+  // Handle real-time event log updates from WebSocket
+  const handleEventLog = useCallback((msg: EventLogMessage) => {
+    setRealtimeEvents((prev) => [msg, ...prev].slice(0, 100))
+    // TODO: Integrate with EventLogPane for real-time updates
+  }, [])
+
+  // Handle snapshot update notifications from WebSocket
+  // Each camera is notified individually when its snapshot is updated
+  const handleSnapshotUpdated = useCallback((msg: SnapshotUpdatedMessage) => {
+    setSnapshotTimestamps((prev) => ({
+      ...prev,
+      [msg.camera_id]: Date.now(),
+    }))
+  }, [])
+
+  // WebSocket connection for real-time notifications
+  const { connected: wsConnected } = useWebSocket({
+    onEventLog: handleEventLog,
+    onSnapshotUpdated: handleSnapshotUpdated,
+  })
 
   const { data: cameras, loading: camerasLoading, refetch: refetchCameras } = useApi<Camera[]>(
     "/api/cameras",
@@ -123,6 +152,20 @@ function App() {
           <Badge variant="outline" className="text-xs">mAcT</Badge>
         </div>
         <div className="flex items-center gap-4">
+          {/* WebSocket connection status */}
+          <div className="flex items-center gap-1 text-sm">
+            {wsConnected ? (
+              <>
+                <Wifi className="h-4 w-4 text-green-500" />
+                <span className="text-green-500 text-xs">LIVE</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground text-xs">Offline</span>
+              </>
+            )}
+          </div>
           {systemStatus && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Activity className="h-4 w-4" />
@@ -164,6 +207,11 @@ function App() {
               onCameraClick={handleCameraClick}
               onSettingsClick={handleSettingsClick}
               onAddClick={() => setScanModalOpen(true)}
+              snapshotTimestamps={snapshotTimestamps}
+              fallbackPollingEnabled={!wsConnected}
+              fallbackPollingIntervalMs={30000}
+              animationEnabled={true}
+              animationStyle="slide-down"
             />
           ) : (
             <BlankCard onScanClick={() => setScanModalOpen(true)} />

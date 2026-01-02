@@ -2,3 +2,8 @@
 export const API_BASE_URL = import.meta.env.DEV
   ? "" // In dev mode, Vite proxy handles /api/*
   : "http://192.168.125.246:8080"
+
+// WebSocket URL
+export const WS_BASE_URL = import.meta.env.DEV
+  ? `ws://${window.location.host}`
+  : "ws://192.168.125.246:8080"

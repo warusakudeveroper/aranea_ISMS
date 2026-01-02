@@ -11,7 +11,7 @@ use crate::config_store::{Camera, ConfigStore, PollingPolicy};
 use crate::event_log_service::{DetectionEvent, EventLogService};
 use crate::snapshot_service::SnapshotService;
 use crate::suggest_engine::SuggestEngine;
-use crate::realtime_hub::{EventLogMessage, HubMessage, RealtimeHub};
+use crate::realtime_hub::{EventLogMessage, HubMessage, RealtimeHub, SnapshotUpdatedMessage};
 use chrono::Utc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,6 +129,14 @@ impl PollingOrchestrator {
     }
 
     /// Poll a single camera
+    ///
+    /// Flow:
+    /// 1. Capture snapshot via ffmpeg (RTSP direct)
+    /// 2. Save to cache for display
+    /// 3. Get previous image for IS21 diff detection
+    /// 4. Send to IS21
+    /// 5. Save current as prev for next iteration
+    /// 6. If detected: save event image, notify EventLog
     async fn poll_camera(
         camera: &Camera,
         snapshot_service: &SnapshotService,
@@ -138,8 +146,14 @@ impl PollingOrchestrator {
         realtime_hub: &RealtimeHub,
         config_store: &ConfigStore,
     ) -> crate::error::Result<()> {
-        // Capture snapshot
+        // 1. Capture snapshot via ffmpeg
         let image_data = snapshot_service.capture(camera).await?;
+
+        // 2. Save to cache for CameraGrid display
+        snapshot_service.save_cache(&camera.camera_id, &image_data).await?;
+
+        // 3. Get previous image for diff detection (optional, may not exist)
+        let _prev_image = snapshot_service.get_prev_image(&camera.camera_id).await?;
 
         // Get schema version
         let schema_version = config_store
@@ -147,7 +161,9 @@ impl PollingOrchestrator {
             .await
             .unwrap_or_else(|| "2025-12-29.1".to_string());
 
-        // Send to AI
+        // 4. Send to IS21
+        // TODO: Send both prev_image and current image for diff detection
+        // Currently sending only current image
         let request = InferRequest {
             camera_id: camera.camera_id.clone(),
             schema_version,
@@ -155,9 +171,22 @@ impl PollingOrchestrator {
             hints: camera.camera_context.clone(),
         };
 
-        let result = ai_client.infer(image_data, request).await?;
+        let result = ai_client.infer(image_data.clone(), request).await?;
 
-        // Only log if detection occurred
+        // 5. Save current as prev for next iteration
+        snapshot_service.save_as_prev(&camera.camera_id, &image_data).await?;
+
+        // 6. Broadcast snapshot update notification (triggers CameraGrid to refresh this camera)
+        realtime_hub
+            .broadcast(HubMessage::SnapshotUpdated(SnapshotUpdatedMessage {
+                camera_id: camera.camera_id.clone(),
+                timestamp: Utc::now().to_rfc3339(),
+                primary_event: Some(result.primary_event.clone()),
+                severity: Some(result.severity),
+            }))
+            .await;
+
+        // 7. Only process event log if detection occurred
         if result.detected {
             // Convert bboxes to attributes JSON
             let attributes = if !result.bboxes.is_empty() {
@@ -195,7 +224,7 @@ impl PollingOrchestrator {
                 .process_event(&event, camera.suggest_policy_weight)
                 .await;
 
-            // Broadcast to clients
+            // Broadcast detection event to AI Event Log (WebSocket)
             realtime_hub
                 .broadcast(HubMessage::EventLog(EventLogMessage {
                     event_id,
@@ -213,6 +242,9 @@ impl PollingOrchestrator {
                 severity = event.severity,
                 "Detection event recorded"
             );
+
+            // TODO: Save event image to /var/lib/is22/events/{camera_id}/{timestamp}.jpg
+            // TODO: Upload to Google Drive (future)
         }
 
         Ok(())

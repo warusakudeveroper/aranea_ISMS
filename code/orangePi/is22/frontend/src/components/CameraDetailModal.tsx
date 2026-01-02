@@ -262,15 +262,17 @@ export function CameraDetailModal({
                 transition: "transform 0.3s ease",
               }}
             >
-              {camera.snapshot_url ? (
-                <img
-                  src={camera.snapshot_url}
-                  alt={camera.name}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <CameraIcon className="h-16 w-16 text-muted-foreground" />
-              )}
+              <img
+                src={`${API_BASE_URL}/api/snapshots/${camera.camera_id}/latest.jpg?t=${Date.now()}`}
+                alt={camera.name}
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  // Hide broken image, show placeholder
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+              {/* Fallback icon shown when image fails to load */}
+              <CameraIcon className="absolute h-16 w-16 text-muted-foreground pointer-events-none" />
             </div>
             <div className="mt-2 flex items-center justify-center gap-2">
               <span className="text-sm text-muted-foreground">回転:</span>

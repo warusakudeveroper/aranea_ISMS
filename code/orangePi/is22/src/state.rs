@@ -8,9 +8,11 @@ use crate::config_store::ConfigStore;
 use crate::event_log_service::EventLogService;
 use crate::ipcam_scan::IpcamScan;
 use crate::realtime_hub::RealtimeHub;
+use crate::snapshot_service::SnapshotService;
 use crate::stream_gateway::StreamGateway;
 use crate::suggest_engine::SuggestEngine;
 use sqlx::MySqlPool;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -27,6 +29,10 @@ pub struct AppConfig {
     pub port: u16,
     /// Server host
     pub host: String,
+    /// Snapshot cache directory (for CameraGrid display)
+    pub snapshot_dir: PathBuf,
+    /// Temporary directory (for prev images for IS21 diff detection)
+    pub temp_dir: PathBuf,
 }
 
 impl Default for AppConfig {
@@ -44,6 +50,12 @@ impl Default for AppConfig {
                 .unwrap_or(8080),
             host: std::env::var("HOST")
                 .unwrap_or_else(|_| "0.0.0.0".to_string()),
+            snapshot_dir: std::env::var("SNAPSHOT_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("/var/lib/is22/snapshots")),
+            temp_dir: std::env::var("TEMP_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("/var/lib/is22/temp")),
         }
     }
 }
@@ -71,6 +83,8 @@ pub struct AppState {
     pub realtime: Arc<RealtimeHub>,
     /// IpcamScan (camera discovery)
     pub ipcam_scan: Arc<IpcamScan>,
+    /// SnapshotService (RTSP -> ffmpeg -> cache)
+    pub snapshot_service: Arc<SnapshotService>,
     /// System health status
     pub system_health: Arc<RwLock<SystemHealth>>,
 }

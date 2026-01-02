@@ -1,12 +1,16 @@
 //! API Routes
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, Query, State,
+    },
     http::StatusCode,
     response::IntoResponse,
     routing::{delete, get, post, put},
     Json, Router,
 };
+use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 
 use crate::admission_controller::{LeaseRequest, LeaseResponse, StreamQuality};
@@ -69,6 +73,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/streams", get(list_streams))
         .route("/api/streams/:camera_id", get(get_stream_urls))
         .route("/api/streams/:camera_id/snapshot", get(get_snapshot))
+        // Snapshots (ffmpeg cached images for CameraGrid)
+        .route("/api/snapshots/:camera_id/latest.jpg", get(get_cached_snapshot))
+        // WebSocket
+        .route("/api/ws", get(websocket_handler))
         .with_state(state)
 }
 
@@ -776,6 +784,53 @@ async fn get_snapshot(
     }
 }
 
+/// Get cached snapshot from SnapshotService (ffmpeg RTSP capture)
+///
+/// This endpoint serves cached images captured by PollingOrchestrator.
+/// CameraGrid should use this endpoint for displaying camera thumbnails.
+async fn get_cached_snapshot(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    let cache_path = state.snapshot_service.get_cache_path(&camera_id);
+
+    match tokio::fs::read(&cache_path).await {
+        Ok(bytes) => {
+            (
+                StatusCode::OK,
+                [
+                    ("content-type", "image/jpeg"),
+                    ("cache-control", "no-cache, no-store, must-revalidate"),
+                ],
+                bytes,
+            ).into_response()
+        }
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Return placeholder or 404
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Snapshot not found",
+                    "camera_id": camera_id,
+                    "hint": "Camera may not have been polled yet"
+                }))
+            ).into_response()
+        }
+        Err(e) => {
+            tracing::error!(
+                camera_id = %camera_id,
+                path = %cache_path.display(),
+                error = %e,
+                "Failed to read cached snapshot"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()}))
+            ).into_response()
+        }
+    }
+}
+
 // ========================================
 // Subnet Management Handlers
 // ========================================
@@ -1292,4 +1347,67 @@ pub async fn get_credentials_for_fid(pool: &sqlx::MySqlPool, fid: &str) -> Resul
         let password = decrypt_password(&c.password_encrypted, &c.encryption_iv);
         (c.username, password)
     }))
+}
+
+// ========================================
+// WebSocket Handler
+// ========================================
+
+/// WebSocket upgrade handler
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_websocket(socket, state))
+}
+
+/// Handle WebSocket connection
+async fn handle_websocket(socket: WebSocket, state: AppState) {
+    let (mut sender, mut receiver) = socket.split();
+
+    // Register with RealtimeHub
+    let user_id = uuid::Uuid::new_v4().to_string();
+    let (conn_id, mut rx) = state.realtime.register(user_id).await;
+
+    tracing::info!(connection_id = %conn_id, "WebSocket client connected");
+
+    // Spawn task to forward messages from hub to WebSocket
+    let send_task = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if sender.send(Message::Text(msg)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Handle incoming messages (for future use - ping/pong, commands, etc.)
+    let recv_task = tokio::spawn(async move {
+        while let Some(result) = receiver.next().await {
+            match result {
+                Ok(Message::Ping(data)) => {
+                    // Pong is handled automatically by axum
+                    tracing::trace!("Received ping: {:?}", data);
+                }
+                Ok(Message::Close(_)) => {
+                    tracing::info!(connection_id = %conn_id, "WebSocket client disconnected");
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!(connection_id = %conn_id, error = %e, "WebSocket error");
+                    break;
+                }
+                _ => {}
+            }
+        }
+        conn_id
+    });
+
+    // Wait for either task to complete
+    let conn_id = tokio::select! {
+        _ = send_task => conn_id,
+        result = recv_task => result.unwrap_or(conn_id),
+    };
+
+    // Unregister from hub
+    state.realtime.unregister(&conn_id).await;
 }

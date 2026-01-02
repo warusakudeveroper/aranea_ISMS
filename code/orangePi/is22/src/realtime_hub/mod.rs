@@ -3,8 +3,12 @@
 //! ## Responsibilities
 //!
 //! - WebSocket connection management
-//! - Event broadcasting
+//! - Event broadcasting (detection events to AI Event Log)
+//! - Snapshot update notifications (triggers CameraGrid to fetch new image)
 //! - Suggest state distribution
+//!
+//! Note: Only snapshot update NOTIFICATIONS are sent via WebSocket (camera_id + timestamp).
+//! Actual image data is fetched via HTTP GET /api/snapshots/{camera_id}/latest.jpg
 
 use crate::suggest_engine::GlobalSuggestState;
 use futures::stream::SplitSink;
@@ -25,6 +29,9 @@ pub enum HubMessage {
     EventLog(EventLogMessage),
     SystemStatus(SystemStatusMessage),
     CameraStatus(CameraStatusMessage),
+    /// Notification that a camera's snapshot has been updated
+    /// Client should fetch new image via HTTP GET
+    SnapshotUpdated(SnapshotUpdatedMessage),
 }
 
 /// Event log message
@@ -52,6 +59,18 @@ pub struct CameraStatusMessage {
     pub camera_id: String,
     pub online: bool,
     pub last_frame_at: Option<String>,
+}
+
+/// Snapshot updated notification
+/// Sent when PollingOrchestrator successfully captures a new frame
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotUpdatedMessage {
+    pub camera_id: String,
+    pub timestamp: String,
+    /// Primary detection event (if IS21 inference was run)
+    pub primary_event: Option<String>,
+    /// Detection severity (0-3)
+    pub severity: Option<i32>,
 }
 
 /// Client connection

@@ -46,6 +46,8 @@ async fn main() -> anyhow::Result<()> {
         database_url = %config.database_url,
         is21_url = %config.is21_url,
         go2rtc_url = %config.go2rtc_url,
+        snapshot_dir = %config.snapshot_dir.display(),
+        temp_dir = %config.temp_dir.display(),
         "Configuration loaded"
     );
 
@@ -80,7 +82,19 @@ async fn main() -> anyhow::Result<()> {
     let suggest_policy = config_store.service().get_suggest_policy().await?;
     let suggest = Arc::new(SuggestEngine::new(suggest_policy));
 
-    let snapshot_service = Arc::new(SnapshotService::new(config.go2rtc_url.clone()));
+    let snapshot_service = Arc::new(
+        SnapshotService::new(
+            config.snapshot_dir.clone(),
+            config.temp_dir.clone(),
+        )
+        .await?
+    );
+    tracing::info!(
+        snapshot_dir = %config.snapshot_dir.display(),
+        temp_dir = %config.temp_dir.display(),
+        "SnapshotService initialized (ffmpeg direct RTSP)"
+    );
+
     let ipcam_scan = Arc::new(IpcamScan::new(pool.clone()));
     tracing::info!("IpcamScan initialized with DB persistence");
 
@@ -107,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
         stream,
         realtime,
         ipcam_scan,
+        snapshot_service,
         system_health,
     };
 
