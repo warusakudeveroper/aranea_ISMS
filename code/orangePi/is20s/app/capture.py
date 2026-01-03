@@ -82,6 +82,8 @@ DEFAULT_WATCH_CONFIG = {
         "exclude_photo_sync": True,    # 写真同期を除外 (iCloud/Google Photos)
         "exclude_os_check": True,      # OS接続チェックを除外 (connectivity check)
         "exclude_ad_tracker": True,    # 広告/計測を除外 (広告SDK、トラッカー)
+        "exclude_dns": True,           # DNSクエリ(port 53)を除外
+        "exclude_background": True,    # バックグラウンド通信を除外 (FCM/GCM, Play Services)
     },
 }
 
@@ -759,6 +761,33 @@ class CaptureManager:
                 "crazyegg", "heap", "moloco", "adsmoloco",
             ]
             for pattern in ad_patterns:
+                if pattern in domain:
+                    return False
+
+        # DNSクエリ(port 53)除外
+        if filter_cfg.get("exclude_dns", True):
+            dst_port = str(event.get("dst_port", ""))
+            if dst_port == "53":
+                return False
+
+        # バックグラウンド通信除外 (FCM/GCM, Play Services, etc.)
+        if filter_cfg.get("exclude_background", True):
+            background_patterns = [
+                "clients.l.google.com", "clients.google.com",
+                "clients1.google.com", "clients2.google.com", "clients3.google.com",
+                "clients4.google.com", "clients5.google.com", "clients6.google.com",
+                "mtalk.google.com",  # FCM/GCM
+                "android.clients.google.com",
+                "play.googleapis.com",  # Google Play
+                "firebaseinstallations.googleapis.com",
+                "fcm.googleapis.com",
+                "update.googleapis.com",
+                "time.google.com", "time.android.com",  # NTP
+                "time.apple.com", "time.windows.com",
+                "gateway.icloud.com",  # iCloud background
+                "init.push.apple.com",  # Apple Push
+            ]
+            for pattern in background_patterns:
                 if pattern in domain:
                     return False
 

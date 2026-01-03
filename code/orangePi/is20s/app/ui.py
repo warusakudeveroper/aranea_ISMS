@@ -251,11 +251,13 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 <details id="filter-dropdown" style="font-size:12px;position:relative">
 <summary style="cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary)">除外フィルタ ▾</summary>
 <div style="position:absolute;top:100%;left:0;z-index:100;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;box-shadow:0 2px 8px rgba(0,0,0,0.15);min-width:160px">
-<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-local" onchange="refreshCaptureEvents()" style="width:auto" checked>ローカル</label>
-<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-ptr" onchange="refreshCaptureEvents()" style="width:auto" checked>PTR</label>
-<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-photo" onchange="refreshCaptureEvents()" style="width:auto" checked>写真同期</label>
-<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-oscheck" onchange="refreshCaptureEvents()" style="width:auto" checked>OS接続</label>
-<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-ad" onchange="refreshCaptureEvents()" style="width:auto" checked>広告/計測</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-local" onchange="updateBackendFilter()" style="width:auto" checked>ローカル</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-ptr" onchange="updateBackendFilter()" style="width:auto" checked>PTR</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-photo" onchange="updateBackendFilter()" style="width:auto" checked>写真同期</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-oscheck" onchange="updateBackendFilter()" style="width:auto" checked>OS接続</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-ad" onchange="updateBackendFilter()" style="width:auto" checked>広告/計測</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-dns" onchange="updateBackendFilter()" style="width:auto" checked>DNS</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-background" onchange="updateBackendFilter()" style="width:auto" checked>バックグラウンド</label>
 <hr style="margin:6px 0;border:0;border-top:1px solid var(--border)">
 <label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-streaming" onchange="refreshCaptureEvents()" style="width:auto">Streaming</label>
 <label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-sns" onchange="refreshCaptureEvents()" style="width:auto">SNS</label>
@@ -779,6 +781,15 @@ async function loadCaptureConfig(){{
     const lines=Object.entries(rooms).map(([ip,room])=>ip+'='+room);
     document.getElementById('cap-rooms-text').value=lines.join('\\n');
     document.getElementById('cap-rooms-status').textContent=Object.keys(rooms).length+' rooms configured';
+    // display_filter チェックボックス初期化
+    const df=capCfg.display_filter||{{}};
+    document.getElementById('cap-filter-local').checked=df.exclude_local_ip!==false;
+    document.getElementById('cap-filter-ptr').checked=df.exclude_ptr!==false;
+    document.getElementById('cap-filter-photo').checked=df.exclude_photo_sync!==false;
+    document.getElementById('cap-filter-oscheck').checked=df.exclude_os_check!==false;
+    document.getElementById('cap-filter-ad').checked=df.exclude_ad_tracker!==false;
+    document.getElementById('cap-filter-dns').checked=df.exclude_dns!==false;
+    document.getElementById('cap-filter-background').checked=df.exclude_background!==false;
   }}catch(e){{console.error('capture config error',e);}}
 }}
 
@@ -918,6 +929,27 @@ function showEventDetail(e){{
   alert(lines.join('\\n'));
 }}
 
+// バックエンドフィルタ設定を更新
+async function updateBackendFilter(){{
+  const displayFilter={{
+    exclude_local_ip:document.getElementById('cap-filter-local').checked,
+    exclude_ptr:document.getElementById('cap-filter-ptr').checked,
+    exclude_photo_sync:document.getElementById('cap-filter-photo').checked,
+    exclude_os_check:document.getElementById('cap-filter-oscheck').checked,
+    exclude_ad_tracker:document.getElementById('cap-filter-ad').checked,
+    exclude_dns:document.getElementById('cap-filter-dns').checked,
+    exclude_background:document.getElementById('cap-filter-background').checked,
+  }};
+  try{{
+    const r=await fetch('/api/capture/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{display_filter:displayFilter}})}});
+    const d=await r.json();
+    if(d.ok){{
+      console.log('Backend filter updated:',displayFilter);
+    }}
+  }}catch(e){{console.error('Failed to update backend filter:',e);}}
+  refreshCaptureEvents();
+}}
+
 async function refreshCaptureEvents(){{
   try{{
     const r=await fetch('/api/capture/events?limit=1000');
@@ -952,68 +984,7 @@ async function refreshCaptureEvents(){{
     const dirFilter=document.getElementById('cap-dir-filter').value;
     if(dirFilter==='up')events=events.filter(e=>e.room_no&&e.room_no!=='UNK');
     if(dirFilter==='down')events=events.filter(e=>!e.room_no||e.room_no==='UNK');
-    // ローカル除外 (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-    if(document.getElementById('cap-filter-local').checked){{
-      events=events.filter(e=>{{
-        const dst=e.dst_ip||'';
-        if(dst.startsWith('192.168.')||dst.startsWith('10.')||dst.startsWith('127.'))return false;
-        if(dst.match(/^172\.(1[6-9]|2[0-9]|3[01])\./))return false;
-        return true;
-      }});
-    }}
-    // PTR除外 (resolved_domainがPTRっぽいもの)
-    if(document.getElementById('cap-filter-ptr').checked){{
-      events=events.filter(e=>{{
-        const rd=e.resolved_domain||'';
-        if(rd.match(/^ec2-|\.compute\.amazonaws\.com|\.compute-1\.amazonaws\.com|\.in-addr\.arpa/))return false;
-        return true;
-      }});
-    }}
-    // 写真同期除外 (iCloud/Google Photos)
-    if(document.getElementById('cap-filter-photo').checked){{
-      events=events.filter(e=>{{
-        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
-        // Google Photos
-        if(domain.includes('googleusercontent.com'))return false;
-        if(domain.includes('photos.google.com'))return false;
-        if(domain.includes('lh3.google.com'))return false;
-        if(domain.includes('lh4.google.com'))return false;
-        if(domain.includes('lh5.google.com'))return false;
-        if(domain.includes('lh6.google.com'))return false;
-        // iCloud Photos
-        if(domain.includes('icloud.com'))return false;
-        if(domain.includes('aaplimg.com'))return false;
-        if(domain.includes('apple-dns.net'))return false;
-        if(domain.includes('mzstatic.com'))return false;
-        return true;
-      }});
-    }}
-    // OS接続チェック除外 (Windows/Android/iOS/Firefox)
-    if(document.getElementById('cap-filter-oscheck').checked){{
-      events=events.filter(e=>{{
-        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
-        // Windows
-        if(domain.includes('msftncsi.com'))return false;
-        if(domain.includes('msftconnecttest.com'))return false;
-        // Android
-        if(domain.includes('connectivitycheck.gstatic.com'))return false;
-        if(domain.includes('connectivitycheck.android.com'))return false;
-        // iOS/macOS
-        if(domain.includes('captive.apple.com'))return false;
-        // Firefox
-        if(domain.includes('detectportal.firefox.com'))return false;
-        return true;
-      }});
-    }}
-    // 広告/計測除外
-    if(document.getElementById('cap-filter-ad').checked){{
-      events=events.filter(e=>{{
-        const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
-        const adPatterns=['googlesyndication','doubleclick','googleadservices','applovin','fivecdm','adtng','adnxs','adsrvr','criteo','bance','taboola','outbrain','pubmatic','rubiconproject','openx','casalemedia','adcolony','chartboost','vungle','ironsrc','fyber','inmobi','mopub','unityads','adjust','appsflyer','branch','amplitude','segment','mixpanel','google-analytics','hotjar','mouseflow','fullstory','crazyegg','heap'];
-        for(const p of adPatterns){{if(domain.includes(p))return false;}}
-        return true;
-      }});
-    }}
+    // 注: ローカル/PTR/写真同期/OS接続/広告計測/DNS/バックグラウンドはバックエンドフィルタで処理済み
     // Streaming除外
     if(document.getElementById('cap-filter-streaming').checked){{
       events=events.filter(e=>{{
