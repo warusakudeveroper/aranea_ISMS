@@ -61,6 +61,22 @@ th{background:var(--bg);font-weight:500;color:var(--text-muted);position:sticky;
 .cap-tbl td,.cap-tbl th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 4px;font-size:12px}
 .cap-tbl td:first-child{overflow:visible}
 .cap-tbl .col-dns,.cap-tbl .col-sni{max-width:100px}
+.stats-chart-container{display:flex;flex-direction:column;gap:8px}
+.stats-bar-row{display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px;border-radius:4px;transition:background .2s}
+.stats-bar-row:hover{background:var(--bg)}
+.stats-bar-label{min-width:60px;font-size:12px;font-weight:500;text-align:right}
+.stats-bar-wrap{flex:1;height:24px;background:var(--bg);border-radius:4px;overflow:hidden;position:relative}
+.stats-bar{height:100%;display:flex;transition:width .6s ease-out;border-radius:4px}
+.stats-bar-segment{height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:500;overflow:hidden;white-space:nowrap;transition:width .6s ease-out}
+.stats-bar-segment:last-child{border-radius:0 4px 4px 0}
+.stats-loading{display:flex;align-items:center;justify-content:center;padding:20px;color:var(--text-muted)}
+.stats-spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.stats-bar-count{min-width:40px;font-size:11px;color:var(--text-muted);text-align:right}
+.stats-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:11px}
+.stats-legend-item{display:flex;align-items:center;gap:4px}
+.stats-legend-color{width:12px;height:12px;border-radius:2px}
+.stats-cat-colors{--cat-streaming:#2563eb;--cat-sns:#7c3aed;--cat-messenger:#0891b2;--cat-ec:#059669;--cat-cloud:#6366f1;--cat-ad:#ea580c;--cat-tracker:#ca8a04;--cat-game:#dc2626;--cat-ai:#8b5cf6;--cat-other:#94a3b8}
 """
 
 # AraneaロゴSVG（共通）
@@ -122,6 +138,7 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 <div class="tab" data-tab="tenant" onclick="showTab('tenant')">Tenant</div>
 <div class="tab" data-tab="system" onclick="showTab('system')">System</div>
 <div class="tab" data-tab="speeddial" onclick="showTab('speeddial')">SpeedDial</div>
+<div class="tab" data-tab="stats" onclick="showTab('stats')">Statistics</div>
 </div>
 
 <!-- Status Tab -->
@@ -529,6 +546,23 @@ gzip=true</pre>
 </div>
 </div>
 
+<!-- Statistics Tab -->
+<div id="tab-stats" class="tab-content">
+<div class="card">
+<div class="card-title">Room別アクセス状況 <span id="stats-room-count" style="color:var(--text-muted);font-weight:normal"></span></div>
+<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">部屋クリックでカテゴリ詳細を表示</p>
+<div id="stats-room-chart" class="stats-chart-container"></div>
+</div>
+<div class="card" id="stats-room-detail-card" style="display:none">
+<div class="card-title">部屋 <span id="stats-room-detail-name"></span> - カテゴリ分布</div>
+<div id="stats-room-detail-chart" class="stats-chart-container"></div>
+</div>
+<div class="card">
+<div class="card-title">全体カテゴリ分布 (Top 10)</div>
+<div id="stats-overall-chart" class="stats-chart-container"></div>
+</div>
+</div>
+
 </div>
 <div id="toast" class="toast"></div>
 
@@ -889,6 +923,8 @@ async function refreshCaptureEvents(){{
     const r=await fetch('/api/capture/events?limit=1000');
     const d=await r.json();
     if(!d.ok)return;
+    captureEventsCache=d.events||[];
+    updateStatsFromCache();
     document.getElementById('cap-event-count').textContent=d.count||0;
     document.getElementById('cap-event-info').textContent='Queue: '+d.total_queued+' events';
     // Room フィルタのオプション更新（数値順ソート、UNKは最後）
@@ -1509,6 +1545,198 @@ async function applySpeedDial(){{
   }}
 }}
 
+// === Statistics ===
+let statsSelectedRoom=null;
+let statsData={{rooms:{{}},categories:{{}}}};
+let statsCatColors={{}};
+let statsColorIdx=0;
+const STATS_COLORS=['#2563eb','#7c3aed','#0891b2','#059669','#6366f1','#ea580c','#ca8a04','#dc2626','#8b5cf6','#ec4899','#14b8a6','#f59e0b'];
+function statsFilterEvents(events){{
+  return events.filter(e=>{{
+    const dst=e.dst_ip||'';
+    // DNSクエリ以外の場合のみローカルIP宛を除外（DNS宛先はルーターになるため）
+    if(!e.dns_qry){{
+      if(dst.startsWith('192.168.')||dst.startsWith('10.')||dst.startsWith('127.'))return false;
+      if(dst.match(/^172\.(1[6-9]|2[0-9]|3[01])\./))return false;
+    }}
+    const domain=(e.http_host||e.tls_sni||e.resolved_domain||e.dns_qry||'').toLowerCase();
+    if(domain.match(/^ec2-|\.compute\.amazonaws\.com|\.in-addr\.arpa/))return false;
+    const photoPatterns=['googleusercontent.com','photos.google.com','lh3.google.com','lh4.google.com','lh5.google.com','lh6.google.com','icloud.com','aaplimg.com','apple-dns.net','mzstatic.com'];
+    for(const p of photoPatterns)if(domain.includes(p))return false;
+    const osPatterns=['msftncsi.com','msftconnecttest.com','connectivitycheck.gstatic.com','connectivitycheck.android.com','captive.apple.com','detectportal.firefox.com'];
+    for(const p of osPatterns)if(domain.includes(p))return false;
+    const adPatterns=['googlesyndication','doubleclick','googleadservices','applovin','fivecdm','adtng','adnxs','adsrvr','criteo','taboola','outbrain','pubmatic','rubiconproject','openx','casalemedia','adcolony','chartboost','vungle','ironsrc','fyber','inmobi','mopub','unityads','adjust','appsflyer','branch','amplitude','segment','mixpanel','google-analytics','hotjar','mouseflow','fullstory','crazyegg','heap'];
+    for(const p of adPatterns)if(domain.includes(p))return false;
+    return true;
+  }});
+}}
+function getCatColor(cat){{
+  if(!statsCatColors[cat])statsCatColors[cat]=STATS_COLORS[statsColorIdx++%STATS_COLORS.length];
+  return statsCatColors[cat];
+}}
+let statsFirstLoad=true;
+let captureEventsCache=null;
+function showStatsLoading(){{
+  if(!statsFirstLoad)return;
+  const rc=document.getElementById('stats-room-chart');
+  const oc=document.getElementById('stats-overall-chart');
+  if(rc&&!rc.querySelector('.stats-loading'))rc.innerHTML='<div class="stats-loading"><div class="stats-spinner"></div>読み込み中...</div>';
+  if(oc&&!oc.querySelector('.stats-loading'))oc.innerHTML='<div class="stats-loading"><div class="stats-spinner"></div>読み込み中...</div>';
+}}
+function updateStatsFromCache(){{
+  if(!captureEventsCache)return;
+  const events=statsFilterEvents(captureEventsCache);
+  const rooms={{}};const categories={{}};
+  events.forEach(e=>{{
+    const room=e.room_no||'UNK';
+    const cat=e.domain_category||'Unknown';
+    const svc=e.domain_service||e.http_host||e.tls_sni||e.resolved_domain||'Unknown';
+    if(!rooms[room])rooms[room]={{total:0,cats:{{}}}};
+    rooms[room].total++;
+    if(!rooms[room].cats[cat])rooms[room].cats[cat]={{total:0,svcs:{{}}}};
+    rooms[room].cats[cat].total++;
+    if(!rooms[room].cats[cat].svcs[svc])rooms[room].cats[cat].svcs[svc]=0;
+    rooms[room].cats[cat].svcs[svc]++;
+    if(!categories[cat])categories[cat]={{total:0,svcs:{{}}}};
+    categories[cat].total++;
+    if(!categories[cat].svcs[svc])categories[cat].svcs[svc]=0;
+    categories[cat].svcs[svc]++;
+  }});
+  statsData={{rooms,categories}};
+  statsFirstLoad=false;
+  updateRoomChart();
+  updateOverallChart();
+  if(statsSelectedRoom)updateRoomDetail(statsSelectedRoom);
+}}
+function updateRoomChart(){{
+  const container=document.getElementById('stats-room-chart');
+  const rooms=Object.entries(statsData.rooms).sort((a,b)=>b[1].total-a[1].total).slice(0,15);
+  if(rooms.length===0){{container.innerHTML='<p style="color:var(--text-muted)">Room別アクセスデータがありません（フィルタ条件を確認）</p>';return;}}
+  document.getElementById('stats-room-count').textContent='('+rooms.length+' rooms)';
+  const maxVal=Math.max(...rooms.map(r=>r[1].total));
+  const roomIds=new Set(rooms.map(r=>r[0]));
+  // Remove old rows
+  container.querySelectorAll('.stats-bar-row[data-room]').forEach(el=>{{
+    if(!roomIds.has(el.dataset.room))el.style.opacity='0';
+  }});
+  setTimeout(()=>container.querySelectorAll('.stats-bar-row[data-room]').forEach(el=>{{
+    if(!roomIds.has(el.dataset.room))el.remove();
+  }}),300);
+  rooms.forEach(([room,data])=>{{
+    const pct=(data.total/maxVal*100);
+    const cats=Object.entries(data.cats).sort((a,b)=>b[1].total-a[1].total);
+    const top3=cats.slice(0,3);
+    const otherTotal=cats.slice(3).reduce((s,c)=>s+c[1].total,0);
+    let row=container.querySelector('[data-room="'+room+'"]');
+    if(!row){{
+      row=document.createElement('div');
+      row.className='stats-bar-row';
+      row.dataset.room=room;
+      row.onclick=()=>showRoomDetail(room);
+      row.innerHTML='<div class="stats-bar-label">'+room+'</div><div class="stats-bar-wrap"><div class="stats-bar"></div></div><div class="stats-bar-count"></div>';
+      const legend=container.querySelector('.stats-legend');
+      if(legend)container.insertBefore(row,legend);else container.appendChild(row);
+    }}
+    const bar=row.querySelector('.stats-bar');
+    bar.style.width=pct+'%';
+    let segsHtml='';
+    top3.forEach(([cat,cd])=>{{
+      const segPct=(cd.total/data.total*100);
+      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+getCatColor(cat)+'" title="'+cat+': '+cd.total+'">'+cat+'</div>';
+    }});
+    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/data.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+    bar.innerHTML=segsHtml;
+    row.querySelector('.stats-bar-count').textContent=data.total;
+  }});
+  // Update legend
+  let legend=container.querySelector('.stats-legend');
+  if(!legend){{legend=document.createElement('div');legend.className='stats-legend';container.appendChild(legend);}}
+  legend.innerHTML=Object.entries(statsCatColors).map(([c,col])=>'<div class="stats-legend-item"><div class="stats-legend-color" style="background:'+col+'"></div>'+c+'</div>').join('');
+}}
+function showRoomDetail(room){{
+  statsSelectedRoom=room;
+  document.getElementById('stats-room-detail-card').style.display='block';
+  document.getElementById('stats-room-detail-name').textContent=room;
+  updateRoomDetail(room);
+}}
+function updateRoomDetail(room){{
+  const container=document.getElementById('stats-room-detail-chart');
+  const data=statsData.rooms[room];
+  if(!data){{container.innerHTML='<p style="color:var(--text-muted)">この部屋のアクセスデータがありません</p>';return;}}
+  const cats=Object.entries(data.cats).sort((a,b)=>b[1].total-a[1].total).slice(0,5);
+  const maxVal=Math.max(...cats.map(c=>c[1].total));
+  const catIds=new Set(cats.map(c=>c[0]));
+  container.querySelectorAll('.stats-bar-row[data-cat]').forEach(el=>{{
+    if(!catIds.has(el.dataset.cat))el.style.opacity='0';
+  }});
+  setTimeout(()=>container.querySelectorAll('.stats-bar-row[data-cat]').forEach(el=>{{
+    if(!catIds.has(el.dataset.cat))el.remove();
+  }}),300);
+  cats.forEach(([cat,cd],i)=>{{
+    const pct=(cd.total/maxVal*100);
+    const svcs=Object.entries(cd.svcs).sort((a,b)=>b[1]-a[1]);
+    const top3=svcs.slice(0,3);
+    const otherTotal=svcs.slice(3).reduce((s,v)=>s+v[1],0);
+    const color=STATS_COLORS[i%STATS_COLORS.length];
+    let row=container.querySelector('[data-cat="'+cat+'"]');
+    if(!row){{
+      row=document.createElement('div');
+      row.className='stats-bar-row';
+      row.dataset.cat=cat;
+      row.innerHTML='<div class="stats-bar-label" style="min-width:80px">'+cat+'</div><div class="stats-bar-wrap"><div class="stats-bar"></div></div><div class="stats-bar-count"></div>';
+      container.appendChild(row);
+    }}
+    const bar=row.querySelector('.stats-bar');
+    bar.style.width=pct+'%';
+    let segsHtml='';
+    top3.forEach(([svc,cnt])=>{{
+      const segPct=(cnt/cd.total*100);
+      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+color+'" title="'+svc+': '+cnt+'">'+svc.substring(0,15)+'</div>';
+    }});
+    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/cd.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+    bar.innerHTML=segsHtml;
+    row.querySelector('.stats-bar-count').textContent=cd.total;
+  }});
+}}
+function updateOverallChart(){{
+  const container=document.getElementById('stats-overall-chart');
+  const cats=Object.entries(statsData.categories).sort((a,b)=>b[1].total-a[1].total).slice(0,10);
+  if(cats.length===0){{container.innerHTML='<p style="color:var(--text-muted)">カテゴリ分布データがありません（フィルタ条件を確認）</p>';return;}}
+  const maxVal=Math.max(...cats.map(c=>c[1].total));
+  const catIds=new Set(cats.map(c=>c[0]));
+  container.querySelectorAll('.stats-bar-row[data-cat]').forEach(el=>{{
+    if(!catIds.has(el.dataset.cat))el.style.opacity='0';
+  }});
+  setTimeout(()=>container.querySelectorAll('.stats-bar-row[data-cat]').forEach(el=>{{
+    if(!catIds.has(el.dataset.cat))el.remove();
+  }}),300);
+  cats.forEach(([cat,cd],i)=>{{
+    const pct=(cd.total/maxVal*100);
+    const svcs=Object.entries(cd.svcs).sort((a,b)=>b[1]-a[1]);
+    const top3=svcs.slice(0,3);
+    const otherTotal=svcs.slice(3).reduce((s,v)=>s+v[1],0);
+    const color=STATS_COLORS[i%STATS_COLORS.length];
+    let row=container.querySelector('[data-cat="'+cat+'"]');
+    if(!row){{
+      row=document.createElement('div');
+      row.className='stats-bar-row';
+      row.dataset.cat=cat;
+      row.innerHTML='<div class="stats-bar-label" style="min-width:100px">'+cat+'</div><div class="stats-bar-wrap"><div class="stats-bar"></div></div><div class="stats-bar-count"></div>';
+      container.appendChild(row);
+    }}
+    const bar=row.querySelector('.stats-bar');
+    bar.style.width=pct+'%';
+    let segsHtml='';
+    top3.forEach(([svc,cnt])=>{{
+      const segPct=(cnt/cd.total*100);
+      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+color+'" title="'+svc+': '+cnt+'">'+svc.substring(0,15)+'</div>';
+    }});
+    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/cd.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+    bar.innerHTML=segsHtml;
+    row.querySelector('.stats-bar-count').textContent=cd.total;
+  }});
+}}
+
 window.onload=()=>{{
   load();
   refreshStatus();
@@ -1530,6 +1758,7 @@ window.onload=()=>{{
   refreshNtp();
   refreshSync();
   refreshSpeedDial();
+  showStatsLoading();
   setInterval(refreshStatus,5000);
   setInterval(refreshCaptureStatus,5000);
   setInterval(refreshCaptureEvents,3000);

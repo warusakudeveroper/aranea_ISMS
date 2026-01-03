@@ -440,15 +440,22 @@ class DomainServiceManager:
 
     特徴:
     - メモリ上で検索（高速）
+    - LRUキャッシュで繰り返しルックアップを高速化
     - 変更時のみファイル書き込み（SDカード保護）
     - スレッドセーフ
     """
+
+    CACHE_MAX_SIZE = 10000  # LRUキャッシュ最大エントリ数
 
     def __init__(self, data_file: Path = DOMAIN_SERVICES_FILE):
         self.data_file = data_file
         self._lock = Lock()
         self._data: Dict[str, Dict[str, str]] = {}
         self._dirty = False
+        # LRUキャッシュ: domain -> (service, category)
+        self._cache: OrderedDict[str, Tuple[Optional[str], Optional[str]]] = OrderedDict()
+        self._cache_hits = 0
+        self._cache_misses = 0
         self._load()
 
     def _load(self) -> None:
@@ -502,7 +509,7 @@ class DomainServiceManager:
 
     def get_service(self, domain: str) -> Tuple[Optional[str], Optional[str]]:
         """
-        ドメインからサービス名・カテゴリを取得
+        ドメインからサービス名・カテゴリを取得（LRUキャッシュ対応）
 
         Args:
             domain: ドメイン名（例: "video.google.com"）
@@ -516,7 +523,17 @@ class DomainServiceManager:
         domain_lower = domain.lower()
 
         with self._lock:
+            # キャッシュヒットチェック
+            if domain_lower in self._cache:
+                self._cache_hits += 1
+                # LRU: 末尾に移動
+                self._cache.move_to_end(domain_lower)
+                return self._cache[domain_lower]
+
+            self._cache_misses += 1
+
             # ドット区切りを考慮したマッチング
+            result: Tuple[Optional[str], Optional[str]] = (None, None)
             for pattern, info in self._data.items():
                 if "." in pattern:
                     # パターンにドットがある場合は厳密マッチ
@@ -525,13 +542,26 @@ class DomainServiceManager:
                         or domain_lower.endswith("." + pattern)
                         or ("." + pattern + ".") in domain_lower
                     ):
-                        return (info.get("service"), info.get("category"))
+                        result = (info.get("service"), info.get("category"))
+                        break
                 else:
                     # パターンにドットがない場合は部分マッチ
                     if pattern in domain_lower:
-                        return (info.get("service"), info.get("category"))
+                        result = (info.get("service"), info.get("category"))
+                        break
 
-        return (None, None)
+            # キャッシュに保存
+            self._cache[domain_lower] = result
+            # 最大サイズ超過時は古いものを削除
+            while len(self._cache) > self.CACHE_MAX_SIZE:
+                self._cache.popitem(last=False)
+
+            return result
+
+    def _invalidate_cache(self) -> None:
+        """キャッシュを無効化（データ変更時に呼び出し）"""
+        self._cache.clear()
+        logger.debug("Service lookup cache invalidated")
 
     def add(self, pattern: str, service: str, category: str = "") -> Dict[str, Any]:
         """サービスマッピングを追加"""
@@ -542,6 +572,7 @@ class DomainServiceManager:
         with self._lock:
             self._data[pattern_lower] = {"service": service, "category": category}
             self._dirty = True
+            self._invalidate_cache()
             self._save_internal()
 
         return {"ok": True, "message": f"Added: {pattern} -> {service}"}
@@ -561,6 +592,7 @@ class DomainServiceManager:
                 self._data[pattern_lower]["category"] = category
 
             self._dirty = True
+            self._invalidate_cache()
             self._save_internal()
 
         return {"ok": True, "message": f"Updated: {pattern}"}
@@ -574,6 +606,7 @@ class DomainServiceManager:
 
             del self._data[pattern_lower]
             self._dirty = True
+            self._invalidate_cache()
             self._save_internal()
 
         return {"ok": True, "message": f"Deleted: {pattern}"}

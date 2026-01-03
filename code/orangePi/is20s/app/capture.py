@@ -210,21 +210,54 @@ def generate_event_id(room_no: str, tz: ZoneInfo) -> str:
 
 def expand_segment_ips(rooms: Dict[str, str]) -> Dict[str, str]:
     """
-    IP末尾が0の場合、/24セグメント全体（1-254）に展開
-    例: 192.168.125.0=all → 192.168.125.1~254 をすべてroomID "all" で登録
+    CIDR記法およびIP末尾0を/24セグメント全体（1-254）に展開
+
+    対応形式:
+    - 192.168.3.0/24=network → 192.168.3.1~254 をすべて登録
+    - 192.168.3.0=network → 同上（末尾0も/24として扱う）
+    - 192.168.3.10/32=room → 192.168.3.10 単体
+    - 192.168.3.10=room → 同上（単体IP）
 
     注意: セグメント指定は大量トラフィックになるため、少量・小規模環境以外では非推奨
     """
     expanded = {}
-    for ip, room in rooms.items():
-        if ip.endswith(".0"):
-            # セグメント展開: 1-254
-            prefix = ip[:-1]  # "192.168.125."
+    for ip_spec, room in rooms.items():
+        # CIDR記法をパース
+        if "/" in ip_spec:
+            ip_part, cidr = ip_spec.rsplit("/", 1)
+            try:
+                prefix_len = int(cidr)
+            except ValueError:
+                logger.warning("Invalid CIDR notation: %s, treating as single IP", ip_spec)
+                expanded[ip_part] = room
+                continue
+
+            if prefix_len == 32:
+                # /32 = 単一IP
+                expanded[ip_part] = room
+            elif prefix_len == 24:
+                # /24 = セグメント展開
+                parts = ip_part.split(".")
+                if len(parts) == 4:
+                    prefix = ".".join(parts[:3]) + "."
+                    for i in range(1, 255):
+                        expanded[f"{prefix}{i}"] = room
+                    logger.warning("Segment expansion (CIDR): %s -> %s1-254 (room=%s)", ip_spec, prefix, room)
+                else:
+                    expanded[ip_part] = room
+            else:
+                # その他のCIDRは単一IPとして扱う（将来拡張可能）
+                logger.warning("Unsupported CIDR prefix /%d: %s, treating as single IP", prefix_len, ip_spec)
+                expanded[ip_part] = room
+        elif ip_spec.endswith(".0"):
+            # 従来形式: 末尾0 → セグメント展開
+            prefix = ip_spec[:-1]  # "192.168.125."
             for i in range(1, 255):
                 expanded[f"{prefix}{i}"] = room
-            logger.warning("Segment expansion: %s -> %s.1-254 (room=%s)", ip, prefix.rstrip('.'), room)
+            logger.warning("Segment expansion: %s -> %s1-254 (room=%s)", ip_spec, prefix, room)
         else:
-            expanded[ip] = room
+            # 単一IP
+            expanded[ip_spec] = room
     return expanded
 
 
