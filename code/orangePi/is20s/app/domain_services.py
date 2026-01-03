@@ -132,7 +132,58 @@ DOMAIN_SERVICES_FILE = DATA_DIR / "domain_services.json"
 
 # デフォルトサービスマップ（ui.pyから移行）
 # 形式: pattern -> {"service": "...", "category": "..."}
+# 注: パターンは上から順に評価されるため、具体的なパターンを先に定義
 DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
+    # === IoT デバイス（汎用パターンより先に定義）===
+    # AWS IoT Hub（リージョン別）- ".pattern." in domain でマッチ
+    "iot.us-east-1": {"service": "AWS IoT", "category": "IoT"},
+    "iot.us-east-2": {"service": "AWS IoT", "category": "IoT"},
+    "iot.us-west-1": {"service": "AWS IoT", "category": "IoT"},
+    "iot.us-west-2": {"service": "AWS IoT", "category": "IoT"},
+    "iot.eu-west-1": {"service": "AWS IoT", "category": "IoT"},
+    "iot.eu-central-1": {"service": "AWS IoT", "category": "IoT"},
+    "iot.ap-northeast-1": {"service": "AWS IoT", "category": "IoT"},
+    "iot.ap-southeast-1": {"service": "AWS IoT", "category": "IoT"},
+    "iot.ap-southeast-2": {"service": "AWS IoT", "category": "IoT"},
+    # Amazon Echo / Alexa
+    "alexa": {"service": "Echo/Alexa", "category": "IoT"},
+    "amazonalexa": {"service": "Echo/Alexa", "category": "IoT"},
+    "avs-alexa": {"service": "Echo/Alexa", "category": "IoT"},
+    "device-metrics-us": {"service": "Echo/Alexa", "category": "IoT"},
+    # Google Home / Nest / Assistant
+    "assistant": {"service": "Google Home", "category": "IoT"},
+    "geller-pa.googleapis": {"service": "Google Home", "category": "IoT"},
+    "nest": {"service": "Nest", "category": "IoT"},
+    "chromecast": {"service": "Chromecast", "category": "IoT"},
+    "castbox": {"service": "Chromecast", "category": "IoT"},
+    # スマートホームデバイス
+    "switchbot": {"service": "SwitchBot", "category": "IoT"},
+    "wonderlabs": {"service": "SwitchBot", "category": "IoT"},
+    "tuya": {"service": "Tuya/スマート家電", "category": "IoT"},
+    "smartlife": {"service": "Smart Life", "category": "IoT"},
+    "tplinkcloud": {"service": "TP-Link", "category": "IoT"},
+    "meross": {"service": "Meross", "category": "IoT"},
+    "yeelight": {"service": "Yeelight", "category": "IoT"},
+    "philips-hue": {"service": "Philips Hue", "category": "IoT"},
+    "hue.philips": {"service": "Philips Hue", "category": "IoT"},
+    "ikea-sh": {"service": "IKEA Smart", "category": "IoT"},
+    "nature.global": {"service": "Nature Remo", "category": "IoT"},
+    "ifttt": {"service": "IFTTT", "category": "IoT"},
+    # スマートTV
+    "samsungcloudsolution": {"service": "Samsung TV", "category": "IoT"},
+    "samsungosp": {"service": "Samsung TV", "category": "IoT"},
+    "lgtvcommon": {"service": "LG TV", "category": "IoT"},
+    "lgsmartplatform": {"service": "LG TV", "category": "IoT"},
+    "bravia": {"service": "Sony TV", "category": "IoT"},
+    "sonyentertainmentnetwork": {"service": "Sony TV", "category": "IoT"},
+    "roku": {"service": "Roku", "category": "IoT"},
+    "fire-tv": {"service": "Fire TV", "category": "IoT"},
+    "firetv": {"service": "Fire TV", "category": "IoT"},
+    # プリンター・複合機
+    "epsonconnect": {"service": "Epson", "category": "IoT"},
+    "canon-cij": {"service": "Canon", "category": "IoT"},
+    "brothercloud": {"service": "Brother", "category": "IoT"},
+    "hpconnected": {"service": "HP", "category": "IoT"},
     # 動画・配信
     "youtube": {"service": "YouTube", "category": "Streaming"},
     "ytimg": {"service": "YouTube", "category": "Streaming"},
@@ -205,23 +256,48 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     "kakao": {"service": "Kakao", "category": "Messenger"},
     "signal": {"service": "Signal", "category": "Messenger"},
     "viber": {"service": "Viber", "category": "Messenger"},
-    # Google
+    # Google（具体的パターンを先に）
     "googleusercontent": {"service": "GPhotos", "category": "Photo"},
     "photos.google": {"service": "GPhotos", "category": "Photo"},
-    "googleapis": {"service": "Google", "category": "Cloud"},
-    "gstatic": {"service": "Google", "category": "Cloud"},
-    "ggpht": {"service": "Google", "category": "Cloud"},
+    "lh3.google": {"service": "GPhotos", "category": "Photo"},
+    # Google認証
+    "accounts.google": {"service": "Google認証", "category": "Auth"},
+    "oauth2.googleapis": {"service": "Google認証", "category": "Auth"},
+    # Google Drive
+    "drive.google": {"service": "GDrive", "category": "Storage"},
+    "drivefrontend": {"service": "GDrive", "category": "Storage"},
+    "docs.google": {"service": "GDocs", "category": "Storage"},
+    "sheets.google": {"service": "GSheets", "category": "Storage"},
+    "slides.google": {"service": "GSlides", "category": "Storage"},
+    # Google Meet / Chat
+    "meet.google": {"service": "GMeet", "category": "Video"},
+    "chat.google": {"service": "GChat", "category": "Messenger"},
+    # Gmail
+    "gmail": {"service": "Gmail", "category": "Mail"},
+    "googlemail": {"service": "Gmail", "category": "Mail"},
+    "mail.google": {"service": "Gmail", "category": "Mail"},
+    # 検索
+    "www.google": {"service": "Google検索", "category": "Search"},
+    "google.com/search": {"service": "Google検索", "category": "Search"},
+    # 広告
     "googlesyndication": {"service": "GoogleAds", "category": "Ad"},
     "doubleclick": {"service": "GoogleAds", "category": "Ad"},
     "googleadservices": {"service": "GoogleAds", "category": "Ad"},
-    "gvt1": {"service": "Google", "category": "Cloud"},
-    "gvt2": {"service": "Google", "category": "Cloud"},
-    "gmail": {"service": "Gmail", "category": "Mail"},
-    "googlemail": {"service": "Gmail", "category": "Mail"},
-    "drive.google": {"service": "GDrive", "category": "Cloud"},
-    "docs.google": {"service": "GDocs", "category": "Cloud"},
-    "meet.google": {"service": "GMeet", "category": "Video"},
+    "pagead": {"service": "GoogleAds", "category": "Ad"},
+    # トラッキング
     "google-analytics": {"service": "GA", "category": "Tracker"},
+    "analytics.google": {"service": "GA", "category": "Tracker"},
+    "googletagmanager": {"service": "GTM", "category": "Tracker"},
+    "tagmanager.google": {"service": "GTM", "category": "Tracker"},
+    # Firebase
+    "firebase": {"service": "Firebase", "category": "Cloud"},
+    "firebaseio": {"service": "Firebase", "category": "Cloud"},
+    # 汎用（最後にマッチ）
+    "googleapis": {"service": "Google API", "category": "Cloud"},
+    "gstatic": {"service": "Google CDN", "category": "CDN"},
+    "ggpht": {"service": "Google CDN", "category": "CDN"},
+    "gvt1": {"service": "Google Update", "category": "System"},
+    "gvt2": {"service": "Google Update", "category": "System"},
     "google": {"service": "Google", "category": "Cloud"},
     # Apple
     "itunes": {"service": "iTunes", "category": "Cloud"},
