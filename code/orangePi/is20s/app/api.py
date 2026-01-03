@@ -269,7 +269,8 @@ def create_router(
             return {"ok": False, "error": "capture not configured", "events": []}
         limit = min(max(limit, 1), 500)
         # 表示用バッファから取得（送信キューとは独立）
-        raw_events = capture_manager.display_buffer[-limit:] if capture_manager.display_buffer else []
+        # deque はスライシング不可のため list() で変換
+        raw_events = list(capture_manager.display_buffer)[-limit:] if capture_manager.display_buffer else []
 
         # 各イベントにservice/categoryを付与（バックエンドで解決）
         events = []

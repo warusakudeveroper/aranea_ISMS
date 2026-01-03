@@ -24,12 +24,12 @@ class UnknownDomainsCache:
     未検出ドメインのFIFOキャッシュ
 
     特徴:
-    - 最大100件保持（超えたら古いものから削除）
+    - 最大300件保持（超えたら古いものから削除）
     - ドメインごとに出現回数・最終検出時刻を記録
     - API経由で未検出一覧を取得可能
     """
 
-    MAX_SIZE = 100
+    MAX_SIZE = 300
 
     def __init__(self):
         self._lock = Lock()

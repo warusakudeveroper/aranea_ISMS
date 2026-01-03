@@ -14,7 +14,8 @@ import socket
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from collections import deque
+from typing import Any, Dict, Deque, List, Optional, Set
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -73,6 +74,14 @@ DEFAULT_WATCH_CONFIG = {
         "log_dir": "/var/lib/is20s/capture_logs",
         "max_file_size": 1048576,  # 1MB per file
         "max_total_size": 10485760,  # 10MB total
+    },
+    # display_buffer用フィルタ（ファイルログには影響なし）
+    "display_filter": {
+        "exclude_local_ip": True,      # ローカルIP宛を除外 (192.168.x, 10.x, 172.16-31.x)
+        "exclude_ptr": True,           # PTR逆引き結果を除外 (in-addr.arpa, ec2-)
+        "exclude_photo_sync": True,    # 写真同期を除外 (iCloud/Google Photos)
+        "exclude_os_check": True,      # OS接続チェックを除外 (connectivity check)
+        "exclude_ad_tracker": True,    # 広告/計測を除外 (広告SDK、トラッカー)
     },
 }
 
@@ -611,7 +620,7 @@ class CaptureFileLogger:
 class CaptureManager:
     """tsharkキャプチャ管理クラス"""
 
-    DISPLAY_BUFFER_SIZE = 1000  # 表示用バッファサイズ
+    DISPLAY_BUFFER_SIZE = 3000  # 表示用バッファサイズ（deque使用でO(1)）
 
     def __init__(self, watch_config_path: str = "/etc/is20s/watch_config.json"):
         self.config_path = watch_config_path
@@ -620,7 +629,8 @@ class CaptureManager:
         self.process: Optional[asyncio.subprocess.Process] = None
         self.running = False
         self.queue: List[Dict[str, Any]] = []  # 送信用キュー
-        self.display_buffer: List[Dict[str, Any]] = []  # 表示用リングバッファ（常時保持）
+        self.display_buffer: Deque[Dict[str, Any]] = deque(maxlen=self.DISPLAY_BUFFER_SIZE)  # 表示用リングバッファ（dequeでO(1)）
+        self._display_filtered_count = 0  # フィルタで除外されたイベント数
         self.drop_count = 0
         self.sent_count = 0
         self.last_send_ok_at: Optional[str] = None
@@ -669,6 +679,91 @@ class CaptureManager:
         self.tz = ZoneInfo(self.cfg.get("timezone", "Asia/Tokyo"))
         self._init_file_logger()
 
+    def _should_include_in_display(self, event: Dict[str, Any]) -> bool:
+        """
+        display_buffer用フィルタ判定
+
+        Returns:
+            True: display_bufferに追加
+            False: フィルタで除外（ファイルログには記録済み）
+        """
+        filter_cfg = self.cfg.get("display_filter", {})
+
+        # ローカルIP宛除外 (192.168.x, 10.x, 172.16-31.x, 127.x)
+        if filter_cfg.get("exclude_local_ip", True):
+            dst_ip = event.get("dst_ip", "")
+            if dst_ip:
+                if dst_ip.startswith("192.168.") or dst_ip.startswith("10.") or dst_ip.startswith("127."):
+                    return False
+                # 172.16-31.x.x チェック
+                if dst_ip.startswith("172."):
+                    parts = dst_ip.split(".")
+                    if len(parts) >= 2:
+                        try:
+                            second = int(parts[1])
+                            if 16 <= second <= 31:
+                                return False
+                        except ValueError:
+                            pass
+
+        # ドメイン取得（複数ソースから）
+        domain = (
+            event.get("http_host")
+            or event.get("tls_sni")
+            or event.get("resolved_domain")
+            or event.get("dns_qry")
+            or ""
+        ).lower()
+
+        # PTR除外 (in-addr.arpa, ec2-xxx.compute.amazonaws.com)
+        if filter_cfg.get("exclude_ptr", True):
+            resolved = (event.get("resolved_domain") or "").lower()
+            if resolved:
+                if ".in-addr.arpa" in resolved:
+                    return False
+                if resolved.startswith("ec2-") and ".compute" in resolved:
+                    return False
+
+        # 写真同期除外 (iCloud/Google Photos)
+        if filter_cfg.get("exclude_photo_sync", True):
+            photo_patterns = [
+                "googleusercontent.com", "photos.google.com",
+                "lh3.google.com", "lh4.google.com", "lh5.google.com", "lh6.google.com",
+                "icloud.com", "aaplimg.com", "apple-dns.net", "mzstatic.com",
+            ]
+            for pattern in photo_patterns:
+                if pattern in domain:
+                    return False
+
+        # OS接続チェック除外
+        if filter_cfg.get("exclude_os_check", True):
+            os_check_patterns = [
+                "msftncsi.com", "msftconnecttest.com",  # Windows
+                "connectivitycheck.gstatic.com", "connectivitycheck.android.com",  # Android
+                "captive.apple.com",  # iOS/macOS
+                "detectportal.firefox.com",  # Firefox
+            ]
+            for pattern in os_check_patterns:
+                if pattern in domain:
+                    return False
+
+        # 広告/計測除外
+        if filter_cfg.get("exclude_ad_tracker", True):
+            ad_patterns = [
+                "googlesyndication", "doubleclick", "googleadservices",
+                "applovin", "fivecdm", "adtng", "adnxs", "adsrvr", "criteo", "bance",
+                "taboola", "outbrain", "pubmatic", "rubiconproject", "openx", "casalemedia",
+                "adcolony", "chartboost", "vungle", "ironsrc", "fyber", "inmobi", "mopub",
+                "unityads", "adjust", "appsflyer", "branch", "amplitude", "segment",
+                "mixpanel", "google-analytics", "hotjar", "mouseflow", "fullstory",
+                "crazyegg", "heap", "moloco", "adsmoloco",
+            ]
+            for pattern in ad_patterns:
+                if pattern in domain:
+                    return False
+
+        return True
+
     def get_status(self) -> Dict[str, Any]:
         """現在のステータスを返す"""
         rooms = self.cfg.get("rooms", {})
@@ -705,6 +800,13 @@ class CaptureManager:
         status["threat_intel"] = self.threat_intel.get_stats()
         # ASN統計を追加
         status["asn"] = self.asn_lookup.get_stats()
+        # display_filter統計を追加
+        status["display_filter"] = {
+            "buffer_size": len(self.display_buffer),
+            "buffer_max": self.DISPLAY_BUFFER_SIZE,
+            "filtered_count": self._display_filtered_count,
+            "config": self.cfg.get("display_filter", {}),
+        }
         return status
 
     async def check_prerequisites(self) -> List[str]:
@@ -934,18 +1036,19 @@ class CaptureManager:
                                 event["asn_category"] = cat
                         except Exception as e:
                             logger.debug("ASN lookup error for %s: %s", dst_ip, e)
+                    # ファイルログ書き込み（フィルタなし、全イベント記録）
+                    if self.file_logger:
+                        self.file_logger.write_event(event)
                     # 送信用キュー追加
                     if len(self.queue) >= max_queue:
                         self.queue.pop(0)
                         self.drop_count += 1
                     self.queue.append(event)
-                    # 表示用バッファ追加（常時保持、送信に影響されない）
-                    self.display_buffer.append(event)
-                    if len(self.display_buffer) > self.DISPLAY_BUFFER_SIZE:
-                        self.display_buffer.pop(0)
-                    # ファイルログ書き込み
-                    if self.file_logger:
-                        self.file_logger.write_event(event)
+                    # 表示用バッファ追加（バックエンドフィルタ適用）
+                    if self._should_include_in_display(event):
+                        self.display_buffer.append(event)  # deque maxlenで自動押し出し
+                    else:
+                        self._display_filtered_count += 1
                     # DNSキャッシュ定期保存（100イベントごと）
                     self._dns_save_counter += 1
                     if self._dns_save_counter >= 100:
