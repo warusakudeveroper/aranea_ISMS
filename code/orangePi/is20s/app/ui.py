@@ -747,6 +747,7 @@ function toast(m){{
 
 // ========== Capture (tshark) Functions ==========
 let capCfg={{}};
+let configuredRooms=[];  // 設定済みroom一覧（ソート済み）
 
 async function refreshCaptureStatus(){{
   try{{
@@ -781,6 +782,13 @@ async function loadCaptureConfig(){{
     const lines=Object.entries(rooms).map(([ip,room])=>ip+'='+room);
     document.getElementById('cap-rooms-text').value=lines.join('\\n');
     document.getElementById('cap-rooms-status').textContent=Object.keys(rooms).length+' rooms configured';
+    // 設定済みroom一覧を抽出（ユニーク＆ソート済み）
+    const roomSet=new Set(Object.values(rooms));
+    configuredRooms=[...roomSet].sort((a,b)=>{{
+      const na=parseInt(a),nb=parseInt(b);
+      if(!isNaN(na)&&!isNaN(nb))return na-nb;
+      return a.localeCompare(b);
+    }});
     // display_filter チェックボックス初期化
     const df=capCfg.display_filter||{{}};
     document.getElementById('cap-filter-local').checked=df.exclude_local_ip!==false;
@@ -959,14 +967,16 @@ async function refreshCaptureEvents(){{
     updateStatsFromCache();
     document.getElementById('cap-event-count').textContent=d.count||0;
     document.getElementById('cap-event-info').textContent='Queue: '+d.total_queued+' events';
-    // Room フィルタのオプション更新（数値順ソート、UNKは最後）
+    // Room フィルタのオプション更新（設定済みroom全件 + イベント由来のroom）
     const filterEl=document.getElementById('cap-room-filter');
     const currentFilter=filterEl.value;
-    const rooms=new Set((d.events||[]).map(e=>e.room_no).filter(r=>r));
-    const sortedRooms=[...rooms].sort((a,b)=>{{
-      if(a==='UNK')return 1;
-      if(b==='UNK')return -1;
-      return parseInt(a)-parseInt(b);
+    const eventRooms=new Set((d.events||[]).map(e=>e.room_no).filter(r=>r&&r!=='UNK'));
+    // 設定済みroom + イベント由来のroom（マージ）
+    const allRooms=new Set([...configuredRooms,...eventRooms]);
+    const sortedRooms=[...allRooms].sort((a,b)=>{{
+      const na=parseInt(a),nb=parseInt(b);
+      if(!isNaN(na)&&!isNaN(nb))return na-nb;
+      return a.localeCompare(b);
     }});
     const opts=['<option value="">All</option>'];
     sortedRooms.forEach(r=>opts.push('<option value="'+r+'"'+(r===currentFilter?' selected':'')+'>'+r+'</option>'));
@@ -1558,6 +1568,10 @@ function updateStatsFromCache(){{
   if(!captureEventsCache)return;
   const events=statsFilterEvents(captureEventsCache);
   const rooms={{}};const categories={{}};
+  // 設定済みroom全件を0件で初期化
+  configuredRooms.forEach(r=>{{
+    rooms[r]={{total:0,cats:{{}}}};
+  }});
   events.forEach(e=>{{
     const room=e.room_no||'UNK';
     const cat=e.domain_category||'Unknown';
@@ -1581,10 +1595,17 @@ function updateStatsFromCache(){{
 }}
 function updateRoomChart(){{
   const container=document.getElementById('stats-room-chart');
-  const rooms=Object.entries(statsData.rooms).sort((a,b)=>b[1].total-a[1].total).slice(0,15);
-  if(rooms.length===0){{container.innerHTML='<p style="color:var(--text-muted)">Room別アクセスデータがありません（フィルタ条件を確認）</p>';return;}}
+  // room番号順でソート（UNKは最後）、全件表示
+  const rooms=Object.entries(statsData.rooms).sort((a,b)=>{{
+    if(a[0]==='UNK')return 1;
+    if(b[0]==='UNK')return -1;
+    const na=parseInt(a[0]),nb=parseInt(b[0]);
+    if(!isNaN(na)&&!isNaN(nb))return na-nb;
+    return a[0].localeCompare(b[0]);
+  }});
+  if(rooms.length===0){{container.innerHTML='<p style="color:var(--text-muted)">監視対象Roomが設定されていません</p>';return;}}
   document.getElementById('stats-room-count').textContent='('+rooms.length+' rooms)';
-  const maxVal=Math.max(...rooms.map(r=>r[1].total));
+  const maxVal=Math.max(...rooms.map(r=>r[1].total),1);  // 0件のみの場合の0除算防止
   const roomIds=new Set(rooms.map(r=>r[0]));
   // Remove old rows
   container.querySelectorAll('.stats-bar-row[data-room]').forEach(el=>{{
@@ -1611,11 +1632,18 @@ function updateRoomChart(){{
     const bar=row.querySelector('.stats-bar');
     bar.style.width=pct+'%';
     let segsHtml='';
-    top3.forEach(([cat,cd])=>{{
-      const segPct=(cd.total/data.total*100);
-      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+getCatColor(cat)+'" title="'+cat+': '+cd.total+'">'+cat+'</div>';
-    }});
-    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/data.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+    if(data.total===0){{
+      // 0件の場合：薄いグレーバーで「通信なし」表示
+      row.style.opacity='0.6';
+      segsHtml='<div class="stats-bar-segment" style="width:100%;background:#e2e8f0;color:#94a3b8;font-size:10px">通信なし</div>';
+    }}else{{
+      row.style.opacity='1';
+      top3.forEach(([cat,cd])=>{{
+        const segPct=(cd.total/data.total*100);
+        segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+getCatColor(cat)+'" title="'+cat+': '+cd.total+'">'+cat+'</div>';
+      }});
+      if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/data.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+    }}
     bar.innerHTML=segsHtml;
     row.querySelector('.stats-bar-count').textContent=data.total;
   }});

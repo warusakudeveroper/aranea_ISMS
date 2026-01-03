@@ -292,9 +292,19 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     # Firebase
     "firebase": {"service": "Firebase", "category": "Cloud"},
     "firebaseio": {"service": "Firebase", "category": "Cloud"},
+    # gstatic細分化（汎用より先に）
+    "fonts.gstatic": {"service": "Google Fonts", "category": "CDN"},
+    "maps.gstatic": {"service": "Google Maps", "category": "Cloud"},
+    "youtube.gstatic": {"service": "YouTube", "category": "Streaming"},
+    "encrypted-tbn": {"service": "Google Images", "category": "Search"},
+    "lh3.googleusercontent": {"service": "GPhotos", "category": "Photo"},
+    "lh4.googleusercontent": {"service": "GPhotos", "category": "Photo"},
+    "lh5.googleusercontent": {"service": "GPhotos", "category": "Photo"},
+    "play.google": {"service": "Google Play", "category": "Cloud"},
+    "play-lh.googleusercontent": {"service": "Google Play", "category": "Cloud"},
     # 汎用（最後にマッチ）
     "googleapis": {"service": "Google API", "category": "Cloud"},
-    "gstatic": {"service": "Google CDN", "category": "CDN"},
+    "gstatic": {"service": "Google Static", "category": "CDN"},
     "ggpht": {"service": "Google CDN", "category": "CDN"},
     "gvt1": {"service": "Google Update", "category": "System"},
     "gvt2": {"service": "Google Update", "category": "System"},
@@ -316,7 +326,17 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     "mzstatic": {"service": "Apple", "category": "Cloud"},
     "apple": {"service": "Apple", "category": "Cloud"},
     "mac.com": {"service": "Apple", "category": "Cloud"},
-    # CDN
+    # CDN（サービス特定可能なパターンを先に）
+    # Adobe系（Akamai経由）
+    "adobe": {"service": "Adobe", "category": "Creative"},
+    "adobess": {"service": "Adobe", "category": "Creative"},
+    "typekit": {"service": "Adobe Fonts", "category": "CDN"},
+    "creativecloud": {"service": "Adobe CC", "category": "Creative"},
+    # DeepL翻訳
+    "deepl": {"service": "DeepL", "category": "AI"},
+    # Azure Traffic Manager
+    "trafficmanager": {"service": "Azure TM", "category": "Cloud"},
+    # 汎用CDN
     "fastly.net": {"service": "Fastly", "category": "CDN"},
     "akamai": {"service": "Akamai", "category": "CDN"},
     "edgekey": {"service": "Akamai", "category": "CDN"},
@@ -325,10 +345,13 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     "akamaized": {"service": "Akamai", "category": "CDN"},
     "cloudflare": {"service": "Cloudflare", "category": "CDN"},
     "cf-cdn": {"service": "Cloudflare", "category": "CDN"},
+    "cloudfront": {"service": "CloudFront", "category": "CDN"},
     "fastly": {"service": "Fastly", "category": "CDN"},
     "edgecast": {"service": "Edgecast", "category": "CDN"},
     "jsdelivr": {"service": "jsDelivr", "category": "CDN"},
     "unpkg": {"service": "unpkg", "category": "CDN"},
+    "bunnycdn": {"service": "BunnyCDN", "category": "CDN"},
+    "keycdn": {"service": "KeyCDN", "category": "CDN"},
     # 日本メディア
     "tbs.co.jp": {"service": "TBS", "category": "Media"},
     "nhk.or.jp": {"service": "NHK", "category": "Media"},
