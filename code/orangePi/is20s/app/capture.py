@@ -22,6 +22,7 @@ import httpx
 
 from .threat_intel import get_threat_intel
 from .asn_lookup import get_asn_lookup
+from .domain_services import get_service_by_domain_full
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ DEFAULT_WATCH_CONFIG = {
         "exclude_ad_tracker": True,    # 広告/計測を除外 (広告SDK、トラッカー)
         "exclude_dns": True,           # DNSクエリ(port 53)を除外
         "exclude_background": True,    # バックグラウンド通信を除外 (FCM/GCM, Play Services)
+        "exclude_categories": [],      # 除外するカテゴリ（例: ["Search"]）
     },
 }
 
@@ -677,9 +679,16 @@ class CaptureManager:
 
     def reload_config(self) -> None:
         """設定を再読み込み"""
+        old_filter = self.cfg.get("display_filter", {})
         self.cfg = load_watch_config(self.config_path)
         self.tz = ZoneInfo(self.cfg.get("timezone", "Asia/Tokyo"))
         self._init_file_logger()
+        # display_filterが変更されたらバッファをクリア（新フィルタを即時反映）
+        new_filter = self.cfg.get("display_filter", {})
+        if old_filter != new_filter:
+            self.display_buffer.clear()
+            self._display_filtered_count = 0
+            logger.info("display_filter changed, buffer cleared")
 
     def _should_include_in_display(self, event: Dict[str, Any]) -> bool:
         """
@@ -764,10 +773,17 @@ class CaptureManager:
                 if pattern in domain:
                     return False
 
-        # DNSクエリ(port 53)除外
+        # DNS応答除外 (公開DNSサーバーからの返信のみフィルタ、クエリは残す)
         if filter_cfg.get("exclude_dns", True):
-            dst_port = str(event.get("dst_port", ""))
-            if dst_port == "53":
+            src_ip = event.get("src_ip", "")
+            # 公開DNSサーバーからの応答をフィルタ（スパム防止）
+            public_dns_servers = [
+                "8.8.8.8", "8.8.4.4",  # Google DNS
+                "1.1.1.1", "1.0.0.1",  # Cloudflare DNS
+                "9.9.9.9",  # Quad9
+                "208.67.222.222", "208.67.220.220",  # OpenDNS
+            ]
+            if src_ip in public_dns_servers:
                 return False
 
         # バックグラウンド通信除外 (FCM/GCM, Play Services, etc.)
@@ -791,6 +807,13 @@ class CaptureManager:
             for pattern in background_patterns:
                 if pattern in domain:
                     return False
+
+        # カテゴリ除外
+        exclude_cats = filter_cfg.get("exclude_categories", [])
+        if exclude_cats:
+            category = event.get("domain_category", "")
+            if category in exclude_cats:
+                return False
 
         return True
 
@@ -1066,6 +1089,19 @@ class CaptureManager:
                                 event["asn_category"] = cat
                         except Exception as e:
                             logger.debug("ASN lookup error for %s: %s", dst_ip, e)
+                    # ドメイン分類（カテゴリ除外フィルタ用）
+                    domain = (
+                        event.get("http_host")
+                        or event.get("tls_sni")
+                        or event.get("resolved_domain")
+                        or event.get("dns_qry")
+                        or ""
+                    )
+                    if domain:
+                        svc, cat, role = get_service_by_domain_full(domain)
+                        event["domain_service"] = svc
+                        event["domain_category"] = cat
+                        event["domain_role"] = role or "primary"
                     # ファイルログ書き込み（フィルタなし、全イベント記録）
                     if self.file_logger:
                         self.file_logger.write_event(event)
