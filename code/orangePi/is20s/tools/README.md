@@ -13,6 +13,8 @@ is20s/
 ├── app/
 │   └── domain_services.py            # コードのみ（JSONから読み込み）
 ├── tools/
+│   ├── test_matching.py              # ローカルマッチングテスター
+│   ├── test_cases.csv                # 回帰テストケース
 │   ├── collect_unknown.sh            # 不明ドメイン収集
 │   ├── add_pattern.sh                # パターン追加
 │   ├── sync_dict.sh                  # 3デバイス同期＆バックアップ
@@ -49,6 +51,59 @@ is20s/
 | akb | 192.168.3.250 | マスター（ここでパターン追加） |
 | tam | 192.168.125.248 | スレーブ |
 | to | 192.168.126.248 | スレーブ |
+
+## ローカルテスト（デプロイ前検証）
+
+辞書変更前に必ずローカルでテストを実行すること。
+
+### test_matching.py
+
+デバイスと同一のマッチングロジックでローカルテストを行うツール。
+
+```bash
+# 単一ドメインテスト
+./test_matching.py youtube.com
+# 出力: youtube.com -> YouTube (Streaming)
+
+# 複数ドメインテスト
+./test_matching.py youtube.com netflix.com amazon.co.jp
+
+# 詳細モード（マッチしたパターンを表示）
+./test_matching.py -v www.gstatic.com
+# 出力: [MATCH] pattern='www.gstatic' type=dotted
+#       www.gstatic.com -> Google Media (Media) [pattern: www.gstatic]
+
+# バッチテスト（ファイルから）
+./test_matching.py -f domains.txt
+
+# 回帰テスト（期待値付きCSV）
+./test_matching.py -t test_cases.csv
+# 出力: Passed: 34/34, Failed: 0
+
+# 辞書のパターン数確認
+./test_matching.py --count
+# 出力: Patterns: 415
+
+# 別の辞書ファイルでテスト
+./test_matching.py -d custom_dict.json youtube.com
+```
+
+### test_cases.csv
+
+回帰テストケース。新しいパターン追加時はここにもテストケースを追加する。
+
+フォーマット: `domain,expected_service,expected_category`
+
+```csv
+# === Streaming ===
+youtube.com,YouTube,Streaming
+r1---sn-xxx.googlevideo.com,YouTube,Streaming
+
+# === Unknown (should not match) ===
+totally-unknown-domain.xyz,-,
+```
+
+`expected_service` が `-` の場合は unknown（マッチしない）を期待。
 
 ## 作業フロー
 
@@ -109,7 +164,19 @@ is20s/
 - サブドメインに対応できるよう短めに
 - 誤検知しないよう注意
 
-### 4. 辞書同期＆バックアップ
+### 4. ローカルテスト（必須）
+
+```bash
+# 回帰テスト実行
+./test_matching.py -t test_cases.csv
+
+# 追加したドメインを個別確認
+./test_matching.py -v kurogames.com
+```
+
+**全テストがパスするまでデプロイしない。**
+
+### 5. 辞書同期＆バックアップ
 
 ```bash
 ./sync_dict.sh
@@ -121,7 +188,7 @@ is20s/
 3. tam/toに同期＆再起動
 4. 各デバイスのパターン数確認
 
-### 5. GitHubにpush（必須）
+### 6. GitHubにpush（必須）
 
 ```bash
 cd /path/to/aranea_ISMS
@@ -175,3 +242,4 @@ echo 'mijeos12345@' | sudo -S systemctl restart is20s
 - 確認なしのパターン追加
 - バックアップなしの辞書更新
 - git pushしないでの作業終了
+- **ローカルテストなしのデプロイ**（`./test_matching.py -t test_cases.csv` が必須）

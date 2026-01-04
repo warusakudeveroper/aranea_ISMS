@@ -1,0 +1,57 @@
+# ドメインマッチング回帰テスト
+# フォーマット: domain,expected_service,expected_category
+# expected_service が "-" の場合は unknown を期待
+
+# === Streaming ===
+youtube.com,YouTube,Streaming
+www.youtube.com,YouTube,Streaming
+r1---sn-xxx.googlevideo.com,YouTube,Streaming
+netflix.com,Netflix,Streaming
+nicovideo.jp,ニコニコ,Streaming
+twitch.tv,Twitch,Streaming
+
+# === SNS ===
+www.instagram.com,Instagram,SNS
+cdninstagram.com,Instagram,SNS
+www.facebook.com,Facebook,SNS
+tiktok.com,TikTok,SNS
+xiaohongshu.com,小紅書,SNS
+
+# === Messenger ===
+line.me,LINE,Messenger
+discord.com,Discord,Messenger
+slack.com,Slack,Messenger
+
+# === EC ===
+amazon.co.jp,Amazon,EC
+amazon.com,Amazon,EC
+item.taobao.com,Taobao,EC
+img.alicdn.com,Alibaba CDN,CDN
+rakuten.co.jp,楽天,EC
+
+# === Cloud ===
+googleapis.com,Google API,Cloud
+s3.amazonaws.com,Amazon,EC
+azure.microsoft.com,Microsoft,Cloud
+
+# === CDN (auxiliary) ===
+www.gstatic.com,Google Media,Media
+ssl.gstatic.com,Google Media,Media
+fonts.gstatic.com,Google Fonts,CDN
+akamaized.net,Akamai,CDN
+cloudfront.net,AWS/CDN,CDN
+
+# === IoT ===
+alexa.amazon.com,Echo/Alexa,IoT
+iot.ap-northeast-1.amazonaws.com,AWS IoT,IoT
+
+# === Game ===
+store.steampowered.com,Steam,Game
+epicgames.com,Epic Games,Game
+
+# === Adult ===
+pornhub.com,PornHub,Adult
+
+# === Unknown (should not match) ===
+totally-unknown-domain.xyz,-,
+random123456.net,-,
