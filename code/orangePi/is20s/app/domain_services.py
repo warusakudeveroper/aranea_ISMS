@@ -302,6 +302,8 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     "fonts.gstatic": {"service": "Google Fonts", "category": "CDN"},
     "maps.gstatic": {"service": "Google Maps", "category": "Cloud"},
     "youtube.gstatic": {"service": "YouTube", "category": "Streaming"},
+    "www.gstatic": {"service": "Google Media", "category": "Media"},  # YouTube等のサムネイル・UI
+    "ssl.gstatic": {"service": "Google Media", "category": "Media"},  # 同上
     "encrypted-tbn": {"service": "Google Images", "category": "Search"},
     "lh3.googleusercontent": {"service": "GPhotos", "category": "Photo"},
     "lh4.googleusercontent": {"service": "GPhotos", "category": "Photo"},
@@ -310,7 +312,7 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     "play-lh.googleusercontent": {"service": "Google Play", "category": "Cloud"},
     # 汎用（最後にマッチ）
     "googleapis": {"service": "Google API", "category": "Cloud"},
-    "gstatic": {"service": "Google Static", "category": "CDN"},
+    "gstatic": {"service": "Google Static", "category": "Media"},  # 汎用もMedia寄りに
     "ggpht": {"service": "Google CDN", "category": "CDN"},
     "gvt1": {"service": "Google Update", "category": "System"},
     "gvt2": {"service": "Google Update", "category": "System"},
@@ -648,10 +650,12 @@ class DomainServiceManager:
             for pattern, info in self._data.items():
                 if "." in pattern:
                     # パターンにドットがある場合は厳密マッチ
+                    # prefix対応: www.gstatic → www.gstatic.com にマッチ
                     if (
                         domain_lower == pattern
                         or domain_lower.endswith("." + pattern)
                         or ("." + pattern + ".") in domain_lower
+                        or domain_lower.startswith(pattern + ".")
                     ):
                         result = (info.get("service"), info.get("category"))
                         break

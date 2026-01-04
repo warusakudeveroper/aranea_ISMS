@@ -1072,7 +1072,7 @@ async function refreshCaptureEvents(){{
       // 脅威/カテゴリフラグ
       const threat=e.threat;
       const threatColors={{'malware':'#dc2626','adult':'#9333ea','gambling':'#ea580c','fakenews':'#ca8a04','tor':'#0891b2'}};
-      const categoryColors={{'Streaming':'#2563eb','SNS':'#7c3aed','Photo':'#059669','Messenger':'#0891b2','Ad':'#ea580c','Tracker':'#ca8a04','VPN':'#dc2626'}};
+      const categoryColors={{'Streaming':'#2563eb','SNS':'#7c3aed','Photo':'#059669','Messenger':'#0891b2','Ad':'#ea580c','Tracker':'#ca8a04','VPN':'#dc2626','Media':'#8b5cf6','Creative':'#ec4899'}};
       let threatCell='';
       if(threat){{
         threatCell='<span style="color:'+(threatColors[threat]||'#dc2626')+';font-weight:bold;font-size:10px">'+threat.toUpperCase()+'</span>';
