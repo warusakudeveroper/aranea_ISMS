@@ -1592,8 +1592,8 @@ function updateStatsFromCache(){{
     if(!categories[cat].svcs[svc])categories[cat].svcs[svc]=0;
     categories[cat].svcs[svc]++;
     // タイムスタンプ更新
-    if(e.timestamp){{
-      const ts=new Date(e.timestamp);
+    if(e.time){{
+      const ts=new Date(e.time);
       if(!minTs||ts<minTs)minTs=ts;
       if(!maxTs||ts>maxTs)maxTs=ts;
     }}

@@ -786,6 +786,7 @@ class CaptureManager:
                 "time.apple.com", "time.windows.com",
                 "gateway.icloud.com",  # iCloud background
                 "init.push.apple.com",  # Apple Push
+                "connectivity-check.ubuntu.com",  # Ubuntu connectivity check
             ]
             for pattern in background_patterns:
                 if pattern in domain:
