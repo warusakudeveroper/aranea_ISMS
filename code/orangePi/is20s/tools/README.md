@@ -4,18 +4,43 @@
 
 3デバイス（akb, tam, to）のドメイン→サービス辞書を管理するツールセット。
 
-## ディレクトリ構成
+## アーキテクチャ
 
 ```
 is20s/
+├── data/
+│   └── default_domain_services.json  # デフォルト辞書（git管理、376パターン）
+├── app/
+│   └── domain_services.py            # コードのみ（JSONから読み込み）
 ├── tools/
-│   ├── collect_unknown.sh  # 不明ドメイン収集
-│   ├── add_pattern.sh      # パターン追加
-│   ├── sync_dict.sh        # 3デバイス同期＆バックアップ
-│   └── README.md           # このファイル
-└── dict_backups/           # バックアップ保存先（git管理）
+│   ├── collect_unknown.sh            # 不明ドメイン収集
+│   ├── add_pattern.sh                # パターン追加
+│   ├── sync_dict.sh                  # 3デバイス同期＆バックアップ
+│   └── README.md                     # このファイル
+└── dict_backups/                     # バックアップ保存先（git管理）
     └── domain_services_YYYYMMDDHHMMSS.json
 ```
+
+### デバイス上のファイル
+
+```
+/opt/is20s/
+├── data/
+│   └── default_domain_services.json  # デフォルト辞書（デプロイ時にコピー）
+└── app/
+    └── domain_services.py            # コード
+
+/var/lib/is20s/
+└── domain_services.json              # 学習データ（起動時メモリロード、変更時のみ書込）
+```
+
+### メモリ管理
+
+| データ | 保存先 | 永続化 |
+|--------|--------|--------|
+| 辞書データ | オンメモリ | 変更時のみ /var/lib/is20s/ に書込 |
+| 不明ドメイン（300件） | オンメモリ | なし（API経由で取得） |
+| LRUキャッシュ（10000件） | オンメモリ | なし |
 
 ## デバイス情報
 
@@ -105,6 +130,19 @@ git commit -m "dict: update domain_services (XXX patterns)"
 git push
 ```
 
+## デフォルト辞書の更新
+
+デフォルトパターンを変更する場合：
+
+```bash
+# 1. data/default_domain_services.json を直接編集
+# 2. 3デバイスにデプロイ
+scp data/default_domain_services.json mijeosadmin@192.168.3.250:/opt/is20s/data/
+# （tam, toにも同様）
+# 3. /var/lib/is20s/domain_services.json を削除して再起動
+# 4. git commit & push
+```
+
 ## トラブルシューティング
 
 ### パターンが反映されない
@@ -120,6 +158,15 @@ echo 'mijeos12345@' | sudo -S systemctl restart is20s
 
 ```bash
 curl "http://192.168.3.250:8080/api/domain-services/lookup?domain=example.com"
+```
+
+### デフォルトに戻す
+
+```bash
+# 学習データを削除してデフォルトから再初期化
+ssh mijeosadmin@192.168.3.250
+echo 'mijeos12345@' | sudo -S rm -f /var/lib/is20s/domain_services.json
+echo 'mijeos12345@' | sudo -S systemctl restart is20s
 ```
 
 ## 禁止事項

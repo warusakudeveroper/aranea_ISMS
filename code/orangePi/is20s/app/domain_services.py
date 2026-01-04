@@ -3,10 +3,10 @@ Domain to Service Mapping
 ドメインパターンからサービス名・カテゴリを判定
 
 Features:
-- JSONファイルで永続化 (/var/lib/is20s/domain_services.json)
-- メモリにロードして高速検索
-- 変更時のみファイル書き込み（SDカード保護）
-- CacheSyncManagerと連携してピア間同期
+- デフォルト辞書: data/default_domain_services.json（コード管理）
+- 学習データ: /var/lib/is20s/domain_services.json（デバイス上）
+- 起動時にメモリロード、変更時のみファイル書き込み（SDカード保護）
+- UnknownDomainsCache: 完全オンメモリ（永続化なし、API経由で取得）
 """
 import json
 import logging
@@ -17,6 +17,12 @@ from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# パス設定
+APP_DIR = Path(__file__).parent
+DEFAULT_SERVICES_FILE = APP_DIR.parent / "data" / "default_domain_services.json"
+DATA_DIR = Path("/var/lib/is20s")
+DOMAIN_SERVICES_FILE = DATA_DIR / "domain_services.json"
 
 
 class UnknownDomainsCache:
@@ -126,426 +132,22 @@ def record_unknown_domain(domain: str, src_ip: str = None, room_no: str = None) 
     """未検出ドメインを記録（便利関数）"""
     get_unknown_cache().add(domain, src_ip, room_no)
 
-# データファイルパス
-DATA_DIR = Path("/var/lib/is20s")
-DOMAIN_SERVICES_FILE = DATA_DIR / "domain_services.json"
 
-# デフォルトサービスマップ（ui.pyから移行）
-# 形式: pattern -> {"service": "...", "category": "..."}
-# 注: パターンは上から順に評価されるため、具体的なパターンを先に定義
-DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
-    # === IoT デバイス（汎用パターンより先に定義）===
-    # AWS IoT Hub（リージョン別）- ".pattern." in domain でマッチ
-    "iot.us-east-1": {"service": "AWS IoT", "category": "IoT"},
-    "iot.us-east-2": {"service": "AWS IoT", "category": "IoT"},
-    "iot.us-west-1": {"service": "AWS IoT", "category": "IoT"},
-    "iot.us-west-2": {"service": "AWS IoT", "category": "IoT"},
-    "iot.eu-west-1": {"service": "AWS IoT", "category": "IoT"},
-    "iot.eu-central-1": {"service": "AWS IoT", "category": "IoT"},
-    "iot.ap-northeast-1": {"service": "AWS IoT", "category": "IoT"},
-    "iot.ap-southeast-1": {"service": "AWS IoT", "category": "IoT"},
-    "iot.ap-southeast-2": {"service": "AWS IoT", "category": "IoT"},
-    # Amazon Echo / Alexa
-    "alexa": {"service": "Echo/Alexa", "category": "IoT"},
-    "amazonalexa": {"service": "Echo/Alexa", "category": "IoT"},
-    "avs-alexa": {"service": "Echo/Alexa", "category": "IoT"},
-    "device-metrics-us": {"service": "Echo/Alexa", "category": "IoT"},
-    # Google Home / Nest / Assistant / Chromecast
-    "assistant": {"service": "Google Home", "category": "IoT"},
-    "geller-pa.googleapis": {"service": "Google Home", "category": "IoT"},
-    "nest": {"service": "Nest", "category": "IoT"},
-    "chromecast": {"service": "Chromecast", "category": "IoT"},
-    "cast.google": {"service": "Chromecast", "category": "IoT"},
-    "castbox": {"service": "Chromecast", "category": "IoT"},
-    # Google内部LB（Chromecast/Google Home用）
-    ".l.google.com": {"service": "Google Cast", "category": "IoT"},
-    "www3.l.google": {"service": "Google Cast", "category": "IoT"},
-    "tools.l.google": {"service": "Google Cast", "category": "IoT"},
-    "clients.l.google": {"service": "Google Cast", "category": "IoT"},
-    # スマートホームデバイス
-    "switchbot": {"service": "SwitchBot", "category": "IoT"},
-    "wonderlabs": {"service": "SwitchBot", "category": "IoT"},
-    "tuya": {"service": "Tuya/スマート家電", "category": "IoT"},
-    "smartlife": {"service": "Smart Life", "category": "IoT"},
-    "tplinkcloud": {"service": "TP-Link", "category": "IoT"},
-    "meross": {"service": "Meross", "category": "IoT"},
-    "yeelight": {"service": "Yeelight", "category": "IoT"},
-    "philips-hue": {"service": "Philips Hue", "category": "IoT"},
-    "hue.philips": {"service": "Philips Hue", "category": "IoT"},
-    "ikea-sh": {"service": "IKEA Smart", "category": "IoT"},
-    "nature.global": {"service": "Nature Remo", "category": "IoT"},
-    "ifttt": {"service": "IFTTT", "category": "IoT"},
-    # スマートTV
-    "samsungcloudsolution": {"service": "Samsung TV", "category": "IoT"},
-    "samsungosp": {"service": "Samsung TV", "category": "IoT"},
-    "lgtvcommon": {"service": "LG TV", "category": "IoT"},
-    "lgsmartplatform": {"service": "LG TV", "category": "IoT"},
-    "bravia": {"service": "Sony TV", "category": "IoT"},
-    "sonyentertainmentnetwork": {"service": "Sony TV", "category": "IoT"},
-    "roku": {"service": "Roku", "category": "IoT"},
-    "fire-tv": {"service": "Fire TV", "category": "IoT"},
-    "firetv": {"service": "Fire TV", "category": "IoT"},
-    # プリンター・複合機
-    "epsonconnect": {"service": "Epson", "category": "IoT"},
-    "canon-cij": {"service": "Canon", "category": "IoT"},
-    "brothercloud": {"service": "Brother", "category": "IoT"},
-    "hpconnected": {"service": "HP", "category": "IoT"},
-    # 動画・配信
-    "youtube": {"service": "YouTube", "category": "Streaming"},
-    "ytimg": {"service": "YouTube", "category": "Streaming"},
-    "yt3.ggpht": {"service": "YouTube", "category": "Streaming"},
-    "googlevideo": {"service": "YouTube", "category": "Streaming"},
-    "youtubei": {"service": "YouTube", "category": "Streaming"},
-    "netflix": {"service": "Netflix", "category": "Streaming"},
-    "nflxvideo": {"service": "Netflix", "category": "Streaming"},
-    "nflximg": {"service": "Netflix", "category": "Streaming"},
-    "nflxext": {"service": "Netflix", "category": "Streaming"},
-    "nicovideo": {"service": "ニコニコ", "category": "Streaming"},
-    "nimg": {"service": "ニコニコ", "category": "Streaming"},
-    "niconi.co": {"service": "ニコニコ", "category": "Streaming"},
-    "twitchcdn": {"service": "Twitch", "category": "Streaming"},
-    "twitch.tv": {"service": "Twitch", "category": "Streaming"},
-    "jtvnw": {"service": "Twitch", "category": "Streaming"},
-    "abema": {"service": "ABEMA", "category": "Streaming"},
-    "ameba": {"service": "Ameba", "category": "SNS"},
-    "hulu": {"service": "Hulu", "category": "Streaming"},
-    "huluim": {"service": "Hulu", "category": "Streaming"},
-    "dazn": {"service": "DAZN", "category": "Streaming"},
-    "primevideo": {"service": "Prime Video", "category": "Streaming"},
-    "aiv-cdn": {"service": "Prime Video", "category": "Streaming"},
-    "disneyplus": {"service": "Disney+", "category": "Streaming"},
-    "spotify": {"service": "Spotify", "category": "Streaming"},
-    "scdn": {"service": "Spotify", "category": "Streaming"},
-    "applemusic": {"service": "Apple Music", "category": "Streaming"},
-    "soundcloud": {"service": "SoundCloud", "category": "Streaming"},
-    # SNS
-    "instagram": {"service": "Instagram", "category": "SNS"},
-    "cdninstagram": {"service": "Instagram", "category": "SNS"},
-    "facebook": {"service": "Facebook", "category": "SNS"},
-    "fbcdn": {"service": "Facebook", "category": "SNS"},
-    "fb.com": {"service": "Facebook", "category": "SNS"},
-    "twitter": {"service": "X", "category": "SNS"},
-    "x.com": {"service": "X", "category": "SNS"},
-    "twimg": {"service": "X", "category": "SNS"},
-    "threads.net": {"service": "Threads", "category": "SNS"},
-    "tiktok": {"service": "TikTok", "category": "SNS"},
-    "bytedance": {"service": "TikTok", "category": "SNS"},
-    "tiktokcdn": {"service": "TikTok", "category": "SNS"},
-    "musical.ly": {"service": "TikTok", "category": "SNS"},
-    "pinterest": {"service": "Pinterest", "category": "SNS"},
-    "pinimg": {"service": "Pinterest", "category": "SNS"},
-    "linkedin": {"service": "LinkedIn", "category": "SNS"},
-    "snapchat": {"service": "Snapchat", "category": "SNS"},
-    "snapkit": {"service": "Snapchat", "category": "SNS"},
-    "bereal": {"service": "BeReal", "category": "SNS"},
-    # 漫画・エンタメ
-    "piccoma": {"service": "ピッコマ", "category": "Entertainment"},
-    "kakaocdn": {"service": "Kakao", "category": "Entertainment"},
-    # メッセンジャー
-    "line": {"service": "LINE", "category": "Messenger"},
-    "linecorp": {"service": "LINE", "category": "Messenger"},
-    "line-apps": {"service": "LINE", "category": "Messenger"},
-    "line-scdn": {"service": "LINE", "category": "Messenger"},
-    "naver": {"service": "LINE", "category": "Messenger"},
-    "wechat": {"service": "WeChat", "category": "Messenger"},
-    "weixin": {"service": "WeChat", "category": "Messenger"},
-    "qq.com": {"service": "QQ/WeChat", "category": "Messenger"},
-    "tencent": {"service": "Tencent", "category": "Messenger"},
-    "whatsapp": {"service": "WhatsApp", "category": "Messenger"},
-    "telegram": {"service": "Telegram", "category": "Messenger"},
-    "t.me": {"service": "Telegram", "category": "Messenger"},
-    "discord": {"service": "Discord", "category": "Messenger"},
-    "discordapp": {"service": "Discord", "category": "Messenger"},
-    "slack": {"service": "Slack", "category": "Messenger"},
-    "slack-edge": {"service": "Slack", "category": "Messenger"},
-    "kakaotalk": {"service": "KakaoTalk", "category": "Messenger"},
-    "kakao": {"service": "Kakao", "category": "Messenger"},
-    "signal": {"service": "Signal", "category": "Messenger"},
-    "viber": {"service": "Viber", "category": "Messenger"},
-    # Google（具体的パターンを先に）
-    "googleusercontent": {"service": "GPhotos", "category": "Photo"},
-    "photos.google": {"service": "GPhotos", "category": "Photo"},
-    "lh3.google": {"service": "GPhotos", "category": "Photo"},
-    # Google認証
-    "accounts.google": {"service": "Google認証", "category": "Auth"},
-    "oauth2.googleapis": {"service": "Google認証", "category": "Auth"},
-    # Google Drive
-    "drive.google": {"service": "GDrive", "category": "Storage"},
-    "drivefrontend": {"service": "GDrive", "category": "Storage"},
-    "docs.google": {"service": "GDocs", "category": "Storage"},
-    "sheets.google": {"service": "GSheets", "category": "Storage"},
-    "slides.google": {"service": "GSlides", "category": "Storage"},
-    # Google Meet / Chat
-    "meet.google": {"service": "GMeet", "category": "Video"},
-    "chat.google": {"service": "GChat", "category": "Messenger"},
-    # Gmail
-    "gmail": {"service": "Gmail", "category": "Mail"},
-    "googlemail": {"service": "Gmail", "category": "Mail"},
-    "mail.google": {"service": "Gmail", "category": "Mail"},
-    # 検索
-    "www.google": {"service": "Google検索", "category": "Search"},
-    "google.com/search": {"service": "Google検索", "category": "Search"},
-    # 広告
-    "googlesyndication": {"service": "GoogleAds", "category": "Ad"},
-    "doubleclick": {"service": "GoogleAds", "category": "Ad"},
-    "googleadservices": {"service": "GoogleAds", "category": "Ad"},
-    "pagead": {"service": "GoogleAds", "category": "Ad"},
-    # トラッキング
-    "google-analytics": {"service": "GA", "category": "Tracker"},
-    "analytics.google": {"service": "GA", "category": "Tracker"},
-    "googletagmanager": {"service": "GTM", "category": "Tracker"},
-    "tagmanager.google": {"service": "GTM", "category": "Tracker"},
-    # Firebase
-    "firebase": {"service": "Firebase", "category": "Cloud"},
-    "firebaseio": {"service": "Firebase", "category": "Cloud"},
-    # gstatic細分化（汎用より先に）- 全てauxiliary（共有CDN）
-    "fonts.gstatic": {"service": "Google Fonts", "category": "CDN", "role": "auxiliary"},
-    "maps.gstatic": {"service": "Google Maps", "category": "Cloud", "role": "auxiliary"},
-    "youtube.gstatic": {"service": "YouTube", "category": "Streaming", "role": "auxiliary"},
-    "www.gstatic": {"service": "Google Media", "category": "Media", "role": "auxiliary"},
-    "ssl.gstatic": {"service": "Google Media", "category": "Media", "role": "auxiliary"},
-    "encrypted-tbn": {"service": "Google Images", "category": "Search", "role": "auxiliary"},
-    "lh3.googleusercontent": {"service": "GPhotos", "category": "Photo", "role": "auxiliary"},
-    "lh4.googleusercontent": {"service": "GPhotos", "category": "Photo", "role": "auxiliary"},
-    "lh5.googleusercontent": {"service": "GPhotos", "category": "Photo", "role": "auxiliary"},
-    "play.google": {"service": "Google Play", "category": "Cloud"},
-    "play-lh.googleusercontent": {"service": "Google Play", "category": "Cloud", "role": "auxiliary"},
-    # 汎用（最後にマッチ）
-    "googleapis": {"service": "Google API", "category": "Cloud", "role": "auxiliary"},
-    "gstatic": {"service": "Google Static", "category": "Media", "role": "auxiliary"},
-    "ggpht": {"service": "Google CDN", "category": "CDN", "role": "auxiliary"},
-    "gvt1": {"service": "Google Update", "category": "System"},
-    "gvt2": {"service": "Google Update", "category": "System"},
-    "google": {"service": "Google", "category": "Cloud"},
-    # Apple
-    "itunes": {"service": "iTunes", "category": "Cloud"},
-    "itunes-apple": {"service": "iTunes", "category": "Cloud"},
-    "appstore": {"service": "AppStore", "category": "Cloud"},
-    "apps.apple": {"service": "AppStore", "category": "Cloud"},
-    "amp-api": {"service": "AppStore", "category": "Cloud"},
-    "icloud": {"service": "iCloud", "category": "Photo"},
-    "apple-cloudkit": {"service": "iCloud", "category": "Photo"},
-    "apple.map": {"service": "Maps", "category": "Cloud"},
-    "apple-map": {"service": "Maps", "category": "Cloud"},
-    "ical": {"service": "iCal", "category": "Cloud"},
-    "caldav": {"service": "iCal", "category": "Cloud"},
-    "imessage": {"service": "iMessage", "category": "Messenger"},
-    "push.apple": {"service": "Push", "category": "Cloud"},
-    "mzstatic": {"service": "Apple", "category": "Cloud"},
-    "apple": {"service": "Apple", "category": "Cloud"},
-    "mac.com": {"service": "Apple", "category": "Cloud"},
-    # CDN（サービス特定可能なパターンを先に）
-    # Adobe系（Akamai経由）
-    "adobe": {"service": "Adobe", "category": "Creative"},
-    "adobess": {"service": "Adobe", "category": "Creative"},
-    "typekit": {"service": "Adobe Fonts", "category": "CDN"},
-    "creativecloud": {"service": "Adobe CC", "category": "Creative"},
-    # DeepL翻訳
-    "deepl": {"service": "DeepL", "category": "AI"},
-    # Azure Traffic Manager
-    "trafficmanager": {"service": "Azure TM", "category": "Cloud"},
-    # 汎用CDN - 全てauxiliary（共有配信基盤）
-    "fastly.net": {"service": "Fastly", "category": "CDN", "role": "auxiliary"},
-    "akamai": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
-    "edgekey": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
-    "edgesuite": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
-    "akadns": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
-    "akamaized": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
-    "cloudflare": {"service": "Cloudflare", "category": "CDN", "role": "auxiliary"},
-    "cf-cdn": {"service": "Cloudflare", "category": "CDN", "role": "auxiliary"},
-    "cloudfront": {"service": "CloudFront", "category": "CDN", "role": "auxiliary"},
-    "fastly": {"service": "Fastly", "category": "CDN", "role": "auxiliary"},
-    "edgecast": {"service": "Edgecast", "category": "CDN", "role": "auxiliary"},
-    "jsdelivr": {"service": "jsDelivr", "category": "CDN", "role": "auxiliary"},
-    "unpkg": {"service": "unpkg", "category": "CDN", "role": "auxiliary"},
-    "bunnycdn": {"service": "BunnyCDN", "category": "CDN", "role": "auxiliary"},
-    "keycdn": {"service": "KeyCDN", "category": "CDN", "role": "auxiliary"},
-    # 日本メディア
-    "tbs.co.jp": {"service": "TBS", "category": "Media"},
-    "nhk.or.jp": {"service": "NHK", "category": "Media"},
-    "ntv.co.jp": {"service": "日テレ", "category": "Media"},
-    "fujitv": {"service": "フジ", "category": "Media"},
-    "tv-asahi": {"service": "テレ朝", "category": "Media"},
-    "tv-tokyo": {"service": "テレ東", "category": "Media"},
-    "radiko": {"service": "radiko", "category": "Streaming"},
-    # SDK
-    "safedk": {"service": "SafeDK", "category": "SDK"},
-    # Microsoft
-    "microsoft": {"service": "Microsoft", "category": "Cloud"},
-    "msft": {"service": "Microsoft", "category": "Cloud"},
-    "azure": {"service": "Azure", "category": "Cloud"},
-    "windows": {"service": "Windows", "category": "Cloud"},
-    "msn": {"service": "MSN", "category": "Cloud"},
-    "office": {"service": "Office365", "category": "Cloud"},
-    "outlook": {"service": "Outlook", "category": "Mail"},
-    "hotmail": {"service": "Outlook", "category": "Mail"},
-    "live.com": {"service": "Microsoft", "category": "Cloud"},
-    "onedrive": {"service": "OneDrive", "category": "Cloud"},
-    "bing": {"service": "Bing", "category": "Cloud"},
-    "skype": {"service": "Skype", "category": "Video"},
-    "teams": {"service": "Teams", "category": "Video"},
-    # EC
-    "amazon": {"service": "Amazon", "category": "EC"},
-    "cloudfront": {"service": "AWS/CDN", "category": "CDN"},
-    "amazonaws": {"service": "AWS", "category": "Cloud"},
-    "compute-1": {"service": "AWS", "category": "Cloud"},
-    "ec2-": {"service": "AWS", "category": "Cloud"},
-    "rakuten": {"service": "楽天", "category": "EC"},
-    "yahoo": {"service": "Yahoo", "category": "EC"},
-    "yimg": {"service": "Yahoo", "category": "EC"},
-    "mercari": {"service": "メルカリ", "category": "EC"},
-    "zozotown": {"service": "ZOZO", "category": "EC"},
-    "zozo": {"service": "ZOZO", "category": "EC"},
-    "paypay": {"service": "PayPay", "category": "EC"},
-    "shopify": {"service": "Shopify", "category": "EC"},
-    "aliexpress": {"service": "AliExpress", "category": "EC"},
-    "alibaba": {"service": "Alibaba", "category": "EC"},
-    "temu": {"service": "Temu", "category": "EC"},
-    "shein": {"service": "SHEIN", "category": "EC"},
-    # ゲーム
-    "steam": {"service": "Steam", "category": "Game"},
-    "steampowered": {"service": "Steam", "category": "Game"},
-    "steamcommunity": {"service": "Steam", "category": "Game"},
-    "playstation": {"service": "PlayStation", "category": "Game"},
-    "sony": {"service": "Sony", "category": "Game"},
-    "xbox": {"service": "Xbox", "category": "Game"},
-    "nintendo": {"service": "Nintendo", "category": "Game"},
-    "epicgames": {"service": "Epic Games", "category": "Game"},
-    "unrealengine": {"service": "Epic", "category": "Game"},
-    "riotgames": {"service": "Riot", "category": "Game"},
-    "leagueoflegends": {"service": "LoL", "category": "Game"},
-    "blizzard": {"service": "Blizzard", "category": "Game"},
-    "battle.net": {"service": "Blizzard", "category": "Game"},
-    "mihoyo": {"service": "miHoYo", "category": "Game"},
-    "hoyoverse": {"service": "HoYoverse", "category": "Game"},
-    "cygames": {"service": "Cygames", "category": "Game"},
-    # クラウド・ストレージ
-    "dropbox": {"service": "Dropbox", "category": "Cloud"},
-    "box.com": {"service": "Box", "category": "Cloud"},
-    "github": {"service": "GitHub", "category": "Cloud"},
-    "githubusercontent": {"service": "GitHub", "category": "Cloud"},
-    "githubassets": {"service": "GitHub", "category": "Cloud"},
-    "gitlab": {"service": "GitLab", "category": "Cloud"},
-    "bitbucket": {"service": "Bitbucket", "category": "Cloud"},
-    "atlassian": {"service": "Atlassian", "category": "Cloud"},
-    # ビデオ会議
-    "zoom": {"service": "Zoom", "category": "Video"},
-    "zoomcdn": {"service": "Zoom", "category": "Video"},
-    "webex": {"service": "Webex", "category": "Video"},
-    "cisco": {"service": "Cisco", "category": "Video"},
-    # AI
-    "chatgpt": {"service": "ChatGPT", "category": "AI"},
-    "openai": {"service": "OpenAI", "category": "AI"},
-    "anthropic": {"service": "Anthropic", "category": "AI"},
-    "claude": {"service": "Claude", "category": "AI"},
-    "statsig": {"service": "Analytics", "category": "Tracker"},
-    "gemini": {"service": "Gemini", "category": "AI"},
-    "bard": {"service": "Bard", "category": "AI"},
-    "copilot": {"service": "Copilot", "category": "AI"},
-    "cursor": {"service": "Cursor", "category": "AI"},
-    "cursor.sh": {"service": "Cursor", "category": "AI"},
-    # ニュース
-    "nhk": {"service": "NHK", "category": "News"},
-    "asahi": {"service": "朝日新聞", "category": "News"},
-    "yomiuri": {"service": "読売新聞", "category": "News"},
-    "nikkei": {"service": "日経", "category": "News"},
-    "cnn": {"service": "CNN", "category": "News"},
-    "bbc": {"service": "BBC", "category": "News"},
-    # アダルト
-    "pornhub": {"service": "PornHub", "category": "Adult"},
-    "xvideos": {"service": "XVideos", "category": "Adult"},
-    "xhamster": {"service": "xHamster", "category": "Adult"},
-    "xnxx": {"service": "XNXX", "category": "Adult"},
-    "cityheaven": {"service": "CityHeaven", "category": "Adult"},
-    "fuzoku": {"service": "風俗", "category": "Adult"},
-    # Tor
-    "tor": {"service": "Tor", "category": "VPN"},
-    "onion": {"service": "Tor", "category": "VPN"},
-    # 広告・トラッキング
-    "moloco": {"service": "Moloco", "category": "Ad"},
-    "adsmoloco": {"service": "Moloco", "category": "Ad"},
-    "applovin": {"service": "AppLovin", "category": "Ad"},
-    "fivecdm": {"service": "AdSDK", "category": "Ad"},
-    "adtng": {"service": "AdTech", "category": "Ad"},
-    "adnxs": {"service": "AdTech", "category": "Ad"},
-    "adsrvr": {"service": "AdTech", "category": "Ad"},
-    "criteo": {"service": "Criteo", "category": "Ad"},
-    "bance": {"service": "AdTech", "category": "Ad"},
-    "adjust": {"service": "Adjust", "category": "Tracker"},
-    "appsflyer": {"service": "AppsFlyer", "category": "Tracker"},
-    "branch": {"service": "Branch", "category": "Tracker"},
-    "amplitude": {"service": "Amplitude", "category": "Tracker"},
-    "segment": {"service": "Segment", "category": "Tracker"},
-    "mixpanel": {"service": "Mixpanel", "category": "Tracker"},
-    "taboola": {"service": "Taboola", "category": "Ad"},
-    "outbrain": {"service": "Outbrain", "category": "Ad"},
-    "smartnews-ads": {"service": "SmartNews", "category": "Ad"},
-    "pubmatic": {"service": "PubMatic", "category": "Ad"},
-    "rubiconproject": {"service": "Rubicon", "category": "Ad"},
-    "openx": {"service": "OpenX", "category": "Ad"},
-    "casalemedia": {"service": "Casale", "category": "Ad"},
-    "advertising": {"service": "AdTech", "category": "Ad"},
-    "adsafeprotected": {"service": "AdSafe", "category": "Ad"},
-    "reflected": {"service": "AdTech", "category": "Ad"},
-    "wcdnga": {"service": "AdTech", "category": "Ad"},
-    "trafficjunky": {"service": "AdTech", "category": "Ad"},
-    "adhigh": {"service": "AdTech", "category": "Ad"},
-    "adcolony": {"service": "AdColony", "category": "Ad"},
-    "unity3d": {"service": "Unity", "category": "Ad"},
-    "unityads": {"service": "UnityAds", "category": "Ad"},
-    "chartboost": {"service": "Chartboost", "category": "Ad"},
-    "vungle": {"service": "Vungle", "category": "Ad"},
-    "ironsrc": {"service": "IronSource", "category": "Ad"},
-    "fyber": {"service": "Fyber", "category": "Ad"},
-    "inmobi": {"service": "InMobi", "category": "Ad"},
-    "mopub": {"service": "MoPub", "category": "Ad"},
-    "relaido": {"service": "Relaido", "category": "Ad"},
-    "deepintent": {"service": "DeepIntent", "category": "Ad"},
-    "admanmedia": {"service": "AdMan", "category": "Ad"},
-    "turn.com": {"service": "Turn", "category": "Ad"},
-    "media.net": {"service": "MediaNet", "category": "Ad"},
-    "btloader": {"service": "BTLoader", "category": "Ad"},
-    "trustarc": {"service": "TrustArc", "category": "Tracker"},
-    "tsdtocl": {"service": "AdTech", "category": "Ad"},
-    "profilepassport": {"service": "ProfilePassport", "category": "Tracker"},
-    "netseer": {"service": "NetSeer", "category": "Ad"},
-    "d-markets": {"service": "D-Markets", "category": "Ad"},
-    "ytv-viewing": {"service": "YTV", "category": "Tracker"},
-    "digicert": {"service": "DigiCert", "category": "Cert"},
-    "ocsp": {"service": "OCSP", "category": "Cert"},
-    "rustdesk": {"service": "RustDesk", "category": "Remote"},
-    # アナリティクス
-    "hotjar": {"service": "Hotjar", "category": "Tracker"},
-    "mouseflow": {"service": "Mouseflow", "category": "Tracker"},
-    "fullstory": {"service": "FullStory", "category": "Tracker"},
-    "crazyegg": {"service": "CrazyEgg", "category": "Tracker"},
-    "heap": {"service": "Heap", "category": "Tracker"},
-    "intercom": {"service": "Intercom", "category": "Tracker"},
-    # VPN
-    "openvpn": {"service": "OpenVPN", "category": "VPN"},
-    "wireguard": {"service": "WireGuard", "category": "VPN"},
-    "nordvpn": {"service": "NordVPN", "category": "VPN"},
-    "expressvpn": {"service": "ExpressVPN", "category": "VPN"},
-    "surfshark": {"service": "Surfshark", "category": "VPN"},
-    "protonvpn": {"service": "ProtonVPN", "category": "VPN"},
-    "ipvanish": {"service": "IPVanish", "category": "VPN"},
-    "cyberghost": {"service": "CyberGhost", "category": "VPN"},
-    "privateinternetaccess": {"service": "PIA", "category": "VPN"},
-    "mullvad": {"service": "Mullvad", "category": "VPN"},
-    "tunnelbear": {"service": "TunnelBear", "category": "VPN"},
-    # その他
-    "wordpress": {"service": "WordPress", "category": "Cloud"},
-    "wix": {"service": "Wix", "category": "Cloud"},
-    "cloudinary": {"service": "Cloudinary", "category": "CDN"},
-    "imgix": {"service": "imgix", "category": "CDN"},
-    # メール追加
-    "smartmailcloud": {"service": "SmartMail", "category": "Mail"},
-    # IoT追加
-    "xiaomi": {"service": "Xiaomi", "category": "IoT"},
-    # Google内部テスト
-    "antigravity": {"service": "Google Test", "category": "Cloud"},
-}
-
+def _load_default_services() -> Dict[str, Dict[str, str]]:
+    """デフォルト辞書をJSONファイルから読み込み"""
+    try:
+        if DEFAULT_SERVICES_FILE.exists():
+            with DEFAULT_SERVICES_FILE.open(encoding="utf-8") as f:
+                data = json.load(f)
+                services = data.get("services", {})
+                logger.info("Loaded %d default services from %s", len(services), DEFAULT_SERVICES_FILE)
+                return services
+        else:
+            logger.warning("Default services file not found: %s", DEFAULT_SERVICES_FILE)
+            return {}
+    except Exception as e:
+        logger.error("Failed to load default services: %s", e)
+        return {}
 
 class DomainServiceManager:
     """
@@ -589,12 +191,15 @@ class DomainServiceManager:
                     logger.warning("Failed to load domain services: %s", e)
                     self._data = {}
 
-            # 空の場合はデフォルトを使用
+            # 空の場合はデフォルトJSONから読み込み
             if not self._data:
-                self._data = DEFAULT_DOMAIN_SERVICES.copy()
-                self._dirty = True
-                self._save_internal()
-                logger.info("Initialized with %d default domain services", len(self._data))
+                self._data = _load_default_services()
+                if self._data:
+                    self._dirty = True
+                    self._save_internal()
+                    logger.info("Initialized with %d default domain services", len(self._data))
+                else:
+                    logger.error("No default services available")
 
     def _save_internal(self) -> bool:
         """内部保存（ロック取得済み前提）"""
