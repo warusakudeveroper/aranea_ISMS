@@ -97,58 +97,67 @@ xiaohongshu.com -> 小紅書 (SNS) ✓
 
 ---
 
-## 4. データ有意性の問題（重大）
+## 4. データ有意性の問題と用途別要件
 
-### IoT/Infrastructure支配問題
+### 現状の分布
 
-現在のtam/toデータはIoT機器とインフラ通信が大半を占め、ゲスト行動の分析には不適切：
-
-| デバイス | IoT | Infrastructure | 合計(有意でない) | 有意なデータ |
-|---------|-----|----------------|-----------------|-------------|
+| デバイス | IoT | Infrastructure | 合計 | 残り |
+|---------|-----|----------------|------|------|
 | tam | 43.3% | 29.7% | **73.0%** | 27.0% |
 | to | 37.3% | 14.0% | **51.3%** | 48.7% |
 
-### 主な原因
+### 用途別カテゴリ要件
 
-1. **Google Cast/Chromecast** (IoT)
+| カテゴリ | 部屋ヘルス監視 | マーケティング分析 | 備考 |
+|---------|--------------|------------------|------|
+| **SNS/Streaming** | ○ | ◎ | 主要分析対象 |
+| **Search** | ○ | ○ | バルク化解消が前提 |
+| **IoT** | ◎ | × | Chromecast, linkS2等の稼働確認 |
+| **Infrastructure** | △ | × | DNS/DHCPは△、NTPは完全不要 |
+| **NTP** | × | × | 分離してデフォルト除外すべき |
+
+### 主なIoT通信（部屋ヘルス監視で有用）
+
+1. **Google Cast/Chromecast**
    - `www3.l.google.com`
    - `cast.google.com`
    - `tools.l.google.com`
 
-2. **PTR逆引きクエリ** (Infrastructure)
-   - `*.in-addr.arpa`
+2. **iwasaki linkS2スイッチ** （要パターン追加）
+   - 現在未分類の可能性
 
-3. **NTPサーバー** (Infrastructure)
-   - `ntp.nict.jp`
-   - `*.pool.ntp.org`
+3. **Alexa/Echo**
+   - `*.amazon.com`, `*.amazonaws.com`
+
+### 完全不要なトラフィック
+
+- **NTPサーバー** → 新カテゴリ「NTP」に分離してデフォルト除外
+  - `ntp.nict.jp`
+  - `*.pool.ntp.org`
 
 ### 改善案
 
-#### 案1: カテゴリ除外オプション追加（推奨）
-```javascript
-// ui.py updateBackendFilter() の修正案
-exclude_categories: [
-  ...(document.getElementById('cap-filter-search').checked ? ['Search'] : []),
-  ...(document.getElementById('cap-filter-iot').checked ? ['IoT'] : []),
-  ...(document.getElementById('cap-filter-infra').checked ? ['Infrastructure'] : []),
-]
+#### 案1: モード切替（推奨）
+```
+[部屋ヘルス監視モード]     [マーケティング分析モード]
+├─ SNS/Streaming ○         ├─ SNS/Streaming ◎
+├─ Search ○                 ├─ Search ○
+├─ IoT ◎                    ├─ IoT ×（除外）
+├─ Infrastructure △         ├─ Infrastructure ×（除外）
+└─ NTP ×（常時除外）        └─ NTP ×（常時除外）
 ```
 
-**メリット**: UI操作で柔軟に除外可能
-**デメリット**: Search除外と同様のバルク化リスク
+UIにモード切替トグルを追加し、プリセットで除外カテゴリを変更。
 
-#### 案2: 二層表示（Primary/Auxiliary分離）
-- 既存のrole属性（primary/auxiliary）を活用
-- IoT/InfraをauxiliaryにデフォルトでマークしUI上で分離表示
-- データは保持しつつ、表示優先度を下げる
+#### 案2: NTP分離 + カテゴリ除外チェックボックス
+- NTPをInfrastructureから分離して独立カテゴリ化
+- IoT/Infrastructure/NTPの個別除外チェックボックス追加
+- NTPはデフォルトON（除外）
 
-**メリット**: データ損失なし、分析目的に応じて切替可能
-**デメリット**: UI改修が大きい
-
-#### 案3: 統計専用フィルタ
-- Monitor表示は全件表示
-- Stats統計のみIoT/Infrastructure除外
-- 生データと分析データを分離
+#### 案3: Search除外廃止
+- 現在のSearch除外チェックボックスを廃止
+- バルク化問題の根本解決（パターン精緻化）を優先
+- 「何でもSearchに入る」問題を解消してから再検討
 
 ---
 
@@ -247,25 +256,31 @@ Unknown 13件の内訳:
 | 問題 | 深刻度 | 状態 |
 |-----|-------|------|
 | バルク化（scdn, line, nest, tor） | 高 | 要修正 |
-| バルク化（www.google → Search） | 中 | 要検討 |
-| IoT/Infrastructure支配（73%） | 高 | 要対応 |
+| バルク化（www.google → Search） | 中 | パターン精緻化で対応 |
+| IoT/Infrastructure支配（73%） | 高 | モード切替で対応 |
+| NTP完全不要 | 中 | 分離・デフォルト除外 |
 | SNS未検出 | 低 | 環境要因（パターンは正常） |
 | Stats表示順 | - | 正常動作確認済 |
 
 ### 推奨アクション優先順位
 
 1. **バルク化パターン修正**（即座に）
-   - `line-scdn` 追加
+   - `line-scdn` 追加（LINE CDN）
    - `line` → `line.me` に変更
+   - `www.google` → より厳密なパターンに分解
    - `ntp.nict.jp`, `mcafee` 追加
 
-2. **IoT/Infrastructure除外UI追加**（短期）
-   - チェックボックス2つ追加
-   - 既存のexclude_categoriesロジック拡張
+2. **NTP分離**（短期）
+   - InfrastructureからNTPを分離して独立カテゴリ化
+   - `ntp`, `pool.ntp.org`, `ntp.nict.jp` → NTP (デフォルト除外)
 
-3. **Search除外の再検討**（中期）
-   - `www.google` パターンをより厳密に
-   - または、Search除外自体を廃止してIoT/Infrastructure除外に切替
+3. **モード切替UI追加**（短期）
+   - 「部屋ヘルス監視」「マーケティング分析」切替
+   - IoT/Infrastructure除外プリセット
 
-4. **二層表示の検討**（長期）
-   - Primary/Auxiliary分離による柔軟な表示制御
+4. **Search除外チェックボックス廃止検討**（中期）
+   - バルク化解消後に再評価
+   - 現状の実装は誤解を招く可能性
+
+5. **iwasaki linkS2パターン追加**（要調査）
+   - 実際の通信ドメインを特定してIoT分類に追加
