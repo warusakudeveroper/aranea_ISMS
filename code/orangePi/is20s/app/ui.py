@@ -551,7 +551,10 @@ gzip=true</pre>
 <!-- Statistics Tab -->
 <div id="tab-stats" class="tab-content">
 <div class="card">
-<div class="card-title">Room別アクセス状況 <span id="stats-room-count" style="color:var(--text-muted);font-weight:normal"></span></div>
+<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+<span>Room別アクセス状況 <span id="stats-room-count" style="color:var(--text-muted);font-weight:normal"></span></span>
+<span id="stats-period" style="font-size:11px;color:var(--text-muted);font-weight:normal"></span>
+</div>
 <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">部屋クリックでカテゴリ詳細を表示</p>
 <div id="stats-room-chart" class="stats-chart-container"></div>
 </div>
@@ -1568,15 +1571,17 @@ function updateStatsFromCache(){{
   if(!captureEventsCache)return;
   const events=statsFilterEvents(captureEventsCache);
   const rooms={{}};const categories={{}};
-  // 設定済みroom全件を0件で初期化
+  // 設定済みroom全件を0件で初期化（登録順を保持）
   configuredRooms.forEach(r=>{{
-    rooms[r]={{total:0,cats:{{}}}};
+    rooms[r]={{total:0,cats:{{}},order:configuredRooms.indexOf(r)}};
   }});
+  // 統計期間計算用
+  let minTs=null,maxTs=null;
   events.forEach(e=>{{
     const room=e.room_no||'UNK';
     const cat=e.domain_category||'Unknown';
     const svc=e.domain_service||e.http_host||e.tls_sni||e.resolved_domain||'Unknown';
-    if(!rooms[room])rooms[room]={{total:0,cats:{{}}}};
+    if(!rooms[room])rooms[room]={{total:0,cats:{{}},order:9999}};
     rooms[room].total++;
     if(!rooms[room].cats[cat])rooms[room].cats[cat]={{total:0,svcs:{{}}}};
     rooms[room].cats[cat].total++;
@@ -1586,22 +1591,43 @@ function updateStatsFromCache(){{
     categories[cat].total++;
     if(!categories[cat].svcs[svc])categories[cat].svcs[svc]=0;
     categories[cat].svcs[svc]++;
+    // タイムスタンプ更新
+    if(e.timestamp){{
+      const ts=new Date(e.timestamp);
+      if(!minTs||ts<minTs)minTs=ts;
+      if(!maxTs||ts>maxTs)maxTs=ts;
+    }}
   }});
   statsData={{rooms,categories}};
   statsFirstLoad=false;
+  // 統計期間表示
+  const periodEl=document.getElementById('stats-period');
+  if(periodEl){{
+    if(minTs&&maxTs){{
+      const fmt=d=>{{
+        const yy=String(d.getFullYear()).slice(-2);
+        const mm=String(d.getMonth()+1).padStart(2,'0');
+        const dd=String(d.getDate()).padStart(2,'0');
+        const hh=String(d.getHours()).padStart(2,'0');
+        const mi=String(d.getMinutes()).padStart(2,'0');
+        return yy+'/'+mm+'/'+dd+' '+hh+':'+mi;
+      }};
+      periodEl.textContent='統計期間: '+fmt(minTs)+' - '+fmt(maxTs);
+    }}else{{
+      periodEl.textContent='';
+    }}
+  }}
   updateRoomChart();
   updateOverallChart();
   if(statsSelectedRoom)updateRoomDetail(statsSelectedRoom);
 }}
 function updateRoomChart(){{
   const container=document.getElementById('stats-room-chart');
-  // room番号順でソート（UNKは最後）、全件表示
+  // 設定順でソート（order属性使用、未設定roomは最後）
   const rooms=Object.entries(statsData.rooms).sort((a,b)=>{{
-    if(a[0]==='UNK')return 1;
-    if(b[0]==='UNK')return -1;
-    const na=parseInt(a[0]),nb=parseInt(b[0]);
-    if(!isNaN(na)&&!isNaN(nb))return na-nb;
-    return a[0].localeCompare(b[0]);
+    const orderA=a[1].order??9999;
+    const orderB=b[1].order??9999;
+    return orderA-orderB;
   }});
   if(rooms.length===0){{container.innerHTML='<p style="color:var(--text-muted)">監視対象Roomが設定されていません</p>';return;}}
   document.getElementById('stats-room-count').textContent='('+rooms.length+' rooms)';

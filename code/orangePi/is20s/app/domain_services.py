@@ -150,12 +150,18 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     "amazonalexa": {"service": "Echo/Alexa", "category": "IoT"},
     "avs-alexa": {"service": "Echo/Alexa", "category": "IoT"},
     "device-metrics-us": {"service": "Echo/Alexa", "category": "IoT"},
-    # Google Home / Nest / Assistant
+    # Google Home / Nest / Assistant / Chromecast
     "assistant": {"service": "Google Home", "category": "IoT"},
     "geller-pa.googleapis": {"service": "Google Home", "category": "IoT"},
     "nest": {"service": "Nest", "category": "IoT"},
     "chromecast": {"service": "Chromecast", "category": "IoT"},
+    "cast.google": {"service": "Chromecast", "category": "IoT"},
     "castbox": {"service": "Chromecast", "category": "IoT"},
+    # Google内部LB（Chromecast/Google Home用）
+    ".l.google.com": {"service": "Google Cast", "category": "IoT"},
+    "www3.l.google": {"service": "Google Cast", "category": "IoT"},
+    "tools.l.google": {"service": "Google Cast", "category": "IoT"},
+    "clients.l.google": {"service": "Google Cast", "category": "IoT"},
     # スマートホームデバイス
     "switchbot": {"service": "SwitchBot", "category": "IoT"},
     "wonderlabs": {"service": "SwitchBot", "category": "IoT"},
