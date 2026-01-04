@@ -553,9 +553,16 @@ gzip=true</pre>
 <div class="card">
 <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
 <span>Room別アクセス状況 <span id="stats-room-count" style="color:var(--text-muted);font-weight:normal"></span></span>
+<div style="display:flex;align-items:center;gap:12px">
+<label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
+<input type="checkbox" id="stats-primary-only" checked onchange="updateStatsFromCache()">
+<span>一次通信のみ</span>
+</label>
+<span id="stats-aux-count" style="font-size:11px;color:var(--text-muted)"></span>
 <span id="stats-period" style="font-size:11px;color:var(--text-muted);font-weight:normal"></span>
 </div>
-<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">部屋クリックでカテゴリ詳細を表示</p>
+</div>
+<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">部屋クリックでカテゴリ詳細を表示 | 「一次通信のみ」ON: CDN等の補助通信を除外</p>
 <div id="stats-room-chart" class="stats-chart-container"></div>
 </div>
 <div class="card" id="stats-room-detail-card" style="display:none">
@@ -1569,7 +1576,21 @@ function showStatsLoading(){{
 }}
 function updateStatsFromCache(){{
   if(!captureEventsCache)return;
-  const events=statsFilterEvents(captureEventsCache);
+  const allEvents=statsFilterEvents(captureEventsCache);
+  const primaryOnly=document.getElementById('stats-primary-only')?.checked??true;
+
+  // auxiliary件数カウント
+  let auxCount=0;
+  const events=allEvents.filter(e=>{{
+    const role=e.domain_role||'primary';
+    if(role==='auxiliary'){{auxCount++;return !primaryOnly;}}
+    return true;
+  }});
+
+  // auxiliary件数表示
+  const auxEl=document.getElementById('stats-aux-count');
+  if(auxEl)auxEl.textContent=primaryOnly?'(補助通信 '+auxCount+'件 除外中)':'';
+
   const rooms={{}};const categories={{}};
   // 設定済みroom全件を0件で初期化（登録順を保持）
   configuredRooms.forEach(r=>{{

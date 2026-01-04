@@ -29,6 +29,7 @@ from .system_config import (
 from .domain_services import (
     get_domain_service_manager,
     get_service_by_domain,
+    get_service_by_domain_full,
     get_unknown_cache,
     record_unknown_domain,
 )
@@ -285,10 +286,11 @@ def create_router(
                 or event.get("dns_qry")
                 or ""
             )
-            # service/categoryを解決
-            service, category = get_service_by_domain(domain)
+            # service/category/roleを解決
+            service, category, role = get_service_by_domain_full(domain)
             event["domain_service"] = service
             event["domain_category"] = category
+            event["domain_role"] = role or "primary"  # 未設定はprimary扱い
             events.append(event)
 
             # 未検出ドメインをキャッシュに記録

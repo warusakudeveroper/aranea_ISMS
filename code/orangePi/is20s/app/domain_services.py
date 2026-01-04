@@ -298,22 +298,22 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     # Firebase
     "firebase": {"service": "Firebase", "category": "Cloud"},
     "firebaseio": {"service": "Firebase", "category": "Cloud"},
-    # gstatic細分化（汎用より先に）
-    "fonts.gstatic": {"service": "Google Fonts", "category": "CDN"},
-    "maps.gstatic": {"service": "Google Maps", "category": "Cloud"},
-    "youtube.gstatic": {"service": "YouTube", "category": "Streaming"},
-    "www.gstatic": {"service": "Google Media", "category": "Media"},  # YouTube等のサムネイル・UI
-    "ssl.gstatic": {"service": "Google Media", "category": "Media"},  # 同上
-    "encrypted-tbn": {"service": "Google Images", "category": "Search"},
-    "lh3.googleusercontent": {"service": "GPhotos", "category": "Photo"},
-    "lh4.googleusercontent": {"service": "GPhotos", "category": "Photo"},
-    "lh5.googleusercontent": {"service": "GPhotos", "category": "Photo"},
+    # gstatic細分化（汎用より先に）- 全てauxiliary（共有CDN）
+    "fonts.gstatic": {"service": "Google Fonts", "category": "CDN", "role": "auxiliary"},
+    "maps.gstatic": {"service": "Google Maps", "category": "Cloud", "role": "auxiliary"},
+    "youtube.gstatic": {"service": "YouTube", "category": "Streaming", "role": "auxiliary"},
+    "www.gstatic": {"service": "Google Media", "category": "Media", "role": "auxiliary"},
+    "ssl.gstatic": {"service": "Google Media", "category": "Media", "role": "auxiliary"},
+    "encrypted-tbn": {"service": "Google Images", "category": "Search", "role": "auxiliary"},
+    "lh3.googleusercontent": {"service": "GPhotos", "category": "Photo", "role": "auxiliary"},
+    "lh4.googleusercontent": {"service": "GPhotos", "category": "Photo", "role": "auxiliary"},
+    "lh5.googleusercontent": {"service": "GPhotos", "category": "Photo", "role": "auxiliary"},
     "play.google": {"service": "Google Play", "category": "Cloud"},
-    "play-lh.googleusercontent": {"service": "Google Play", "category": "Cloud"},
+    "play-lh.googleusercontent": {"service": "Google Play", "category": "Cloud", "role": "auxiliary"},
     # 汎用（最後にマッチ）
-    "googleapis": {"service": "Google API", "category": "Cloud"},
-    "gstatic": {"service": "Google Static", "category": "Media"},  # 汎用もMedia寄りに
-    "ggpht": {"service": "Google CDN", "category": "CDN"},
+    "googleapis": {"service": "Google API", "category": "Cloud", "role": "auxiliary"},
+    "gstatic": {"service": "Google Static", "category": "Media", "role": "auxiliary"},
+    "ggpht": {"service": "Google CDN", "category": "CDN", "role": "auxiliary"},
     "gvt1": {"service": "Google Update", "category": "System"},
     "gvt2": {"service": "Google Update", "category": "System"},
     "google": {"service": "Google", "category": "Cloud"},
@@ -344,22 +344,22 @@ DEFAULT_DOMAIN_SERVICES: Dict[str, Dict[str, str]] = {
     "deepl": {"service": "DeepL", "category": "AI"},
     # Azure Traffic Manager
     "trafficmanager": {"service": "Azure TM", "category": "Cloud"},
-    # 汎用CDN
-    "fastly.net": {"service": "Fastly", "category": "CDN"},
-    "akamai": {"service": "Akamai", "category": "CDN"},
-    "edgekey": {"service": "Akamai", "category": "CDN"},
-    "edgesuite": {"service": "Akamai", "category": "CDN"},
-    "akadns": {"service": "Akamai", "category": "CDN"},
-    "akamaized": {"service": "Akamai", "category": "CDN"},
-    "cloudflare": {"service": "Cloudflare", "category": "CDN"},
-    "cf-cdn": {"service": "Cloudflare", "category": "CDN"},
-    "cloudfront": {"service": "CloudFront", "category": "CDN"},
-    "fastly": {"service": "Fastly", "category": "CDN"},
-    "edgecast": {"service": "Edgecast", "category": "CDN"},
-    "jsdelivr": {"service": "jsDelivr", "category": "CDN"},
-    "unpkg": {"service": "unpkg", "category": "CDN"},
-    "bunnycdn": {"service": "BunnyCDN", "category": "CDN"},
-    "keycdn": {"service": "KeyCDN", "category": "CDN"},
+    # 汎用CDN - 全てauxiliary（共有配信基盤）
+    "fastly.net": {"service": "Fastly", "category": "CDN", "role": "auxiliary"},
+    "akamai": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
+    "edgekey": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
+    "edgesuite": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
+    "akadns": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
+    "akamaized": {"service": "Akamai", "category": "CDN", "role": "auxiliary"},
+    "cloudflare": {"service": "Cloudflare", "category": "CDN", "role": "auxiliary"},
+    "cf-cdn": {"service": "Cloudflare", "category": "CDN", "role": "auxiliary"},
+    "cloudfront": {"service": "CloudFront", "category": "CDN", "role": "auxiliary"},
+    "fastly": {"service": "Fastly", "category": "CDN", "role": "auxiliary"},
+    "edgecast": {"service": "Edgecast", "category": "CDN", "role": "auxiliary"},
+    "jsdelivr": {"service": "jsDelivr", "category": "CDN", "role": "auxiliary"},
+    "unpkg": {"service": "unpkg", "category": "CDN", "role": "auxiliary"},
+    "bunnycdn": {"service": "BunnyCDN", "category": "CDN", "role": "auxiliary"},
+    "keycdn": {"service": "KeyCDN", "category": "CDN", "role": "auxiliary"},
     # 日本メディア
     "tbs.co.jp": {"service": "TBS", "category": "Media"},
     "nhk.or.jp": {"service": "NHK", "category": "Media"},
@@ -624,14 +624,25 @@ class DomainServiceManager:
         """
         ドメインからサービス名・カテゴリを取得（LRUキャッシュ対応）
 
+        後方互換性のため (service, category) を返す。
+        roleも必要な場合は get_service_full() を使用。
+        """
+        result = self.get_service_full(domain)
+        return (result[0], result[1])
+
+    def get_service_full(self, domain: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """
+        ドメインからサービス名・カテゴリ・ロールを取得（LRUキャッシュ対応）
+
         Args:
             domain: ドメイン名（例: "video.google.com"）
 
         Returns:
-            (service_name, category) or (None, None)
+            (service_name, category, role) or (None, None, None)
+            role: "primary" | "auxiliary" | None (未設定の場合はprimary扱い)
         """
         if not domain:
-            return (None, None)
+            return (None, None, None)
 
         domain_lower = domain.lower()
 
@@ -646,7 +657,7 @@ class DomainServiceManager:
             self._cache_misses += 1
 
             # ドット区切りを考慮したマッチング
-            result: Tuple[Optional[str], Optional[str]] = (None, None)
+            result: Tuple[Optional[str], Optional[str], Optional[str]] = (None, None, None)
             for pattern, info in self._data.items():
                 if "." in pattern:
                     # パターンにドットがある場合は厳密マッチ
@@ -657,12 +668,12 @@ class DomainServiceManager:
                         or ("." + pattern + ".") in domain_lower
                         or domain_lower.startswith(pattern + ".")
                     ):
-                        result = (info.get("service"), info.get("category"))
+                        result = (info.get("service"), info.get("category"), info.get("role"))
                         break
                 else:
                     # パターンにドットがない場合は部分マッチ
                     if pattern in domain_lower:
-                        result = (info.get("service"), info.get("category"))
+                        result = (info.get("service"), info.get("category"), info.get("role"))
                         break
 
             # キャッシュに保存
@@ -826,10 +837,21 @@ def get_service_by_domain(domain: str) -> Tuple[Optional[str], Optional[str]]:
     return get_domain_service_manager().get_service(domain)
 
 
+def get_service_by_domain_full(domain: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    ドメインからサービス情報をフル取得（便利関数）
+
+    Returns: (service_name, category, role) or (None, None, None)
+    role: "primary" | "auxiliary" | None
+    """
+    return get_domain_service_manager().get_service_full(domain)
+
+
 __all__ = [
     "DomainServiceManager",
     "get_domain_service_manager",
     "get_service_by_domain",
+    "get_service_by_domain_full",
     "DOMAIN_SERVICES_FILE",
     "UnknownDomainsCache",
     "get_unknown_cache",
