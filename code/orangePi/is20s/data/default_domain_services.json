@@ -230,6 +230,10 @@
       "service": "Netflix",
       "category": "Streaming"
     },
+    "nflxso": {
+      "service": "Netflix",
+      "category": "Streaming"
+    },
     "nicovideo": {
       "service": "ニコニコ",
       "category": "Streaming"
@@ -398,7 +402,7 @@
       "service": "LINE",
       "category": "Messenger"
     },
-    "line-scdn": {
+    "line-scdn.net": {
       "service": "LINE",
       "category": "Messenger"
     },
@@ -527,8 +531,9 @@
       "category": "Mail"
     },
     "www.google": {
-      "service": "Google検索",
-      "category": "Search"
+      "service": "Google Background",
+      "category": "Infrastructure",
+      "role": "auxiliary"
     },
     "google.com/search": {
       "service": "Google検索",
@@ -1538,6 +1543,62 @@
     "tenki": {
       "service": "tenki.jp",
       "category": "Weather"
+    },
+    "cymru.com": {
+      "service": "Cymru ASN",
+      "category": "Infrastructure"
+    },
+    "tplinknbu.com": {
+      "service": "TP-Link Omada",
+      "category": "IoT"
+    },
+    "netconnect.co.jp": {
+      "service": "Netconnect",
+      "category": "Infrastructure"
+    },
+    "connectivitycheck.gstatic.com": {
+      "service": "NCSI",
+      "category": "Infrastructure",
+      "role": "auxiliary"
+    },
+    "dns.msftncsi.com": {
+      "service": "NCSI",
+      "category": "Infrastructure",
+      "role": "auxiliary"
+    },
+    "clients3.google.com": {
+      "service": "Google Background",
+      "category": "Infrastructure",
+      "role": "auxiliary"
+    },
+    "clients4.google.com": {
+      "service": "Google Background",
+      "category": "Infrastructure",
+      "role": "auxiliary"
+    },
+    "time.nist.gov": {
+      "service": "NIST NTP",
+      "category": "NTP"
+    },
+    "ntp.nict.jp": {
+      "service": "NICT NTP",
+      "category": "NTP"
+    },
+    "pool.ntp.org": {
+      "service": "NTP Pool",
+      "category": "NTP"
+    },
+    "time.google.com": {
+      "service": "Google NTP",
+      "category": "NTP"
+    },
+    "time.windows.com": {
+      "service": "Windows NTP",
+      "category": "NTP"
+    },
+    "time.apple.com": {
+      "service": "Apple NTP",
+      "category": "NTP"
     }
   }
 }
