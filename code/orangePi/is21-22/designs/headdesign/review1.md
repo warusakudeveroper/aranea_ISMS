@@ -459,6 +459,114 @@ is22起動（01:23 JST）から約2時間後。
 
 ---
 
+## 12. フロントエンド/バックエンド境界分析
+
+### 12.1 設計意図
+
+**ユーザーの設計原則**:
+> 「SuggestPaneの再生は推論判定からスタートする。レンダリングはフロントエンドでも、接続ロジックや再生時間カウントはバックエンドロジック」
+
+**つまり**:
+- **バックエンドトリガー**: AI推論検出 → WebSocket通知 → 再生開始
+- **フロントエンドの役割**: レンダリングのみ（接続判断をしない）
+
+### 12.2 現状の実装
+
+**ファイル**: `frontend/src/App.tsx`
+
+```typescript
+// Line 117-119: ページマウント時にログをフェッチ
+useEffect(() => {
+  fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
+}, [fetchLogs])
+
+// Line 203-207: currentEventは最新の検出を返す
+const currentEvent = useMemo(() => {
+  return detectionLogs.find(e => e.severity > 0) || null
+}, [detectionLogs])
+```
+
+**ファイル**: `frontend/src/components/SuggestPane.tsx`
+
+```typescript
+// Line 155-165: currentEvent変更時に再生開始
+useEffect(() => {
+  if (!currentEvent) return
+  if (currentEvent.severity === 0) return
+  if (lastEventIdRef.current === currentEvent.log_id) return
+  lastEventIdRef.current = currentEvent.log_id  // ← リロードでnullにリセット
+  addOrExtendCamera(currentEvent)
+}, [currentEvent, addOrExtendCamera])
+```
+
+### 12.3 問題のシーケンス
+
+**正常フロー（AI推論トリガー）**:
+```
+IS21 AI推論検出
+    ↓
+is22バックエンド WebSocket "event_log" 送信
+    ↓
+フロントエンド受信 → handleEventLog() → fetchLogs()
+    ↓
+detectionLogs更新 → currentEvent更新
+    ↓
+SuggestPane: lastEventIdRef != currentEvent.log_id → 再生開始
+```
+✅ バックエンドトリガー（正しい）
+
+**問題フロー（ページリロード）**:
+```
+ユーザーがページをリロード
+    ↓
+App.tsx useEffect → fetchLogs() (マウント時)
+    ↓
+既存の古い検出ログを取得
+    ↓
+currentEvent = 古い検出
+    ↓
+SuggestPane: lastEventIdRef = null (リロードでリセット)
+    ↓
+古い検出を「新規」として再生開始
+```
+❌ フロントエンドトリガー（違反）
+
+### 12.4 境界違反の本質
+
+| 項目 | 設計意図 | 現状 | 判定 |
+|------|----------|------|------|
+| 再生トリガー | AI推論（バックエンド） | fetchLogs結果（フロントエンド） | 違反 |
+| 接続判断 | バックエンドが決定 | フロントエンドが判断 | 違反 |
+| リロード時 | 再生しない（AI推論なし） | 古い検出を再生 | 違反 |
+
+### 12.5 修正方針
+
+**Option A: WebSocket経由のイベントのみ再生対象にする**
+- `handleEventLog()`で受信したイベントを直接`currentEvent`として渡す
+- HTTPフェッチ結果はEventLogPane表示用のみ（SuggestPane再生には使わない）
+- リロード時はWebSocket接続まで待機、新規検出まで再生しない
+
+**Option B: バックエンドが再生指示を明示的に送信**
+- 新規WebSocketメッセージタイプ `suggest_play` を追加
+- バックエンドが「このイベントは再生すべき」と判断したときのみ送信
+- フロントエンドは`suggest_play`受信時のみ再生開始
+
+**推奨**: Option A（最小変更で実現可能）
+
+### 12.6 go2rtcへの影響
+
+現状の問題:
+1. ページリロード → SuggestPane再生 → Go2rtcPlayer生成
+2. Go2rtcPlayerが`PUT /api/streams`でストリーム登録
+3. WebSocket接続でMSE再生開始
+4. **AI推論なしにカメラ接続が発生**
+
+これはバックエンドのポーリングロジック（go2rtc視聴者検出 → ffmpegスキップ）にも影響:
+- 本来なら視聴者なしでffmpegを使うべきタイミングで
+- フロントエンド起因の不要なストリーム接続が発生
+
+---
+
 ## 更新履歴
 
 | 日時 (JST) | 内容 |
@@ -467,6 +575,7 @@ is22起動（01:23 JST）から約2時間後。
 | 2026-01-05 09:30 | コード詳細分析、go2rtc統合分析、カメラ別パターン、再起動ログ確認追加 |
 | 2026-01-05 08:30 | セクション2.1/2.2詳細検証・修正（生存時間計算誤り訂正、08:28時点データ追加）|
 | 2026-01-05 10:10 | **処理チェーンベース依存関係分析追加（セクション10）**: 「波及」表現を訂正、垂直/水平依存モデル定義、エビデンスデータ追加 |
+| 2026-01-05 10:45 | **フロントエンド/バックエンド境界分析追加（セクション12）**: ページリロード時の不正再生問題を特定、設計意図との乖離を文書化 |
 
 ---
 
