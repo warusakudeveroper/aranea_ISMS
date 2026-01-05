@@ -1599,6 +1599,62 @@
     "time.apple.com": {
       "service": "Apple NTP",
       "category": "NTP"
+    },
+    "curacao-egaming": {
+      "service": "Curacao eGaming",
+      "category": "Gambling"
+    },
+    "international-egaming": {
+      "service": "International eGaming",
+      "category": "Gambling"
+    },
+    "adnexus": {
+      "service": "AppNexus",
+      "category": "Tracker"
+    },
+    "sportradarserving": {
+      "service": "Sportradar",
+      "category": "Tracker"
+    },
+    "360yield": {
+      "service": "360yield",
+      "category": "Tracker"
+    },
+    "loopme": {
+      "service": "LoopMe",
+      "category": "Tracker"
+    },
+    "emxdgt": {
+      "service": "EMX Digital",
+      "category": "Tracker"
+    },
+    "bidswitch": {
+      "service": "BidSwitch",
+      "category": "Tracker"
+    },
+    "ad-stir": {
+      "service": "AdStir",
+      "category": "Tracker"
+    },
+    "iponweb": {
+      "service": "IPONWEB",
+      "category": "Tracker"
+    },
+    "mapify": {
+      "service": "Mapify",
+      "category": "AI"
+    },
+    "pulseem": {
+      "service": "Pulseem",
+      "category": "Tracker"
+    },
+    "your-server.de": {
+      "service": "Hetzner",
+      "category": "Hosting"
+    },
+    "force.com": {
+      "service": "Salesforce",
+      "category": "Cloud"
     }
   }
 }
