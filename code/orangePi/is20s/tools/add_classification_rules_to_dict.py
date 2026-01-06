@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-不明ドメイン自動分類スクリプト
-300件の不明ドメインをカテゴリ・サービス名に分類
+分類ルールから辞書パターン追加
+classify_unknown_domains.py の CLASSIFICATION_RULES を default_domain_services.json に反映
 """
 import json
 import sys
 from pathlib import Path
-from typing import Dict, Tuple
 
-# カテゴリ分類ルール（優先順位順）
+# 分類ルール（classify_unknown_domains.py から抽出）
 CLASSIFICATION_RULES = [
     # Gaming
     (["yuanshen", "genshin"], "Gaming", "Genshin Impact (miHoYo)"),
@@ -21,11 +20,9 @@ CLASSIFICATION_RULES = [
     (["ysdp.top"], "Gaming", "Gaming Service"),
     (["bluearchive.jp"], "Gaming", "Blue Archive"),
     (["launcher", "hggslb.com"], "Gaming", "Game Launcher"),
-    (["game", "gaming"], "Gaming", "Gaming"),
 
     # AI/ML
     (["gliacloud"], "AI", "GliaCloud (AI Video)"),
-    (["openai", "anthropic"], "AI", "AI Service"),
 
     # Monitoring & Observability
     (["nr-data.net", "newrelic"], "Monitoring", "New Relic"),
@@ -46,17 +43,6 @@ CLASSIFICATION_RULES = [
     (["appcenter.ms"], "Analytics", "App Center Analytics"),
     (["singular.net"], "Analytics", "Singular"),
     (["piyolog.com"], "Analytics", "Piyolog"),
-    (["telemetry"], "Analytics", "Telemetry"),
-    (["analytics", "measurement", "metrics"], "Analytics", "Analytics"),
-    (["pixel", "tracking", "tracker"], "Tracker", "Tracker"),
-
-    # Marketing Automation
-    (["evergage.com"], "Marketing", "Evergage"),
-    (["marketo.net"], "Marketing", "Marketo"),
-    (["qualtrics.com"], "Marketing", "Qualtrics"),
-    (["surveygizmo.eu"], "Marketing", "SurveyGizmo"),
-    (["agkn.com"], "Marketing", "Neustar"),
-    (["1rx.io"], "Marketing", "1rx"),
 
     # Booking & Travel
     (["booking.com", "beds24.com"], "Booking", "Booking Service"),
@@ -67,12 +53,10 @@ CLASSIFICATION_RULES = [
     (["coolkit.cn", "coolkit.cc", "ewelink"], "IoT", "eWeLink IoT"),
     (["blynk.io", "blynk.cloud"], "IoT", "Blynk IoT"),
     (["home.mi.com"], "IoT", "Xiaomi Home"),
-    (["iot", "smart"], "IoT", "IoT"),
 
     # Ad Network
     (["exp-tas.com", "exponential"], "Ad", "Exponential (Ad Network)"),
     (["youborafds", "youboranqs"], "Ad", "Youbora Ad Network"),
-    (["adnexus", "doubleclick", "ad-stir", "ad.as", "amanad", "socdm", "adtdp"], "Ad", "Ad Network"),
     (["creativecdn.com"], "Ad", "Creative CDN"),
     (["uncn.jp"], "Ad", "Ad Network (Japan)"),
     (["a-dsp.com"], "Ad", "DSP"),
@@ -82,13 +66,6 @@ CLASSIFICATION_RULES = [
     (["adingo.jp"], "Ad", "Adingo (Japan)"),
     (["id5-sync.com"], "Ad", "ID5"),
     (["wagbridge.com"], "CDN", "Wagbridge CDN"),
-
-    # AWS Services
-    (["diagnostic.networking.aws.dev"], "Network", "AWS Network Diagnostics"),
-    (["awswaf.com"], "Security", "AWS WAF"),
-    (["cloudfront"], "CDN", "AWS CloudFront"),
-    (["a2z.com"], "Cloud", "AWS (Amazon)"),
-    (["amazonaws.com"], "Cloud", "AWS"),
 
     # Alibaba Cloud & Services
     (["aliyun", "aliyuncs"], "Cloud", "Alibaba Cloud"),
@@ -106,11 +83,9 @@ CLASSIFICATION_RULES = [
 
     # CDN & Load Balancer
     (["mgslb.com"], "CDN", "Load Balancer/CDN"),
-    (["lbaas", "lb-"], "Network", "Load Balancer"),
     (["kunlunhuf", "lahuashanbx", "kunlunle", "kunluncan"], "CDN", "China CDN (Kunlun)"),
     (["quic.cloud"], "CDN", "QUIC.cloud"),
     (["fontawesome.com"], "CDN", "Font Awesome"),
-    (["cdn", "cloudflare", "akamai", "fastly"], "CDN", "CDN"),
 
     # Network Infrastructure
     (["one.one.one.one"], "Network", "Cloudflare DNS (1.1.1.1)"),
@@ -125,12 +100,10 @@ CLASSIFICATION_RULES = [
     (["mcafee.com"], "Security", "McAfee"),
     (["hcaptcha.com"], "Security", "hCaptcha"),
     (["cybertrust.ne.jp"], "Security", "Cybertrust"),
-    (["waf"], "Security", "WAF"),
 
     # Payment
     (["stripe.com", "stripe.network"], "Payment", "Stripe"),
     (["americanexpress.com", "aexp-static.com"], "Payment", "American Express"),
-    (["paypal"], "Payment", "PayPal"),
     (["payhub.jp"], "Payment", "PayHub"),
 
     # Microsoft
@@ -138,30 +111,6 @@ CLASSIFICATION_RULES = [
     (["sharepoint.com"], "Microsoft", "SharePoint"),
     (["1drv.com", "onedrive"], "Microsoft", "OneDrive"),
     (["live.net"], "Microsoft", "Microsoft Live"),
-    (["microsoft"], "Microsoft", "Microsoft"),
-
-    # Social Media & Communication
-    (["t.co"], "Social", "Twitter (X)"),
-    (["fbpigeon.com"], "Social", "Facebook"),
-    (["sinaimg.cn"], "Social", "Sina Weibo"),
-    (["ameblo.jp"], "Blog", "Ameba Blog"),
-    (["twitter", "facebook", "instagram"], "Social", "Social Media"),
-
-    # Development Tools & Software
-    (["vscode-cdn.net"], "Development", "VS Code"),
-    (["obsidian.md"], "Development", "Obsidian"),
-    (["github"], "Development", "GitHub"),
-    (["growthbook.io"], "Development", "GrowthBook"),
-    (["openlitespeed.org"], "Development", "OpenLiteSpeed"),
-    (["clip-studio.com"], "Software", "Clip Studio"),
-    (["amd.com"], "Software", "AMD"),
-
-    # Apps & Services
-    (["starbucks.co.jp"], "Retail", "Starbucks"),
-    (["uber.com"], "Transport", "Uber"),
-    (["goodnotes"], "Productivity", "GoodNotes"),
-    (["mapbox.com"], "Maps", "Mapbox"),
-    (["mousegestures"], "Browser", "Mouse Gestures"),
 
     # Xiaomi / MIUI
     (["mijia.tech", "io.mi.com"], "IoT", "Xiaomi Mi IoT"),
@@ -183,8 +132,6 @@ CLASSIFICATION_RULES = [
 
     # Southeast Asia Services
     (["grab.com", "grabtaxi.com"], "Transport", "Grab"),
-    (["lazada"], "Shopping", "Lazada"),
-    (["shopee"], "Shopping", "Shopee"),
 
     # E-commerce & Retail
     (["lkcoffee.com"], "Retail", "Luckin Coffee"),
@@ -224,10 +171,6 @@ CLASSIFICATION_RULES = [
     (["szlcsc.com"], "Shopping", "LCSC Electronics"),
     (["accelatech.com"], "Business", "Accelatech"),
     (["listdl.com"], "Download", "List Download"),
-    (["amazon", "rakuten", "yahoo"], "Shopping", "E-commerce"),
-
-    # Mobile Apps & Services
-    (["antutu.net", "ksmobile.com"], "Mobile", "AnTuTu Benchmark"),
 
     # Cloud Functions
     (["cloudfunctions.net"], "Cloud", "Google Cloud Functions"),
@@ -243,90 +186,44 @@ CLASSIFICATION_RULES = [
     (["wujisite.com"], "Development", "Wuji Site"),
     (["tdos.vip"], "Development", "TDOS"),
 
-    # ISP & Telecom
-    (["ntt", "softbank", "docomo"], "Telecom", "Telecom"),
+    # Mobile Apps & Services
+    (["antutu.net", "ksmobile.com"], "Mobile", "AnTuTu Benchmark"),
 ]
 
-def classify_domain(domain: str) -> Tuple[str, str]:
-    """
-    ドメインをカテゴリとサービス名に分類
-
-    Returns:
-        (category, service) のタプル
-    """
-    domain_lower = domain.lower()
-
-    # IPアドレス判定（xxx.xxx.xxx.xxx形式）
-    import re
-    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', domain):
-        return ("Network", "IP Address")
-
-    for keywords, category, service in CLASSIFICATION_RULES:
-        if any(kw in domain_lower for kw in keywords):
-            return (category, service)
-
-    # 分類不可
-    return ("Unknown", "Unknown")
-
 def main():
-    input_file = Path(__file__).parent / "unknown_domains_20260106.json"
-    output_file = Path(__file__).parent / "classified_domains_20260106.json"
+    dict_file = Path(__file__).parent / "../data/default_domain_services.json"
 
-    if not input_file.exists():
-        print(f"Error: {input_file} not found", file=sys.stderr)
-        sys.exit(1)
+    # 既存辞書読み込み
+    with open(dict_file, 'r', encoding='utf-8') as f:
+        dictionary = json.load(f)
 
-    # 不明ドメインリスト読み込み
-    with open(input_file, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    existing_patterns = set(dictionary['services'].keys())
+    added_count = 0
 
-    # 分類実行
-    classified = []
-    category_stats = {}
+    # 分類ルールから辞書に追加
+    for keywords, category, service in CLASSIFICATION_RULES:
+        for pattern in keywords:
+            # 既に存在するパターンはスキップ
+            if pattern in existing_patterns:
+                continue
 
-    for item in data['domains']:
-        domain = item['domain']
-        count = item['count']
-        category, service = classify_domain(domain)
+            # 辞書に追加
+            dictionary['services'][pattern] = {
+                "category": category,
+                "service": service
+            }
+            added_count += 1
+            print(f"  + {pattern:40s} [{category:10s}] {service}")
 
-        classified.append({
-            "domain": domain,
-            "count": count,
-            "category": category,
-            "service": service,
-            "first_seen": item["first_seen"],
-            "last_seen": item["last_seen"],
-            "sample_ips": item["sample_ips"],
-            "rooms": item["rooms"]
-        })
+    # 保存
+    with open(dict_file, 'w', encoding='utf-8') as f:
+        json.dump(dictionary, f, indent=2, ensure_ascii=False)
 
-        # 統計
-        if category not in category_stats:
-            category_stats[category] = {"count": 0, "total_hits": 0}
-        category_stats[category]["count"] += 1
-        category_stats[category]["total_hits"] += count
-
-    # カテゴリ別にソート
-    classified.sort(key=lambda x: (x["category"], -x["count"]))
-
-    # 結果保存
-    result = {
-        "total_domains": len(classified),
-        "total_hits": data["total_hits"],
-        "category_stats": category_stats,
-        "domains": classified
-    }
-
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
-
-    # 統計表示
-    print(f"✓ 分類完了: {len(classified)}ドメイン")
-    print(f"\n【カテゴリ別統計】")
-    for cat, stats in sorted(category_stats.items(), key=lambda x: -x[1]["total_hits"]):
-        print(f"  {cat}: {stats['count']}ドメイン ({stats['total_hits']:,}ヒット)")
-
-    print(f"\n保存先: {output_file}")
+    print(f"\n✓ 分類ルールから辞書更新完了")
+    print(f"  既存: {len(existing_patterns)}パターン")
+    print(f"  追加: {added_count}パターン")
+    print(f"  合計: {len(dictionary['services'])}パターン")
+    print(f"  保存先: {dict_file}")
 
 if __name__ == "__main__":
     main()

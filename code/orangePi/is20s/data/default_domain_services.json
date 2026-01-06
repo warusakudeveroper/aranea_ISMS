@@ -880,10 +880,6 @@
       "service": "Windows",
       "category": "Cloud"
     },
-    "msn": {
-      "service": "MSN",
-      "category": "Cloud"
-    },
     "office": {
       "service": "Office365",
       "category": "Cloud"
@@ -1164,10 +1160,6 @@
       "service": "Cursor",
       "category": "AI"
     },
-    "nhk": {
-      "service": "NHK",
-      "category": "News"
-    },
     "asahi": {
       "service": "朝日新聞",
       "category": "News"
@@ -1178,14 +1170,6 @@
     },
     "nikkei": {
       "service": "日経",
-      "category": "News"
-    },
-    "cnn": {
-      "service": "CNN",
-      "category": "News"
-    },
-    "bbc": {
-      "service": "BBC",
       "category": "News"
     },
     "pornhub": {
@@ -1211,10 +1195,6 @@
     "fuzoku": {
       "service": "風俗",
       "category": "Adult"
-    },
-    "tor": {
-      "service": "Tor",
-      "category": "VPN"
     },
     "onion": {
       "service": "Tor",
@@ -1502,10 +1482,6 @@
     },
     "wordpress": {
       "service": "WordPress",
-      "category": "Cloud"
-    },
-    "wix": {
-      "service": "Wix",
       "category": "Cloud"
     },
     "cloudinary": {
@@ -1835,10 +1811,6 @@
     "bdydns.com": {
       "service": "Baidu CDN",
       "category": "CDN"
-    },
-    "t.co": {
-      "service": "Twitter (X)",
-      "category": "Social"
     },
     "cdngslb.com": {
       "service": "CDN",
@@ -2219,6 +2191,1562 @@
     "3lift.com": {
       "service": "Twitter (X)",
       "category": "Social"
+    },
+    "bbc.com": {
+      "service": "BBC",
+      "category": "News"
+    },
+    "cnn.com": {
+      "service": "CNN",
+      "category": "News"
+    },
+    "pixel.gliacloud.com": {
+      "category": "AI",
+      "service": "GliaCloud (AI Video)"
+    },
+    "infinity-c35.youboranqs01.com": {
+      "category": "Ad",
+      "service": "Youbora Ad Network"
+    },
+    "default.exp-tas.com": {
+      "category": "Ad",
+      "service": "Exponential (Ad Network)"
+    },
+    "ad.as.amanad.adtdp.com": {
+      "category": "Ad",
+      "service": "Ad Network"
+    },
+    "trk.a-dsp.com": {
+      "category": "Ad",
+      "service": "DSP"
+    },
+    "ds.uncn.jp": {
+      "category": "Ad",
+      "service": "Ad Network (Japan)"
+    },
+    "tg.dr.socdm.com": {
+      "category": "Ad",
+      "service": "Ad Network"
+    },
+    "simple-redirect.redinuid.sre.nielsen.com": {
+      "category": "Ad",
+      "service": "Nielsen"
+    },
+    "cm.rdr.creativecdn.com": {
+      "category": "Ad",
+      "service": "Creative CDN"
+    },
+    "impressions.onelink.me": {
+      "category": "Ad",
+      "service": "AppsFlyer OneLink"
+    },
+    "asia.creativecdn.com": {
+      "category": "Ad",
+      "service": "Creative CDN"
+    },
+    "a-fds.youborafds01.com": {
+      "category": "Ad",
+      "service": "Youbora Ad Network"
+    },
+    "d.socdm.com": {
+      "category": "Ad",
+      "service": "Ad Network"
+    },
+    "tg.socdm.com": {
+      "category": "Ad",
+      "service": "Ad Network"
+    },
+    "infinity-c38.youboranqs01.com": {
+      "category": "Ad",
+      "service": "Youbora Ad Network"
+    },
+    "sync.targeting.unrulymedia.com": {
+      "category": "Ad",
+      "service": "Unruly Media"
+    },
+    "audible.sc.omtrdc.net": {
+      "category": "Analytics",
+      "service": "Adobe Analytics"
+    },
+    "analytics.apis.mcafee.com": {
+      "category": "Analytics",
+      "service": "Analytics"
+    },
+    "secure-origin.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "hm.mieru-ca.com": {
+      "category": "Analytics",
+      "service": "Mieru-CA Analytics"
+    },
+    "ntjp.mieru-ca.com": {
+      "category": "Analytics",
+      "service": "Mieru-CA Analytics"
+    },
+    "global.telemetry.insights.video.a2z.com": {
+      "category": "Analytics",
+      "service": "Telemetry"
+    },
+    "asanalytics.booking.com": {
+      "category": "Analytics",
+      "service": "Analytics"
+    },
+    "api.leanplum.com": {
+      "category": "Analytics",
+      "service": "Leanplum"
+    },
+    "p4k6jrj0ceheadr6ekwptfmktct8u1767670874.darnuid.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "secure-us.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "4ml22dnhvbq3ihzgoaxxhfakpyyn71767671933.darnuid.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "skan.singular.net": {
+      "category": "Analytics",
+      "service": "Singular"
+    },
+    "5nkekadlqbwnlse53ihowbvdibxbh1767668333.darnuid.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "fwlyzflrokwiskal9ce4csrncbtzq1767671573.darnuid.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "api2.piyolog.com": {
+      "category": "Analytics",
+      "service": "Piyolog"
+    },
+    "sdk.iad-03.braze.com": {
+      "category": "Analytics",
+      "service": "Braze"
+    },
+    "sdk.fra-01.braze.eu": {
+      "category": "Analytics",
+      "service": "Braze"
+    },
+    "sdk.iad-07.braze.com": {
+      "category": "Analytics",
+      "service": "Braze"
+    },
+    "mu5nfwsizyzi3kkus72z7ewncm4xg1767668438.darnuid.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "hmz9uko5wbnm8plx1lsoteinimcgt1767668438.darnuid.imrworldwide.com": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "in.appcenter.ms": {
+      "category": "Analytics",
+      "service": "App Center Analytics"
+    },
+    "meshgw-dlb-external.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "admin.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "web-vitals.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "web-perf.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "counters.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "account.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "nellie.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "saa.booking.com": {
+      "category": "Booking",
+      "service": "Booking Service"
+    },
+    "api.mousegesturesapi.com": {
+      "category": "Browser",
+      "service": "Mouse Gestures"
+    },
+    "bizsearch-asp.accelatech.com": {
+      "category": "Business",
+      "service": "Accelatech"
+    },
+    "sptest.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "main.vscode-cdn.net": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "0img.hitv.com.w.kunlunhuf.com": {
+      "category": "CDN",
+      "service": "China CDN (Kunlun)"
+    },
+    "ofloc.map.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "cdn.growthbook.io": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "mbd.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "direct.quic-mix-proxy-gcpsg-v3.gcpsg.byteglb.com": {
+      "category": "CDN",
+      "service": "ByteDance Global CDN"
+    },
+    "t7.a.market.c.mgslb.com": {
+      "category": "CDN",
+      "service": "Load Balancer/CDN"
+    },
+    "static.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "nmtest.bdstatic.com.a.bdydns.com": {
+      "category": "CDN",
+      "service": "Baidu CDN"
+    },
+    "newloc.map.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "all.cdn-gw-dv.vip.w.cdngslb.com": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "h3-bdbus-turbonet.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN"
+    },
+    "direct.quic-proxy-gcpsg-v3.gcpsg.byteglb.com": {
+      "category": "CDN",
+      "service": "ByteDance Global CDN"
+    },
+    "bdbus-turbonet.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN"
+    },
+    "carowner.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "h2tcbox.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "lcs.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "common.lcs.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "newsofire.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "id.rlcdn.com": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "nmtest.bdstatic.com": {
+      "category": "CDN",
+      "service": "Baidu CDN"
+    },
+    "log.byteoversea.com.ttdns2.com": {
+      "category": "CDN",
+      "service": "ByteDance"
+    },
+    "app-h5.dji.com.w.cdngslb.com": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "ali-rwk.pull.etoote.com.w.alikunlun.net": {
+      "category": "CDN",
+      "service": "Alibaba CDN"
+    },
+    "use.fontawesome.com": {
+      "category": "CDN",
+      "service": "Font Awesome"
+    },
+    "ack.push.n.shifen.com": {
+      "category": "CDN",
+      "service": "Baidu CDN (Shifen)"
+    },
+    "list.szlcsc.com.w.kunluncan.com": {
+      "category": "CDN",
+      "service": "China CDN (Kunlun)"
+    },
+    "www.quic.cloud": {
+      "category": "CDN",
+      "service": "QUIC.cloud"
+    },
+    "stock-notifications.astockcdn.net": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "cf-trickplay.aux.pv-cdn.net": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "cdn.evgnet.com": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "cdn.ynuf.aliapp.org": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "log.byteoversea.com": {
+      "category": "CDN",
+      "service": "ByteDance"
+    },
+    "idsync.rlcdn.com": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "www.cdn-net.com": {
+      "category": "CDN",
+      "service": "CDN"
+    },
+    "us-central1-mobesorder.cloudfunctions.net": {
+      "category": "Cloud",
+      "service": "Google Cloud Functions"
+    },
+    "unknown-203-209-255-222.aliyun.com": {
+      "category": "Cloud",
+      "service": "Alibaba Cloud"
+    },
+    "oser.ns.aliyuncs.com.w.kunlunle.com": {
+      "category": "Cloud",
+      "service": "Alibaba Cloud"
+    },
+    "oser.ns.aliyuncs.com": {
+      "category": "Cloud",
+      "service": "Alibaba Cloud"
+    },
+    "b79c66077e27a1c100292a6aa5da291cfa7da7ef982a7d0d2708be38d76b31f.us-east-1.prod.service.minerva.devices.a2z.com": {
+      "category": "Cloud",
+      "service": "AWS (Amazon)"
+    },
+    "releases.obsidian.md": {
+      "category": "Development",
+      "service": "Obsidian"
+    },
+    "content.diagnose.tdos.vip": {
+      "category": "Development",
+      "service": "TDOS"
+    },
+    "cache.api.wujisite.com": {
+      "category": "Development",
+      "service": "Wuji Site"
+    },
+    "glcs.listdl.com": {
+      "category": "Download",
+      "service": "List Download"
+    },
+    "dl.listdl.com": {
+      "category": "Download",
+      "service": "List Download"
+    },
+    "dispatchosglobal.yuanshen.com": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "yostar-oversea-client-logging.ap-southeast-1.log.aliyuncs.com": {
+      "category": "Gaming",
+      "service": "Yostar Games"
+    },
+    "bta9p7hynf6feeht.ysdp.top": {
+      "category": "Gaming",
+      "service": "Gaming Service"
+    },
+    "hw-media-cdn-mingchao.kurogame.com.a.lahuashanbx.com": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "qcloud-sg-datareceiver.kurogame.xyz": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "us-datareceiver.aki-game.net": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "yostar-oversea-netsdk-logging.ap-southeast-1.log.aliyuncs.com": {
+      "category": "Gaming",
+      "service": "Yostar Games"
+    },
+    "osasiadispatch.yuanshen.com": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "android.crashsight.wetest.net": {
+      "category": "Gaming",
+      "service": "Tencent Gaming Services"
+    },
+    "cdn-qcloud-hw-mc.aki-game.net.eo.dnse0.com": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-config-qcloud.aki-game2.net.cdn.dnsv1.com": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-config-qcloud.aki-game.net.cdn.dnsv1.com": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-config-huoshan.aki-game2.net.volcgslb.com": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "launcher.hggslb.com": {
+      "category": "Gaming",
+      "service": "Game Launcher"
+    },
+    "aki-config-huoshan.aki-game.net.volcgslb.com": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "oseurodispatch.yuanshen.com": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "globaldp-prod-os01.zenlesszonezero.com": {
+      "category": "Gaming",
+      "service": "Zenless Zone Zero (miHoYo)"
+    },
+    "autopatchos.starrails.com": {
+      "category": "Gaming",
+      "service": "Honkai: Star Rail (miHoYo)"
+    },
+    "jp-sdk-api.yostarplat.com": {
+      "category": "Gaming",
+      "service": "Yostar Games"
+    },
+    "auth-launcher-jp.hismarttv.com": {
+      "category": "Gaming",
+      "service": "Game Launcher"
+    },
+    "upload-os-bbs.hoyolab.com": {
+      "category": "Gaming",
+      "service": "miHoYo Community"
+    },
+    "hoyolab-upload.hoyolab.com": {
+      "category": "Gaming",
+      "service": "miHoYo Community"
+    },
+    "globaldp-prod-os01.starrails.com": {
+      "category": "Gaming",
+      "service": "Honkai: Star Rail (miHoYo)"
+    },
+    "prod-official-asia-dp01.starrails.com": {
+      "category": "Gaming",
+      "service": "Honkai: Star Rail (miHoYo)"
+    },
+    "bbs-api-os-ab.hoyolab.com": {
+      "category": "Gaming",
+      "service": "miHoYo Community"
+    },
+    "bbs-api-os.hoyolab.com": {
+      "category": "Gaming",
+      "service": "miHoYo Community"
+    },
+    "autopatchhk.yuanshen.com": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "osusadispatch.yuanshen.com": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "osuspider.yuanshen.com": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "sdkapi.kurogame-service.com": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-config-qcloud.aki-game.net": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-config-qcloud.aki-game2.net": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "cdn-qcloud-hw-mc.aki-game.net": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-config-huoshan.aki-game.net": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-config-huoshan.aki-game2.net": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "bbs-api-os-static.hoyolab.com": {
+      "category": "Gaming",
+      "service": "miHoYo Community"
+    },
+    "ba-jp-sdk.bluearchive.jp": {
+      "category": "Gaming",
+      "service": "Blue Archive"
+    },
+    "163-44-185-210.virt.lolipop.jp": {
+      "category": "Hosting",
+      "service": "Lolipop"
+    },
+    "ssh.lolipop.jp": {
+      "category": "Hosting",
+      "service": "Lolipop"
+    },
+    "124-146-155-170.pro.static.arena.ne.jp": {
+      "category": "ISP",
+      "service": "NTT Arena"
+    },
+    "ntv2.media.ylive.jp": {
+      "category": "ISP",
+      "service": "Yahoo Live"
+    },
+    "prod-dkappfiles.daikinsmartdb.jp": {
+      "category": "IoT",
+      "service": "Daikin Smart"
+    },
+    "api.tplinkra.com": {
+      "category": "IoT",
+      "service": "TP-Link Router"
+    },
+    "ntp-jp.hismarttv.com": {
+      "category": "IoT",
+      "service": "IoT"
+    },
+    "auth-jp.hismarttv.com": {
+      "category": "IoT",
+      "service": "IoT"
+    },
+    "upgrade-jp.hismarttv.com": {
+      "category": "IoT",
+      "service": "IoT"
+    },
+    "rtb-csync.smartadserver.com": {
+      "category": "IoT",
+      "service": "IoT"
+    },
+    "events.mapbox.com": {
+      "category": "Maps",
+      "service": "Mapbox"
+    },
+    "api.mapbox.com": {
+      "category": "Maps",
+      "service": "Mapbox"
+    },
+    "bookingdotcomb2b.germany-2.evergage.com": {
+      "category": "Marketing",
+      "service": "Evergage"
+    },
+    "zn2cd3q3b8veiooeg-booking.siteintercept.qualtrics.com": {
+      "category": "Marketing",
+      "service": "Qualtrics"
+    },
+    "www.surveygizmo.eu": {
+      "category": "Marketing",
+      "service": "SurveyGizmo"
+    },
+    "munchkin.marketo.net": {
+      "category": "Marketing",
+      "service": "Marketo"
+    },
+    "aa.agkn.com": {
+      "category": "Marketing",
+      "service": "Neustar"
+    },
+    "sync.1rx.io": {
+      "category": "Marketing",
+      "service": "1rx"
+    },
+    "img.vidaahub.com": {
+      "category": "Media",
+      "service": "Vidaa Hub"
+    },
+    "play-aws.wetvinfo.com": {
+      "category": "Media",
+      "service": "WeTV"
+    },
+    "appcfg.wetvinfo.com": {
+      "category": "Media",
+      "service": "WeTV"
+    },
+    "play.wetvinfo.com": {
+      "category": "Media",
+      "service": "WeTV"
+    },
+    "wuji.wetvinfo.com": {
+      "category": "Media",
+      "service": "WeTV"
+    },
+    "b.im-apps.net": {
+      "category": "Messaging",
+      "service": "Messaging Service"
+    },
+    "atm.im-apps.net": {
+      "category": "Messaging",
+      "service": "Messaging Service"
+    },
+    "score.im-apps.net": {
+      "category": "Messaging",
+      "service": "Messaging Service"
+    },
+    "vibeaconstr.onezapp.com": {
+      "category": "Messaging",
+      "service": "OneZapp"
+    },
+    "login.msa.msidentity.com": {
+      "category": "Microsoft",
+      "service": "Microsoft Identity"
+    },
+    "196758-ipv4.gr.global.aa-rt.sharepoint.com": {
+      "category": "Microsoft",
+      "service": "SharePoint"
+    },
+    "login.mso.msidentity.com": {
+      "category": "Microsoft",
+      "service": "Microsoft Identity"
+    },
+    "common-afdrk.fe.1drv.com": {
+      "category": "Microsoft",
+      "service": "OneDrive"
+    },
+    "apis.live.net": {
+      "category": "Microsoft",
+      "service": "Microsoft Live"
+    },
+    "196758-ipv4fdsmte.gr.global.aa-rt.sharepoint.com": {
+      "category": "Microsoft",
+      "service": "SharePoint"
+    },
+    "common-geo.ha.1drv.com": {
+      "category": "Microsoft",
+      "service": "OneDrive"
+    },
+    "bam.cell.nr-data.net": {
+      "category": "Monitoring",
+      "service": "New Relic"
+    },
+    "ly.my.sentry.io": {
+      "category": "Monitoring",
+      "service": "Sentry"
+    },
+    "api-eks-2.ext.prod.honeycomb.io": {
+      "category": "Monitoring",
+      "service": "Honeycomb"
+    },
+    "bam.nr-data.net": {
+      "category": "Monitoring",
+      "service": "New Relic"
+    },
+    "api.honeycomb.io": {
+      "category": "Monitoring",
+      "service": "Honeycomb"
+    },
+    "apisonar-liveaccess.go.usonar.jp": {
+      "category": "Monitoring",
+      "service": "U-SONAR Analytics"
+    },
+    "apisonar.go.usonar.jp": {
+      "category": "Monitoring",
+      "service": "U-SONAR Analytics"
+    },
+    "cookie.sync.usonar.jp": {
+      "category": "Monitoring",
+      "service": "U-SONAR Analytics"
+    },
+    "ec2.web.ap-east-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-northeast-3.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "aga.web.us-east-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.me-central-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "lb-133-237-128-251.lbaas.jpe2b.rdcnw.net": {
+      "category": "Network",
+      "service": "Load Balancer"
+    },
+    "ec2.web.ap-southeast-2.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "v4.aga.web.us-east-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-southeast-7.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-east-2.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "cf-byoip.web.us-east-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.eu-west-2.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-south-2.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-southeast-3.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.eu-central-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-southeast-5.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-northeast-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.eu-south-2.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.us-east-2.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-southeast-4.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "v4.aga.web.ap-northeast-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-southeast-6.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "one.one.one.one": {
+      "category": "Network",
+      "service": "Cloudflare DNS (1.1.1.1)"
+    },
+    "ec2.web.il-central-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.eu-north-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "cf-embedded.web.us-east-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "pdns.dnspod.cn": {
+      "category": "Network",
+      "service": "DNSPod"
+    },
+    "206.193.250.142.in-addr.arpa": {
+      "category": "Network",
+      "service": "Reverse DNS"
+    },
+    "ec2.web.ap-south-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ap-southeast-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.us-east-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "lz.web.us-west-2-lax-1a.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.eu-south-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "ec2.web.ca-west-1.prod.diagnostic.networking.aws.dev": {
+      "category": "Network",
+      "service": "AWS Network Diagnostics"
+    },
+    "43.132.55.55": {
+      "category": "Network",
+      "service": "IP Address"
+    },
+    "119.29.29.90": {
+      "category": "Network",
+      "service": "IP Address"
+    },
+    "119.29.29.88": {
+      "category": "Network",
+      "service": "IP Address"
+    },
+    "ip2c.landscape.co.jp": {
+      "category": "Network",
+      "service": "Landscape"
+    },
+    "43.132.43.43": {
+      "category": "Network",
+      "service": "IP Address"
+    },
+    "api.newspicks.com": {
+      "category": "News",
+      "service": "NewsPicks"
+    },
+    "contents.newspicks.com": {
+      "category": "News",
+      "service": "NewsPicks"
+    },
+    "fe-nlb.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "safekey1uplift-eusw1-vip.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "api-13-115-13-148.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "skauthn-eusw1-vip.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "skcheckout-eusw1-vip.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "safekeyacs-eusw1-vip.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "dashboard.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "functions31b-vip.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "iwmapapi11.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "gw.alipayobjects.com": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "datagw-edge.alipay.com": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "amdc.alipaydns.com": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "www.aexp-static.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "safekey1uplifthydra.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "js.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "skauthnhydra.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "skcheckouthydra.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "mdn.alipayobjects.com": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "bailingual-assets.alipay.com": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "nichigas.payhub.jp": {
+      "category": "Payment",
+      "service": "PayHub"
+    },
+    "safekey-1.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "safekeyacs.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "r.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "ashort.alipay.com.cn": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "mgw.alipay.com": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "iwmapapi.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "merchant-ui-api.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "functions.americanexpress.com": {
+      "category": "Payment",
+      "service": "American Express"
+    },
+    "amdc.alipay.com": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "errors.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "invoicedata.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "m.stripe.network": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "m.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "api.stripe.com": {
+      "category": "Payment",
+      "service": "Stripe"
+    },
+    "unleash-edge.goodnotes-devops.com": {
+      "category": "Productivity",
+      "service": "GoodNotes"
+    },
+    "images-udp.app.starbucks.co.jp": {
+      "category": "Retail",
+      "service": "Starbucks"
+    },
+    "sptest.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "bdbus-turbonet.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "nsclick.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "h2tcbox.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "loc.map.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "mbd.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "ofloc.map.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "sofire.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "ossapi.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "aispace.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "ack.tuisong.baidu.com": {
+      "category": "Search",
+      "service": "Baidu"
+    },
+    "mosaic-nova.apis.mcafee.com": {
+      "category": "Security",
+      "service": "McAfee"
+    },
+    "d8c14d4960ca.edge.sdk.awswaf.com": {
+      "category": "Security",
+      "service": "AWS WAF"
+    },
+    "api.hcaptcha.com": {
+      "category": "Security",
+      "service": "hCaptcha"
+    },
+    "download.mcafee.com": {
+      "category": "Security",
+      "service": "McAfee"
+    },
+    "crl.cybertrust.ne.jp": {
+      "category": "Security",
+      "service": "Cybertrust"
+    },
+    "newassets.hcaptcha.com": {
+      "category": "Security",
+      "service": "hCaptcha"
+    },
+    "209.250.254.15.vultrusercontent.com": {
+      "category": "Social",
+      "service": "Twitter (X)"
+    },
+    "t.co": {
+      "category": "Social",
+      "service": "Twitter (X)"
+    },
+    "image2v2.pubmnet.com": {
+      "category": "Social",
+      "service": "Twitter (X)"
+    },
+    "api.revenuecat.com": {
+      "category": "Social",
+      "service": "Twitter (X)"
+    },
+    "graph.fbpigeon.com": {
+      "category": "Social",
+      "service": "Facebook"
+    },
+    "tvax2.sinaimg.cn": {
+      "category": "Social",
+      "service": "Sina Weibo"
+    },
+    "eb2.3lift.com": {
+      "category": "Social",
+      "service": "Twitter (X)"
+    },
+    "ice.clip-studio.com": {
+      "category": "Software",
+      "service": "Clip Studio"
+    },
+    "download.amd.com": {
+      "category": "Software",
+      "service": "AMD"
+    },
+    "test-mijeos.but.jp": {
+      "category": "Testing",
+      "service": "Testing Domain"
+    },
+    "dyn.keepa.com": {
+      "category": "Tracker",
+      "service": "Keepa (Price Tracker)"
+    },
+    "tracking.intl.miui.com": {
+      "category": "Tracker",
+      "service": "Tracker"
+    },
+    "cn-neg-geo.cfe.uber.com": {
+      "category": "Transport",
+      "service": "Uber"
+    },
+    "pusher.uber.com": {
+      "category": "Transport",
+      "service": "Uber"
+    },
+    "connect.intl.rom.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "sgp-howl.api.intl.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "api.competition.intl.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "jupiter.intl.sys.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "api.gallery.intl.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "flash.sec.intl.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "gtglobal.intl.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "authbe.sec.intl.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "mcc.intl.inf.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "mcc-intl.inf.miui.com": {
+      "category": "Xiaomi",
+      "service": "Xiaomi/MIUI"
+    },
+    "yuanshen": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "genshin": {
+      "category": "Gaming",
+      "service": "Genshin Impact (miHoYo)"
+    },
+    "starrails": {
+      "category": "Gaming",
+      "service": "Honkai: Star Rail (miHoYo)"
+    },
+    "honkai": {
+      "category": "Gaming",
+      "service": "Honkai: Star Rail (miHoYo)"
+    },
+    "zenlesszonezero": {
+      "category": "Gaming",
+      "service": "Zenless Zone Zero (miHoYo)"
+    },
+    "zenless": {
+      "category": "Gaming",
+      "service": "Zenless Zone Zero (miHoYo)"
+    },
+    "kurogame": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "mingchao": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "wuthering": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "aki-game": {
+      "category": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)"
+    },
+    "yostar": {
+      "category": "Gaming",
+      "service": "Yostar Games"
+    },
+    "crashsight": {
+      "category": "Gaming",
+      "service": "Tencent Gaming Services"
+    },
+    "launcher": {
+      "category": "Gaming",
+      "service": "Game Launcher"
+    },
+    "gliacloud": {
+      "category": "AI",
+      "service": "GliaCloud (AI Video)"
+    },
+    "newrelic": {
+      "category": "Monitoring",
+      "service": "New Relic"
+    },
+    "datadog": {
+      "category": "Monitoring",
+      "service": "Datadog"
+    },
+    "datadoghq": {
+      "category": "Monitoring",
+      "service": "Datadog"
+    },
+    "sonar": {
+      "category": "Monitoring",
+      "service": "U-SONAR Analytics"
+    },
+    "googletagmanager.com": {
+      "category": "Analytics",
+      "service": "Google Tag Manager"
+    },
+    "omtr": {
+      "category": "Analytics",
+      "service": "Adobe Analytics"
+    },
+    "comscore": {
+      "category": "Analytics",
+      "service": "Nielsen/comScore"
+    },
+    "daikin": {
+      "category": "IoT",
+      "service": "Daikin Smart"
+    },
+    "tplink": {
+      "category": "IoT",
+      "service": "TP-Link Router"
+    },
+    "coolkit.cn": {
+      "category": "IoT",
+      "service": "eWeLink IoT"
+    },
+    "coolkit.cc": {
+      "category": "IoT",
+      "service": "eWeLink IoT"
+    },
+    "ewelink": {
+      "category": "IoT",
+      "service": "eWeLink IoT"
+    },
+    "blynk.io": {
+      "category": "IoT",
+      "service": "Blynk IoT"
+    },
+    "blynk.cloud": {
+      "category": "IoT",
+      "service": "Blynk IoT"
+    },
+    "home.mi.com": {
+      "category": "IoT",
+      "service": "Xiaomi Home"
+    },
+    "exponential": {
+      "category": "Ad",
+      "service": "Exponential (Ad Network)"
+    },
+    "youborafds": {
+      "category": "Ad",
+      "service": "Youbora Ad Network"
+    },
+    "youboranqs": {
+      "category": "Ad",
+      "service": "Youbora Ad Network"
+    },
+    "adingo.jp": {
+      "category": "Ad",
+      "service": "Adingo (Japan)"
+    },
+    "id5-sync.com": {
+      "category": "Ad",
+      "service": "ID5"
+    },
+    "wagbridge.com": {
+      "category": "CDN",
+      "service": "Wagbridge CDN"
+    },
+    "aliyun": {
+      "category": "Cloud",
+      "service": "Alibaba Cloud"
+    },
+    "aliyuncs": {
+      "category": "Cloud",
+      "service": "Alibaba Cloud"
+    },
+    "alipay": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "alipaydns": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "alipayobjects": {
+      "category": "Payment",
+      "service": "Alipay"
+    },
+    "alikunlun": {
+      "category": "CDN",
+      "service": "Alibaba CDN"
+    },
+    "bdbus": {
+      "category": "CDN",
+      "service": "Baidu CDN"
+    },
+    "kunlunhuf": {
+      "category": "CDN",
+      "service": "China CDN (Kunlun)"
+    },
+    "lahuashanbx": {
+      "category": "CDN",
+      "service": "China CDN (Kunlun)"
+    },
+    "kunlunle": {
+      "category": "CDN",
+      "service": "China CDN (Kunlun)"
+    },
+    "kunluncan": {
+      "category": "CDN",
+      "service": "China CDN (Kunlun)"
+    },
+    "arena.ne.jp": {
+      "category": "ISP",
+      "service": "NTT Arena"
+    },
+    "landscape.co.jp": {
+      "category": "Network",
+      "service": "Landscape"
+    },
+    "cybertrust.ne.jp": {
+      "category": "Security",
+      "service": "Cybertrust"
+    },
+    "msa.msidentity": {
+      "category": "Microsoft",
+      "service": "Microsoft Identity"
+    },
+    "mijia.tech": {
+      "category": "IoT",
+      "service": "Xiaomi Mi IoT"
+    },
+    "io.mi.com": {
+      "category": "IoT",
+      "service": "Xiaomi Mi IoT"
+    },
+    "kuaishou": {
+      "category": "Social",
+      "service": "Kuaishou (快手)"
+    },
+    "adukwai.com": {
+      "category": "Social",
+      "service": "Kuaishou (快手)"
+    },
+    "kwai": {
+      "category": "Social",
+      "service": "Kuaishou (快手)"
+    },
+    "yximgs.com": {
+      "category": "Social",
+      "service": "Kuaishou (快手)"
+    },
+    "bcelive.com": {
+      "category": "Social",
+      "service": "Kuaishou (快手)"
+    },
+    "youku.tv": {
+      "category": "Streaming",
+      "service": "Youku (優酷)"
+    },
+    "youku.com": {
+      "category": "Streaming",
+      "service": "Youku (優酷)"
+    },
+    "xiaojukeji.com": {
+      "category": "Transport",
+      "service": "DiDi (滴滴)"
+    },
+    "didichuxing": {
+      "category": "Transport",
+      "service": "DiDi (滴滴)"
+    },
+    "udache.com": {
+      "category": "Transport",
+      "service": "DiDi (滴滴)"
+    },
+    "didistatic.com": {
+      "category": "Transport",
+      "service": "DiDi (滴滴)"
+    },
+    "meituan.com": {
+      "category": "Shopping",
+      "service": "Meituan (美団)"
+    },
+    "meituan.net": {
+      "category": "Shopping",
+      "service": "Meituan (美団)"
+    },
+    "dianping.com": {
+      "category": "Shopping",
+      "service": "Dianping (大衆点評)"
+    },
+    "ele.me": {
+      "category": "Shopping",
+      "service": "Ele.me (餓了麼)"
+    },
+    "eleme": {
+      "category": "Shopping",
+      "service": "Ele.me (餓了麼)"
+    },
+    "jd.com": {
+      "category": "Shopping",
+      "service": "JD.com (京東)"
+    },
+    "iqiyi.com": {
+      "category": "Streaming",
+      "service": "iQiyi (愛奇芸)"
+    },
+    "iq.com": {
+      "category": "Streaming",
+      "service": "iQiyi (愛奇芸)"
+    },
+    "uc.cn": {
+      "category": "Browser",
+      "service": "UC Browser"
+    },
+    "jpush.cn": {
+      "category": "Messaging",
+      "service": "JPush"
+    },
+    "pcloud.tw": {
+      "category": "Cloud",
+      "service": "PCloud Taiwan"
+    },
+    "tanx.com": {
+      "category": "Ad",
+      "service": "Taobao Ad Network"
+    },
+    "grab.com": {
+      "category": "Transport",
+      "service": "Grab"
+    },
+    "grabtaxi.com": {
+      "category": "Transport",
+      "service": "Grab"
+    },
+    "lkcoffee.com": {
+      "category": "Retail",
+      "service": "Luckin Coffee"
+    },
+    "pchome.com.tw": {
+      "category": "Shopping",
+      "service": "PChome"
+    },
+    "etsy.com": {
+      "category": "Shopping",
+      "service": "Etsy"
+    },
+    "sekorm.com": {
+      "category": "Shopping",
+      "service": "Sekorm Electronics"
+    },
+    "ameya360.com": {
+      "category": "Shopping",
+      "service": "Ameya360"
+    },
+    "vipmro.net": {
+      "category": "Shopping",
+      "service": "Vipmro"
+    },
+    "adseyeservice.com": {
+      "category": "Ad",
+      "service": "AdSeye"
+    },
+    "adseye.com": {
+      "category": "Ad",
+      "service": "AdSeye"
+    },
+    "spadsync.com": {
+      "category": "Ad",
+      "service": "SpAdSync"
+    },
+    "tongdun.net": {
+      "category": "Ad",
+      "service": "Tongdun"
+    },
+    "reproio.com": {
+      "category": "Analytics",
+      "service": "Repro"
+    },
+    "repro.io": {
+      "category": "Analytics",
+      "service": "Repro"
+    },
+    "beaconbank.jp": {
+      "category": "Finance",
+      "service": "Beacon Bank"
+    },
+    "openexchangerates.org": {
+      "category": "Finance",
+      "service": "Open Exchange Rates"
+    },
+    "hwclouds-dns.com": {
+      "category": "Cloud",
+      "service": "Huawei Cloud"
+    },
+    "jcloud-cdn.com": {
+      "category": "CDN",
+      "service": "JCloud CDN"
+    },
+    "jcloudgslb.com": {
+      "category": "CDN",
+      "service": "JCloud CDN"
+    },
+    "hjholdings.tv": {
+      "category": "Media",
+      "service": "HJ Holdings"
+    },
+    "szlcsc.com": {
+      "category": "Shopping",
+      "service": "LCSC Electronics"
+    },
+    "antutu.net": {
+      "category": "Mobile",
+      "service": "AnTuTu Benchmark"
+    },
+    "ksmobile.com": {
+      "category": "Mobile",
+      "service": "AnTuTu Benchmark"
     }
   }
 }
