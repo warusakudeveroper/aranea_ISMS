@@ -6,6 +6,7 @@ use super::repository::CameraBrandRepository;
 use super::types::*;
 use crate::error::{Error, Result};
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sqlx::MySqlPool;
 use std::collections::HashMap;
 use std::sync::Arc;
