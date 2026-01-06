@@ -44,6 +44,7 @@ export interface CameraStatusMessage {
 
 // Polling cycle statistics - broadcast at end of each cycle
 export interface CycleStatsMessage {
+  subnet: string
   cycle_duration_sec: number
   cycle_duration_formatted: string  // "mm:ss"
   cameras_polled: number

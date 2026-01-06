@@ -49,14 +49,6 @@ function BlankCard({ onScanClick }: { onScanClick: () => void }) {
   )
 }
 
-// Polling cycle state for header display
-// With parallel subnet polling, we track the most recent cycle from any subnet
-interface CycleState {
-  durationFormatted: string  // "mm:ss"
-  camerasPolled: number
-  cycleNumber: number
-}
-
 // Default onairtime in seconds
 const DEFAULT_ONAIRTIME_SECONDS = 180
 
@@ -71,12 +63,9 @@ function App() {
   const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>({})
   // Per-camera status (processing time, errors) for slow/timeout display
   const [cameraStatuses, setCameraStatuses] = useState<Record<string, CameraStatus>>({})
-  // Polling cycle state (parallel subnet polling - shows most recent cycle)
-  const [cycleState, setCycleState] = useState<CycleState>({
-    durationFormatted: "--:--",
-    camerasPolled: 0,
-    cycleNumber: 0,
-  })
+  // Per-subnet cycle statistics (from WebSocket notifications)
+  // Key: subnet (e.g., "192.168.125.0/24"), Value: CycleStatsMessage
+  const [cycleStats, setCycleStats] = useState<Record<string, CycleStatsMessage>>({})
   // On-air camera IDs (for tile highlighting)
   const [onAirCameraIds, setOnAirCameraIds] = useState<string[]>([])
   // On-air time setting (persisted to localStorage)
@@ -227,12 +216,13 @@ function App() {
   }, [])
 
   // Handle cycle stats from polling orchestrator (parallel subnets)
+  // Handle cycle statistics updates from WebSocket
+  // Each subnet broadcasts independently with its own cycle timing
   const handleCycleStats = useCallback((msg: CycleStatsMessage) => {
-    setCycleState({
-      durationFormatted: msg.cycle_duration_formatted,
-      camerasPolled: msg.cameras_polled,
-      cycleNumber: msg.cycle_number,
-    })
+    setCycleStats((prev) => ({
+      ...prev,
+      [msg.subnet]: msg,
+    }))
   }, [])
 
   // WebSocket connection for real-time notifications (single connection point)
@@ -299,10 +289,24 @@ function App() {
               <>
                 <Wifi className="h-4 w-4 text-green-500" />
                 <span className="text-green-500 text-xs">LIVE</span>
-                {/* Polling cycle duration display (parallel subnets) */}
-                <span className="text-muted-foreground text-xs ml-1">
-                  巡回 {cycleState.durationFormatted}
-                </span>
+                {/* Subnet-specific cycle times and camera counts */}
+                {Object.entries(cycleStats).length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground text-xs">巡回</span>
+                    {Object.entries(cycleStats)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([subnet, stats], idx) => {
+                        // Format "192.168.125.0/24" -> "125.0/24"
+                        const shortSubnet = subnet.split('.').slice(2).join('.')
+                        return (
+                          <span key={subnet} className="text-xs">
+                            {idx > 0 && <span className="text-muted-foreground mx-1">|</span>}
+                            {shortSubnet}: {stats.cycle_duration_formatted} ({stats.cameras_polled}台)
+                          </span>
+                        )
+                      })}
+                  </div>
+                )}
               </>
             ) : (
               <>
