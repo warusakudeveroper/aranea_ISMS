@@ -1655,6 +1655,198 @@
     "force.com": {
       "service": "Salesforce",
       "category": "Cloud"
+    },
+    "gliacloud.com": {
+      "service": "GliaCloud (AI Video)",
+      "category": "AI"
+    },
+    "nr-data.net": {
+      "service": "New Relic",
+      "category": "Monitoring"
+    },
+    "keepa.com": {
+      "service": "Keepa (Price Tracker)",
+      "category": "Tracker"
+    },
+    "beds24.com": {
+      "service": "Booking Service",
+      "category": "Booking"
+    },
+    "daikinsmartdb.jp": {
+      "service": "Daikin Smart",
+      "category": "IoT"
+    },
+    "lolipop.jp": {
+      "service": "Lolipop",
+      "category": "Hosting"
+    },
+    "app-measurement.com": {
+      "service": "Google Analytics",
+      "category": "Analytics"
+    },
+    "ameblo.jp": {
+      "service": "Ameba Blog",
+      "category": "Blog"
+    },
+    "youboranqs01.com": {
+      "service": "Ad Network",
+      "category": "Ad"
+    },
+    "sentry.io": {
+      "service": "Sentry",
+      "category": "Monitoring"
+    },
+    "msidentity.com": {
+      "service": "Microsoft Identity",
+      "category": "Microsoft"
+    },
+    "honeycomb.io": {
+      "service": "Honeycomb",
+      "category": "Monitoring"
+    },
+    "stripe.com": {
+      "service": "Stripe",
+      "category": "Payment"
+    },
+    "ipv4only.arpa": {
+      "service": "IPv4 Test",
+      "category": "Network"
+    },
+    "adtdp.com": {
+      "service": "Ad Network",
+      "category": "Ad"
+    },
+    "a-dsp.com": {
+      "service": "DSP",
+      "category": "Ad"
+    },
+    "awswaf.com": {
+      "service": "AWS WAF",
+      "category": "Security"
+    },
+    "newspicks.com": {
+      "service": "NewsPicks",
+      "category": "News"
+    },
+    "cloudfunctions.net": {
+      "service": "Google Cloud Functions",
+      "category": "Cloud"
+    },
+    "americanexpress.com": {
+      "service": "American Express",
+      "category": "Payment"
+    },
+    "uncn.jp": {
+      "service": "Ad Network (Japan)",
+      "category": "Ad"
+    },
+    "aws.dev": {
+      "service": "AWS Network Diagnostics",
+      "category": "Network"
+    },
+    "shifen.com": {
+      "service": "Baidu CDN (Shifen)",
+      "category": "CDN"
+    },
+    "miui.com": {
+      "service": "Xiaomi/MIUI",
+      "category": "Xiaomi"
+    },
+    "socdm.com": {
+      "service": "Ad Network",
+      "category": "Ad"
+    },
+    "nielsen.com": {
+      "service": "Nielsen",
+      "category": "Ad"
+    },
+    "creativecdn.com": {
+      "service": "Creative CDN",
+      "category": "Ad"
+    },
+    "yuanshen.com": {
+      "service": "Genshin Impact (miHoYo)",
+      "category": "Gaming"
+    },
+    "booking.com": {
+      "service": "Booking Service",
+      "category": "Booking"
+    },
+    "mcafee.com": {
+      "service": "Analytics",
+      "category": "Analytics"
+    },
+    "vultrusercontent.com": {
+      "service": "Twitter (X)",
+      "category": "Social"
+    },
+    "obsidian.md": {
+      "service": "Obsidian",
+      "category": "Development"
+    },
+    "hcaptcha.com": {
+      "service": "hCaptcha",
+      "category": "Security"
+    },
+    "vscode-cdn.net": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "im-apps.net": {
+      "service": "Messaging Service",
+      "category": "Messaging"
+    },
+    "sharepoint.com": {
+      "service": "SharePoint",
+      "category": "Microsoft"
+    },
+    "onelink.me": {
+      "service": "AppsFlyer OneLink",
+      "category": "Ad"
+    },
+    "aliyuncs.com": {
+      "service": "Yostar Games",
+      "category": "Gaming"
+    },
+    "kunlunhuf.com": {
+      "service": "China CDN",
+      "category": "CDN"
+    },
+    "growthbook.io": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "lahuashanbx.com": {
+      "service": "Wuthering Waves (Kuro Games)",
+      "category": "Gaming"
+    },
+    "byteglb.com": {
+      "service": "ByteDance Global CDN",
+      "category": "CDN"
+    },
+    "1drv.com": {
+      "service": "OneDrive",
+      "category": "Microsoft"
+    },
+    "kurogame.xyz": {
+      "service": "Wuthering Waves (Kuro Games)",
+      "category": "Gaming"
+    },
+    "bdydns.com": {
+      "service": "Baidu CDN",
+      "category": "CDN"
+    },
+    "t.co": {
+      "service": "Twitter (X)",
+      "category": "Social"
+    },
+    "cdngslb.com": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "aki-game.net": {
+      "service": "Gaming",
+      "category": "Gaming"
     }
   }
 }
