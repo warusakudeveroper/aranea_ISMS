@@ -60,6 +60,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/settings/system", get(get_system_info))
         .route("/api/settings/performance/logs", get(get_performance_logs))
         .route("/api/settings/polling/logs", get(get_polling_logs))
+        .route("/api/settings/timeouts", get(get_global_timeouts))
+        .route("/api/settings/timeouts", put(update_global_timeouts))
         // Performance Dashboard API (統合デバッグAPI)
         .route("/api/debug/performance/dashboard", get(get_performance_dashboard))
         // IpcamScan
@@ -1557,6 +1559,137 @@ struct DashboardSummary {
 /// GET /api/debug/performance/dashboard
 ///
 /// Returns comprehensive performance statistics for the monitoring dashboard:
+// ============================================================================
+// Timeout Settings API
+// ============================================================================
+
+/// GET /api/settings/timeouts - Get global timeout settings
+async fn get_global_timeouts(State(state): State<AppState>) -> impl IntoResponse {
+    // Load timeout settings from settings.polling
+    let result = sqlx::query("SELECT setting_json FROM settings WHERE setting_key = 'polling'")
+        .fetch_optional(&state.pool)
+        .await;
+
+    match result {
+        Ok(Some(row)) => {
+            let setting_json: String = row.get("setting_json");
+            match serde_json::from_str::<serde_json::Value>(&setting_json) {
+                Ok(polling_settings) => {
+                    let timeout_main = polling_settings["timeout_main_sec"].as_u64().unwrap_or(10);
+                    let timeout_sub = polling_settings["timeout_sub_sec"].as_u64().unwrap_or(20);
+
+                    Json(json!({
+                        "ok": true,
+                        "data": {
+                            "timeout_main_sec": timeout_main,
+                            "timeout_sub_sec": timeout_sub
+                        }
+                    }))
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to parse polling settings JSON");
+                    Json(json!({
+                        "ok": true,
+                        "data": {
+                            "timeout_main_sec": 10,
+                            "timeout_sub_sec": 20
+                        }
+                    }))
+                }
+            }
+        }
+        Ok(None) => {
+            // Settings not found, return defaults
+            Json(json!({
+                "ok": true,
+                "data": {
+                    "timeout_main_sec": 10,
+                    "timeout_sub_sec": 20
+                }
+            }))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to load timeout settings");
+            Json(json!({
+                "ok": false,
+                "error": "Failed to load settings"
+            }))
+        }
+    }
+}
+
+/// PUT /api/settings/timeouts - Update global timeout settings
+#[derive(Deserialize)]
+struct UpdateTimeoutRequest {
+    timeout_main_sec: u64,
+    timeout_sub_sec: u64,
+}
+
+async fn update_global_timeouts(
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateTimeoutRequest>,
+) -> impl IntoResponse {
+    // Validation
+    if payload.timeout_main_sec < 5 || payload.timeout_main_sec > 120 {
+        return Json(json!({
+            "ok": false,
+            "error": "timeout_main_sec must be between 5 and 120"
+        }));
+    }
+    if payload.timeout_sub_sec < 5 || payload.timeout_sub_sec > 120 {
+        return Json(json!({
+            "ok": false,
+            "error": "timeout_sub_sec must be between 5 and 120"
+        }));
+    }
+
+    // Update settings
+    let result = sqlx::query(
+        "UPDATE settings
+         SET setting_json = JSON_SET(
+             setting_json,
+             '$.timeout_main_sec', ?,
+             '$.timeout_sub_sec', ?
+         )
+         WHERE setting_key = 'polling'"
+    )
+    .bind(payload.timeout_main_sec)
+    .bind(payload.timeout_sub_sec)
+    .execute(&state.pool)
+    .await;
+
+    match result {
+        Ok(_) => {
+            tracing::info!(
+                timeout_main_sec = payload.timeout_main_sec,
+                timeout_sub_sec = payload.timeout_sub_sec,
+                "Global timeout settings updated"
+            );
+
+            // Refresh ConfigStore cache
+            state.config_store.refresh_cache().await;
+
+            Json(json!({
+                "ok": true,
+                "message": "Timeout settings updated"
+            }))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to update timeout settings");
+            Json(json!({
+                "ok": false,
+                "error": "Failed to update settings"
+            }))
+        }
+    }
+}
+
+// ============================================================================
+// Performance Dashboard API
+// ============================================================================
+
+/// GET /api/debug/performance/dashboard - Performance statistics dashboard
+/// Returns aggregated performance data:
 /// - Timeline lap times per subnet (for line chart)
 /// - Error rates over time (image vs inference errors)
 /// - Processing time distribution (for pie chart)

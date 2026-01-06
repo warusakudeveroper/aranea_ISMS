@@ -73,10 +73,14 @@ impl SnapshotService {
     /// * `snapshot_dir` - Directory to store latest snapshots (e.g., /var/lib/is22/snapshots)
     /// * `temp_dir` - Directory for temporary files (e.g., /var/lib/is22/temp)
     /// * `rtsp_manager` - RTSPアクセス制御マネージャ
+    /// * `timeout_main_sec` - Timeout for main stream in seconds (from global settings)
+    /// * `timeout_sub_sec` - Timeout for sub stream in seconds (from global settings)
     pub async fn new(
         snapshot_dir: PathBuf,
         temp_dir: PathBuf,
         rtsp_manager: Arc<RtspManager>,
+        timeout_main_sec: u64,
+        timeout_sub_sec: u64,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
@@ -91,8 +95,8 @@ impl SnapshotService {
             client,
             snapshot_dir,
             temp_dir,
-            ffmpeg_timeout_main: 10,
-            ffmpeg_timeout_sub: 20,
+            ffmpeg_timeout_main: timeout_main_sec,
+            ffmpeg_timeout_sub: timeout_sub_sec,
             rtsp_manager,
         })
     }
