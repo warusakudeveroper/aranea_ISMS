@@ -102,6 +102,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/ipcamscan/jobs", post(create_scan_job))
         .route("/api/ipcamscan/jobs/:id", get(get_scan_job))
         .route("/api/ipcamscan/devices", get(list_scanned_devices))
+        .route("/api/ipcamscan/devices-with-categories", get(list_devices_with_categories))
+        .route("/api/ipcamscan/devices/cidr/count", post(count_devices_by_cidr))
+        .route("/api/ipcamscan/devices/cidr/delete", post(delete_devices_by_cidr))
         .route("/api/ipcamscan/devices/:ip/verify", post(verify_device))
         .route("/api/ipcamscan/devices/:ip/approve", post(approve_device))
         .route("/api/ipcamscan/devices/:ip/reject", post(reject_device))
@@ -2290,6 +2293,76 @@ async fn list_scanned_devices(
         "devices": devices,
         "total": total
     }))
+}
+
+/// List devices with category enrichment (#82 T2-8)
+/// Query params: subnet, include_lost (default: true)
+#[derive(Deserialize)]
+struct DevicesWithCategoriesQuery {
+    subnet: Option<String>,
+    include_lost: Option<bool>,
+}
+
+async fn list_devices_with_categories(
+    State(state): State<AppState>,
+    Query(query): Query<DevicesWithCategoriesQuery>,
+) -> impl IntoResponse {
+    let filter = crate::ipcam_scan::DeviceFilter {
+        subnet: query.subnet,
+        ..Default::default()
+    };
+    let include_lost = query.include_lost.unwrap_or(true);
+
+    let devices = state.ipcam_scan.list_devices_with_categories(filter, include_lost).await;
+
+    // Group by category for summary
+    let mut category_counts = std::collections::HashMap::new();
+    for device in &devices {
+        let cat_key = format!("{:?}", device.category);
+        *category_counts.entry(cat_key).or_insert(0) += 1;
+    }
+
+    Json(serde_json::json!({
+        "devices": devices,
+        "total": devices.len(),
+        "by_category": category_counts
+    }))
+}
+
+/// CIDR request for count/delete operations (#82 T2-9)
+#[derive(Deserialize)]
+struct CidrRequest {
+    cidr: String,
+}
+
+/// Count devices by CIDR (preview before delete)
+async fn count_devices_by_cidr(
+    State(state): State<AppState>,
+    Json(req): Json<CidrRequest>,
+) -> impl IntoResponse {
+    match state.ipcam_scan.count_devices_by_cidr(&req.cidr).await {
+        Ok(count) => Json(serde_json::json!({
+            "ok": true,
+            "cidr": req.cidr,
+            "count": count
+        })).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Delete devices by CIDR
+async fn delete_devices_by_cidr(
+    State(state): State<AppState>,
+    Json(req): Json<CidrRequest>,
+) -> impl IntoResponse {
+    match state.ipcam_scan.delete_devices_by_cidr(&req.cidr).await {
+        Ok(deleted) => Json(serde_json::json!({
+            "ok": true,
+            "cidr": req.cidr,
+            "deleted": deleted
+        })).into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 #[derive(Deserialize)]

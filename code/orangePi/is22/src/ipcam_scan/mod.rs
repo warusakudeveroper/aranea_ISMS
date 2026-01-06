@@ -23,7 +23,7 @@ use scanner::{
     parse_cidr, probe_onvif_detailed, probe_onvif_extended, probe_onvif_with_auth,
     probe_rtsp_detailed, scan_port, scan_ports, ArpScanResult, DeviceEvidence,
     OnvifCapabilities, OnvifDeviceInfo, OnvifExtendedInfo, OnvifNetworkInterface, OnvifScopes,
-    ProbeResult,
+    ProbeResult, ProbesProbeResult,
 };
 use futures::future::select_all;
 use sqlx::MySqlPool;
@@ -627,6 +627,17 @@ impl IpcamScan {
                     (None, None)
                 };
 
+                // Convert probes::ProbeResult to network::ProbeResult
+                let onvif_result_network = match onvif_result {
+                    ProbesProbeResult::NotTested => ProbeResult::NotTested,
+                    ProbesProbeResult::Success => ProbeResult::Success,
+                    ProbesProbeResult::NoResponse => ProbeResult::NoResponse,
+                    ProbesProbeResult::AuthRequired => ProbeResult::AuthRequired,
+                    ProbesProbeResult::Timeout => ProbeResult::Timeout,
+                    ProbesProbeResult::Refused => ProbeResult::Refused,
+                    ProbesProbeResult::Error => ProbeResult::Error,
+                };
+
                 DeviceEvidence {
                     ip,
                     open_ports: open_ports_clone,
@@ -635,7 +646,7 @@ impl IpcamScan {
                     onvif_found,
                     ssdp_found: false,
                     mdns_found: false,
-                    onvif_result,
+                    onvif_result: onvif_result_network,
                     rtsp_result,
                 }
             });
@@ -1169,6 +1180,205 @@ impl IpcamScan {
         Ok(())
     }
 
+    /// Detect lost connections (Category F) - #82 T2-8
+    ///
+    /// After a scan completes, check which registered cameras in the target
+    /// subnets were NOT found (did not respond to ARP/TCP/ONVIF).
+    /// These are marked as LostConnection (Category F).
+    ///
+    /// Returns: Vec of (camera_id, camera_name, ip_address, category_detail)
+    pub async fn detect_lost_connections(
+        &self,
+        targets: &[String],
+        alive_ips: &[IpAddr],
+    ) -> Vec<LostCameraInfo> {
+        let mut lost_cameras: Vec<LostCameraInfo> = Vec::new();
+
+        // Get all registered cameras in target subnets
+        // Using INET_ATON for IPv4 CIDR matching
+        for target in targets {
+            // Parse CIDR to get network and mask
+            let parts: Vec<&str> = target.split('/').collect();
+            if parts.len() != 2 {
+                continue;
+            }
+            let network = parts[0];
+            let prefix: u8 = match parts[1].parse() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            // Calculate network mask
+            let mask: u32 = if prefix == 0 { 0 } else { !0u32 << (32 - prefix) };
+
+            // Query cameras in this subnet using INET_ATON
+            let cameras: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+                "SELECT camera_id, name, ip_address, mac_address \
+                 FROM cameras \
+                 WHERE enabled = 1 \
+                 AND ip_address IS NOT NULL \
+                 AND (INET_ATON(ip_address) & ?) = (INET_ATON(?) & ?)"
+            )
+            .bind(mask)
+            .bind(network)
+            .bind(mask)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+
+            for (camera_id, name, ip_address, mac_address) in cameras {
+                // Check if this camera was found in the scan
+                let ip: IpAddr = match ip_address.parse() {
+                    Ok(ip) => ip,
+                    Err(_) => continue,
+                };
+
+                if !alive_ips.contains(&ip) {
+                    // Camera was not found - mark as lost
+                    tracing::warn!(
+                        camera_id = %camera_id,
+                        name = %name,
+                        ip = %ip_address,
+                        "Camera not responding - marking as LostConnection"
+                    );
+
+                    // Check if IP might have changed (StrayChild detection)
+                    // Look for a device with matching MAC but different IP
+                    let stray_child = if let Some(ref mac) = mac_address {
+                        let matching_device: Option<(String,)> = sqlx::query_as(
+                            "SELECT ip FROM ipcamscan_devices \
+                             WHERE mac = ? AND ip != ?"
+                        )
+                        .bind(mac)
+                        .bind(&ip_address)
+                        .fetch_optional(&self.pool)
+                        .await
+                        .ok()
+                        .flatten();
+
+                        if let Some((new_ip,)) = matching_device {
+                            Some(new_ip)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let (detail, new_ip) = if let Some(ref ip) = stray_child {
+                        (DeviceCategoryDetail::StrayChild, Some(ip.clone()))
+                    } else {
+                        (DeviceCategoryDetail::LostConnection, None)
+                    };
+
+                    lost_cameras.push(LostCameraInfo {
+                        camera_id,
+                        camera_name: name,
+                        ip_address,
+                        mac_address,
+                        category: DeviceCategory::F,
+                        category_detail: detail,
+                        new_ip_address: new_ip,
+                    });
+                }
+            }
+        }
+
+        lost_cameras
+    }
+
+    /// Get devices with category enrichment (#82 T2-8)
+    ///
+    /// Returns scanned devices with:
+    /// - Category A: Matched to registered camera (IP match)
+    /// - Category F: Added for lost cameras (not found in scan)
+    pub async fn list_devices_with_categories(
+        &self,
+        filter: DeviceFilter,
+        include_lost: bool,
+    ) -> Vec<ScannedDevice> {
+        let mut devices = self.list_devices(filter.clone()).await;
+
+        // Get registered cameras for Category A matching
+        let registered: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT camera_id, name, ip_address FROM cameras WHERE enabled = 1"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        let registered_ips: HashMap<String, (String, String)> = registered
+            .into_iter()
+            .map(|(id, name, ip)| (ip, (id, name)))
+            .collect();
+
+        // Enrich devices with registered camera info (Category A)
+        for device in &mut devices {
+            if let Some((camera_id, camera_name)) = registered_ips.get(&device.ip) {
+                device.category = DeviceCategory::A;
+                device.category_detail = DeviceCategoryDetail::Registered;
+                device.registered_camera_id = Some(camera_id.clone());
+                device.registered_camera_name = Some(camera_name.clone());
+            }
+        }
+
+        // Add lost cameras as Category F if requested
+        if include_lost {
+            // Find cameras in filter subnet that are not in devices
+            if let Some(ref subnet_filter) = filter.subnet {
+                let device_ips: std::collections::HashSet<String> =
+                    devices.iter().map(|d| d.ip.clone()).collect();
+
+                // Get registered cameras in this subnet
+                let subnet_cameras: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+                    "SELECT camera_id, name, ip_address, mac_address FROM cameras \
+                     WHERE enabled = 1 AND ip_address LIKE ?"
+                )
+                .bind(format!("{}%", subnet_filter))
+                .fetch_all(&self.pool)
+                .await
+                .unwrap_or_default();
+
+                for (camera_id, camera_name, ip_address, mac_address) in subnet_cameras {
+                    if !device_ips.contains(&ip_address) {
+                        // This camera is not in the scan results - Category F
+                        devices.push(ScannedDevice {
+                            device_id: Uuid::nil(),
+                            ip: ip_address.clone(),
+                            subnet: subnet_filter.clone(),
+                            mac: mac_address,
+                            oui_vendor: None,
+                            hostnames: vec![],
+                            open_ports: vec![],
+                            score: 0,
+                            verified: false,
+                            status: DeviceStatus::Discovered,
+                            manufacturer: None,
+                            model: None,
+                            firmware: None,
+                            family: CameraFamily::Unknown,
+                            confidence: 0,
+                            rtsp_uri: None,
+                            first_seen: chrono::Utc::now(),
+                            last_seen: chrono::Utc::now(),
+                            detection: DetectionReason::default(),
+                            credential_status: CredentialStatus::NotTried,
+                            credential_username: None,
+                            credential_password: None,
+                            category: DeviceCategory::F,
+                            category_detail: DeviceCategoryDetail::LostConnection,
+                            registered_camera_name: Some(camera_name),
+                            registered_camera_id: Some(camera_id),
+                            ip_changed: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        devices
+    }
+
     /// Verify a device with credentials (Stage 6 completion)
     /// Also retrieves device info (manufacturer, model, MAC) and extended ONVIF data
     pub async fn verify_device(
@@ -1346,6 +1556,95 @@ impl IpcamScan {
             Ok(r) => Ok(r.rows_affected()),
             Err(e) => Err(Error::Internal(format!("Database error: {}", e))),
         }
+    }
+
+    /// Delete scanned devices by CIDR range (#82 T2-9)
+    ///
+    /// Uses INET_ATON for IPv4 CIDR matching (IPv4 only)
+    /// Example: "192.168.96.0/24" deletes all devices in 192.168.96.0-255
+    pub async fn delete_devices_by_cidr(&self, cidr: &str) -> Result<u64> {
+        // Parse CIDR
+        let parts: Vec<&str> = cidr.split('/').collect();
+        if parts.len() != 2 {
+            return Err(Error::Validation(format!(
+                "Invalid CIDR format: {}. Expected format: x.x.x.x/prefix",
+                cidr
+            )));
+        }
+
+        let network = parts[0];
+        let prefix: u8 = parts[1].parse().map_err(|_| {
+            Error::Validation(format!("Invalid prefix: {}", parts[1]))
+        })?;
+
+        if prefix > 32 {
+            return Err(Error::Validation(format!(
+                "Invalid prefix: {}. Must be 0-32",
+                prefix
+            )));
+        }
+
+        // Calculate network mask
+        let mask: u32 = if prefix == 0 { 0 } else { !0u32 << (32 - prefix) };
+
+        tracing::info!(
+            cidr = %cidr,
+            network = %network,
+            prefix = prefix,
+            mask = format!("{:08X}", mask),
+            "Deleting devices by CIDR"
+        );
+
+        // Delete using INET_ATON for IPv4 CIDR matching
+        let result = sqlx::query(
+            "DELETE FROM ipcamscan_devices \
+             WHERE (INET_ATON(ip) & ?) = (INET_ATON(?) & ?)"
+        )
+        .bind(mask)
+        .bind(network)
+        .bind(mask)
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Ok(r) => {
+                let deleted = r.rows_affected();
+                tracing::info!(cidr = %cidr, deleted = deleted, "Deleted devices by CIDR");
+                Ok(deleted)
+            }
+            Err(e) => {
+                tracing::error!(cidr = %cidr, error = %e, "Failed to delete by CIDR");
+                Err(Error::Internal(format!("Database error: {}", e)))
+            }
+        }
+    }
+
+    /// Count devices in a CIDR range (preview before delete)
+    pub async fn count_devices_by_cidr(&self, cidr: &str) -> Result<u64> {
+        let parts: Vec<&str> = cidr.split('/').collect();
+        if parts.len() != 2 {
+            return Err(Error::Validation(format!("Invalid CIDR: {}", cidr)));
+        }
+
+        let network = parts[0];
+        let prefix: u8 = parts[1].parse().map_err(|_| {
+            Error::Validation(format!("Invalid prefix: {}", parts[1]))
+        })?;
+
+        let mask: u32 = if prefix == 0 { 0 } else { !0u32 << (32 - prefix) };
+
+        let result: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM ipcamscan_devices \
+             WHERE (INET_ATON(ip) & ?) = (INET_ATON(?) & ?)"
+        )
+        .bind(mask)
+        .bind(network)
+        .bind(mask)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("Database error: {}", e)))?;
+
+        Ok(result.0 as u64)
     }
 
     /// Approve a verified device and create camera entry
@@ -1579,6 +1878,28 @@ impl DbDevice {
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
 
+        let status = match self.status.as_str() {
+            "discovered" => DeviceStatus::Discovered,
+            "verifying" => DeviceStatus::Verifying,
+            "verified" => DeviceStatus::Verified,
+            "rejected" => DeviceStatus::Rejected,
+            "approved" => DeviceStatus::Approved,
+            _ => DeviceStatus::Discovered,
+        };
+
+        let credential_status = match self.credential_status.as_deref() {
+            Some("success") => CredentialStatus::Success,
+            Some("failed") => CredentialStatus::Failed,
+            _ => CredentialStatus::NotTried,
+        };
+
+        // Derive category from status and credential_status (SSoT)
+        let (category, category_detail) = Self::derive_category(
+            &status,
+            &credential_status,
+            &detection,
+        );
+
         ScannedDevice {
             device_id: Uuid::parse_str(&self.device_id).unwrap_or_else(|_| Uuid::nil()),
             ip: self.ip,
@@ -1597,14 +1918,7 @@ impl DbDevice {
                 .collect(),
             score: self.score,
             verified: self.verified,
-            status: match self.status.as_str() {
-                "discovered" => DeviceStatus::Discovered,
-                "verifying" => DeviceStatus::Verifying,
-                "verified" => DeviceStatus::Verified,
-                "rejected" => DeviceStatus::Rejected,
-                "approved" => DeviceStatus::Approved,
-                _ => DeviceStatus::Discovered,
-            },
+            status,
             manufacturer: self.manufacturer,
             model: self.model,
             firmware: self.firmware,
@@ -1623,13 +1937,76 @@ impl DbDevice {
             first_seen: self.first_seen,
             last_seen: self.last_seen,
             detection,
-            credential_status: match self.credential_status.as_deref() {
-                Some("success") => CredentialStatus::Success,
-                Some("failed") => CredentialStatus::Failed,
-                _ => CredentialStatus::NotTried,
-            },
+            credential_status,
             credential_username: self.credential_username,
             credential_password: self.credential_password,
+            // SSoT category fields
+            category,
+            category_detail,
+            registered_camera_name: None,  // Set by caller when matching with cameras table
+            registered_camera_id: None,    // Set by caller when matching with cameras table
+            ip_changed: false,             // Set by caller during LostConnection detection
+        }
+    }
+
+    /// Derive category (A-F) from device state
+    /// This is the SSoT logic for categorization
+    fn derive_category(
+        status: &DeviceStatus,
+        credential_status: &CredentialStatus,
+        detection: &DetectionReason,
+    ) -> (DeviceCategory, DeviceCategoryDetail) {
+        match status {
+            // Approved devices are registered cameras (Category A)
+            DeviceStatus::Approved => (DeviceCategory::A, DeviceCategoryDetail::Registered),
+
+            // Verified with successful auth = registrable (Category B)
+            DeviceStatus::Verified if *credential_status == CredentialStatus::Success => {
+                (DeviceCategory::B, DeviceCategoryDetail::Registrable)
+            }
+
+            // Discovered/Verifying with camera-like evidence
+            DeviceStatus::Discovered | DeviceStatus::Verifying => {
+                match detection.device_type {
+                    // Camera confirmed but auth needed (Category C)
+                    DeviceType::CameraConfirmed => {
+                        if *credential_status == CredentialStatus::Failed {
+                            (DeviceCategory::C, DeviceCategoryDetail::AuthFailed)
+                        } else {
+                            (DeviceCategory::C, DeviceCategoryDetail::AuthRequired)
+                        }
+                    }
+                    // Camera possible (Category D)
+                    DeviceType::CameraLikely | DeviceType::CameraPossible => {
+                        (DeviceCategory::D, DeviceCategoryDetail::PossibleCamera)
+                    }
+                    // Network device (Category D)
+                    DeviceType::NetworkDevice => {
+                        (DeviceCategory::D, DeviceCategoryDetail::NetworkEquipment)
+                    }
+                    // NVR (Category D)
+                    DeviceType::NvrLikely => {
+                        (DeviceCategory::D, DeviceCategoryDetail::PossibleCamera)
+                    }
+                    // Other/Unknown (Category D or E)
+                    DeviceType::OtherDevice => {
+                        (DeviceCategory::D, DeviceCategoryDetail::IoTDevice)
+                    }
+                    DeviceType::Unknown => {
+                        (DeviceCategory::D, DeviceCategoryDetail::UnknownDevice)
+                    }
+                }
+            }
+
+            // Verified but auth not tried yet (Category C)
+            DeviceStatus::Verified => {
+                (DeviceCategory::C, DeviceCategoryDetail::AuthRequired)
+            }
+
+            // Rejected devices (Category E)
+            DeviceStatus::Rejected => {
+                (DeviceCategory::E, DeviceCategoryDetail::NonCamera)
+            }
         }
     }
 }

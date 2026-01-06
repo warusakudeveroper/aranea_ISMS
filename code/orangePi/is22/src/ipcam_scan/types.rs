@@ -206,6 +206,55 @@ pub enum SuggestedAction {
     Ignore,              // 無視推奨（カメラではない）
 }
 
+// ============================================================================
+// カテゴリ分類 (SSoT統一型定義)
+// ============================================================================
+
+/// デバイスカテゴリ (メイン分類)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum DeviceCategory {
+    /// A: 登録済みカメラ（IP一致）
+    A,
+    /// B: 登録可能カメラ（認証成功）
+    B,
+    /// C: 認証待ちカメラ（RTSP/ONVIF応答あり、認証必要）
+    C,
+    /// D: カメラ可能性あり（OUI一致等）
+    D,
+    /// E: 非カメラ（応答なし等）
+    E,
+    /// F: 通信断・迷子カメラ
+    F,
+    #[default]
+    Unknown,
+}
+
+/// デバイスカテゴリ詳細
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceCategoryDetail {
+    // カテゴリA
+    Registered,            // A: 登録済み（IP一致）
+    // カテゴリB
+    Registrable,           // B: 登録可能（認証成功）
+    // カテゴリC
+    AuthRequired,          // C: 認証必要
+    AuthFailed,            // C: 認証失敗
+    // カテゴリD
+    PossibleCamera,        // D: カメラ可能性あり（OUI一致）
+    NetworkEquipment,      // D: ネットワーク機器
+    IoTDevice,             // D: IoTデバイス
+    UnknownDevice,         // D: 不明
+    // カテゴリE
+    NonCamera,             // E: 非カメラ
+    // カテゴリF
+    LostConnection,        // F: 通信断
+    StrayChild,            // F: 迷子カメラ（IP変更検出）
+    #[default]
+    Unknown,
+}
+
 /// Credential trial status - スキャン時のクレデンシャル試行結果
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -256,6 +305,22 @@ pub struct ScannedDevice {
     pub credential_username: Option<String>,
     /// 成功したクレデンシャルのパスワード
     pub credential_password: Option<String>,
+    // ============================================
+    // カテゴリ分類 (SSoT統一フィールド)
+    // ============================================
+    /// デバイスカテゴリ (A-F)
+    #[serde(default)]
+    pub category: DeviceCategory,
+    /// カテゴリ詳細
+    #[serde(default)]
+    pub category_detail: DeviceCategoryDetail,
+    /// 登録済みカメラ名（カテゴリA/Fの場合）
+    pub registered_camera_name: Option<String>,
+    /// 登録済みカメラID（カテゴリA/Fの場合）
+    pub registered_camera_id: Option<String>,
+    /// IP変更検出フラグ（StrayChild判定用）
+    #[serde(default)]
+    pub ip_changed: bool,
 }
 
 /// Port status
@@ -345,4 +410,24 @@ pub struct CreateFacilityCredentialsRequest {
     pub facility_name: String,
     pub username: String,
     pub password: String,
+}
+
+/// Lost camera info (#82 T2-8)
+/// Information about a registered camera that was not found during scan
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LostCameraInfo {
+    /// Camera ID from cameras table
+    pub camera_id: String,
+    /// Camera name
+    pub camera_name: String,
+    /// Registered IP address
+    pub ip_address: String,
+    /// MAC address (if known)
+    pub mac_address: Option<String>,
+    /// Category (always F for lost)
+    pub category: DeviceCategory,
+    /// Detail: LostConnection or StrayChild
+    pub category_detail: DeviceCategoryDetail,
+    /// New IP address (if StrayChild detected via MAC match)
+    pub new_ip_address: Option<String>,
 }
