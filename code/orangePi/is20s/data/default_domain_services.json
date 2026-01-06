@@ -1847,6 +1847,378 @@
     "aki-game.net": {
       "service": "Gaming",
       "category": "Gaming"
+    },
+    "exp-tas.com": {
+      "service": "Exponential (Ad Network)",
+      "category": "Ad"
+    },
+    "omtrdc.net": {
+      "service": "Adobe Analytics",
+      "category": "Analytics"
+    },
+    "rdcnw.net": {
+      "service": "Load Balancer",
+      "category": "Network"
+    },
+    "ysdp.top": {
+      "service": "Gaming Service",
+      "category": "Gaming"
+    },
+    "mgslb.com": {
+      "service": "Load Balancer/CDN",
+      "category": "CDN"
+    },
+    "imrworldwide.com": {
+      "service": "Nielsen/comScore",
+      "category": "Analytics"
+    },
+    "wetest.net": {
+      "service": "Tencent Gaming Services",
+      "category": "Gaming"
+    },
+    "aliyun.com": {
+      "service": "Alibaba Cloud",
+      "category": "Cloud"
+    },
+    "one.one": {
+      "service": "Cloudflare DNS (1.1.1.1)",
+      "category": "Network"
+    },
+    "usonar.jp": {
+      "service": "U-SONAR Analytics",
+      "category": "Monitoring"
+    },
+    "mieru-ca.com": {
+      "service": "Mieru-CA Analytics",
+      "category": "Analytics"
+    },
+    "mousegesturesapi.com": {
+      "service": "Mouse Gestures",
+      "category": "Browser"
+    },
+    "youborafds01.com": {
+      "service": "Youbora Ad Network",
+      "category": "Ad"
+    },
+    "sms-forwarder.com": {
+      "service": "SMS Forwarder",
+      "category": "Messaging"
+    },
+    "dnspod.cn": {
+      "service": "DNSPod",
+      "category": "Network"
+    },
+    "accelatech.com": {
+      "service": "Accelatech",
+      "category": "Business"
+    },
+    "dnse0.com": {
+      "service": "Wuthering Waves (Kuro Games)",
+      "category": "Gaming"
+    },
+    "clip-studio.com": {
+      "service": "Clip Studio",
+      "category": "Software"
+    },
+    "dnsv1.com": {
+      "service": "Wuthering Waves (Kuro Games)",
+      "category": "Gaming"
+    },
+    "volcgslb.com": {
+      "service": "Wuthering Waves (Kuro Games)",
+      "category": "Gaming"
+    },
+    "hggslb.com": {
+      "service": "Game Launcher",
+      "category": "Gaming"
+    },
+    "in-addr.arpa": {
+      "service": "Reverse DNS",
+      "category": "Network"
+    },
+    "pubmnet.com": {
+      "service": "Twitter (X)",
+      "category": "Social"
+    },
+    "rlcdn.com": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "revenuecat.com": {
+      "service": "Twitter (X)",
+      "category": "Social"
+    },
+    "live.net": {
+      "service": "Microsoft Live",
+      "category": "Microsoft"
+    },
+    "but.jp": {
+      "service": "Testing Domain",
+      "category": "Testing"
+    },
+    "bdstatic.com": {
+      "service": "Baidu CDN",
+      "category": "CDN"
+    },
+    "listdl.com": {
+      "service": "List Download",
+      "category": "Download"
+    },
+    "ttdns2.com": {
+      "service": "ByteDance",
+      "category": "CDN"
+    },
+    "baidu.com": {
+      "service": "Baidu",
+      "category": "Search"
+    },
+    "alikunlun.net": {
+      "service": "Alibaba CDN",
+      "category": "CDN"
+    },
+    "browser-intake-datadoghq.com": {
+      "service": "Datadog",
+      "category": "Monitoring"
+    },
+    "mapbox.com": {
+      "service": "Mapbox",
+      "category": "Maps"
+    },
+    "fontawesome.com": {
+      "service": "Font Awesome",
+      "category": "CDN"
+    },
+    "zenlesszonezero.com": {
+      "service": "Zenless Zone Zero (miHoYo)",
+      "category": "Gaming"
+    },
+    "kunlunle.com": {
+      "service": "Alibaba Cloud",
+      "category": "Cloud"
+    },
+    "alipayobjects.com": {
+      "service": "Alipay",
+      "category": "Payment"
+    },
+    "uber.com": {
+      "service": "Uber",
+      "category": "Transport"
+    },
+    "goodnotes-devops.com": {
+      "service": "GoodNotes",
+      "category": "Productivity"
+    },
+    "evergage.com": {
+      "service": "Evergage",
+      "category": "Marketing"
+    },
+    "alipay.com": {
+      "service": "Alipay",
+      "category": "Payment"
+    },
+    "tplinkra.com": {
+      "service": "TP-Link Router",
+      "category": "IoT"
+    },
+    "kunluncan.com": {
+      "service": "China CDN (Kunlun)",
+      "category": "CDN"
+    },
+    "starrails.com": {
+      "service": "Honkai: Star Rail (miHoYo)",
+      "category": "Gaming"
+    },
+    "quic.cloud": {
+      "service": "QUIC.cloud",
+      "category": "CDN"
+    },
+    "alipaydns.com": {
+      "service": "Alipay",
+      "category": "Payment"
+    },
+    "a2z.com": {
+      "service": "Telemetry",
+      "category": "Analytics"
+    },
+    "yostarplat.com": {
+      "service": "Yostar Games",
+      "category": "Gaming"
+    },
+    "hismarttv.com": {
+      "service": "Game Launcher",
+      "category": "Gaming"
+    },
+    "vidaahub.com": {
+      "service": "Vidaa Hub",
+      "category": "Media"
+    },
+    "55.55": {
+      "service": "IP Address",
+      "category": "Network"
+    },
+    "aexp-static.com": {
+      "service": "American Express",
+      "category": "Payment"
+    },
+    "amd.com": {
+      "service": "AMD",
+      "category": "Software"
+    },
+    "hoyolab.com": {
+      "service": "miHoYo Community",
+      "category": "Gaming"
+    },
+    "leanplum.com": {
+      "service": "Leanplum",
+      "category": "Analytics"
+    },
+    "astockcdn.net": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "qualtrics.com": {
+      "service": "Qualtrics",
+      "category": "Marketing"
+    },
+    "surveygizmo.eu": {
+      "service": "SurveyGizmo",
+      "category": "Marketing"
+    },
+    "29.90": {
+      "service": "IP Address",
+      "category": "Network"
+    },
+    "29.88": {
+      "service": "IP Address",
+      "category": "Network"
+    },
+    "payhub.jp": {
+      "service": "PayHub",
+      "category": "Payment"
+    },
+    "pv-cdn.net": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "evgnet.com": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "fbpigeon.com": {
+      "service": "Facebook",
+      "category": "Social"
+    },
+    "app-analytics-services.com": {
+      "service": "Analytics",
+      "category": "Analytics"
+    },
+    "singular.net": {
+      "service": "Singular",
+      "category": "Analytics"
+    },
+    "aliapp.org": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "com.cn": {
+      "service": "Alipay",
+      "category": "Payment"
+    },
+    "sinaimg.cn": {
+      "service": "Sina Weibo",
+      "category": "Social"
+    },
+    "piyolog.com": {
+      "service": "Piyolog",
+      "category": "Analytics"
+    },
+    "marketo.net": {
+      "service": "Marketo",
+      "category": "Marketing"
+    },
+    "wetvinfo.com": {
+      "service": "WeTV",
+      "category": "Media"
+    },
+    "braze.com": {
+      "service": "Braze",
+      "category": "Analytics"
+    },
+    "braze.eu": {
+      "service": "Braze",
+      "category": "Analytics"
+    },
+    "byteoversea.com": {
+      "service": "ByteDance",
+      "category": "CDN"
+    },
+    "kurogame-service.com": {
+      "service": "Wuthering Waves (Kuro Games)",
+      "category": "Gaming"
+    },
+    "aki-game2.net": {
+      "service": "Wuthering Waves (Kuro Games)",
+      "category": "Gaming"
+    },
+    "ylive.jp": {
+      "service": "Yahoo Live",
+      "category": "ISP"
+    },
+    "unrulymedia.com": {
+      "service": "Unruly Media",
+      "category": "Ad"
+    },
+    "openlitespeed.org": {
+      "service": "OpenLiteSpeed",
+      "category": "Development"
+    },
+    "appcenter.ms": {
+      "service": "App Center Analytics",
+      "category": "Analytics"
+    },
+    "tdos.vip": {
+      "service": "TDOS",
+      "category": "Development"
+    },
+    "bluearchive.jp": {
+      "service": "Blue Archive",
+      "category": "Gaming"
+    },
+    "smartadserver.com": {
+      "service": "IoT",
+      "category": "IoT"
+    },
+    "onezapp.com": {
+      "service": "OneZapp",
+      "category": "Messaging"
+    },
+    "cdn-net.com": {
+      "service": "CDN",
+      "category": "CDN"
+    },
+    "wujisite.com": {
+      "service": "Wuji Site",
+      "category": "Development"
+    },
+    "agkn.com": {
+      "service": "Neustar",
+      "category": "Marketing"
+    },
+    "1rx.io": {
+      "service": "1rx",
+      "category": "Marketing"
+    },
+    "43.43": {
+      "service": "IP Address",
+      "category": "Network"
+    },
+    "stripe.network": {
+      "service": "Stripe",
+      "category": "Payment"
+    },
+    "3lift.com": {
+      "service": "Twitter (X)",
+      "category": "Social"
     }
   }
 }

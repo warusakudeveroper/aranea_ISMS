@@ -7,8 +7,8 @@
       "total_hits": 143706
     },
     "Monitoring": {
-      "count": 5,
-      "total_hits": 38539
+      "count": 9,
+      "total_hits": 38783
     },
     "Tracker": {
       "count": 2,
@@ -20,75 +20,123 @@
     },
     "IoT": {
       "count": 6,
-      "total_hits": 3842
+      "total_hits": 3854
     },
     "Hosting": {
       "count": 2,
       "total_hits": 3901
     },
     "Analytics": {
-      "count": 4,
-      "total_hits": 4026
+      "count": 23,
+      "total_hits": 5260
     },
     "Blog": {
       "count": 1,
       "total_hits": 2420
     },
     "Ad": {
-      "count": 12,
-      "total_hits": 7156
+      "count": 15,
+      "total_hits": 9018
     },
     "Security": {
-      "count": 6,
-      "total_hits": 3627
+      "count": 7,
+      "total_hits": 3638
     },
     "Microsoft": {
-      "count": 6,
-      "total_hits": 2797
+      "count": 7,
+      "total_hits": 2865
     },
     "Payment": {
-      "count": 24,
-      "total_hits": 3916
-    },
-    "Unknown": {
-      "count": 114,
-      "total_hits": 6588
+      "count": 35,
+      "total_hits": 4080
     },
     "Network": {
-      "count": 30,
-      "total_hits": 7942
+      "count": 39,
+      "total_hits": 8680
     },
     "News": {
       "count": 2,
       "total_hits": 1301
     },
     "Cloud": {
-      "count": 1,
-      "total_hits": 901
+      "count": 5,
+      "total_hits": 1077
     },
     "CDN": {
-      "count": 29,
-      "total_hits": 4278
+      "count": 37,
+      "total_hits": 4708
     },
     "Xiaomi": {
       "count": 10,
       "total_hits": 941
     },
     "Gaming": {
-      "count": 27,
-      "total_hits": 2211
+      "count": 37,
+      "total_hits": 2809
     },
     "Social": {
-      "count": 5,
-      "total_hits": 686
+      "count": 7,
+      "total_hits": 701
     },
     "Development": {
-      "count": 1,
-      "total_hits": 359
+      "count": 4,
+      "total_hits": 368
     },
     "Messaging": {
-      "count": 3,
-      "total_hits": 674
+      "count": 5,
+      "total_hits": 776
+    },
+    "Browser": {
+      "count": 1,
+      "total_hits": 103
+    },
+    "Business": {
+      "count": 1,
+      "total_hits": 92
+    },
+    "Software": {
+      "count": 2,
+      "total_hits": 103
+    },
+    "ISP": {
+      "count": 2,
+      "total_hits": 86
+    },
+    "Testing": {
+      "count": 1,
+      "total_hits": 65
+    },
+    "Download": {
+      "count": 2,
+      "total_hits": 81
+    },
+    "Search": {
+      "count": 11,
+      "total_hits": 157
+    },
+    "Maps": {
+      "count": 2,
+      "total_hits": 48
+    },
+    "Transport": {
+      "count": 2,
+      "total_hits": 42
+    },
+    "Productivity": {
+      "count": 1,
+      "total_hits": 36
+    },
+    "Marketing": {
+      "count": 6,
+      "total_hits": 66
+    },
+    "Media": {
+      "count": 5,
+      "total_hits": 37
+    },
+    "Retail": {
+      "count": 1,
+      "total_hits": 9
     }
   },
   "domains": [
@@ -110,11 +158,28 @@
       "domain": "infinity-c35.youboranqs01.com",
       "count": 2226,
       "category": "Ad",
-      "service": "Ad Network",
+      "service": "Youbora Ad Network",
       "first_seen": "2026-01-06T01:28:17.923790",
       "last_seen": "2026-01-06T04:15:53.938838",
       "sample_ips": [
         "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "default.exp-tas.com",
+      "count": 1757,
+      "category": "Ad",
+      "service": "Exponential (Ad Network)",
+      "first_seen": "2026-01-05T17:37:56.944070",
+      "last_seen": "2026-01-06T04:49:14.968761",
+      "sample_ips": [
+        "192.168.3.225",
+        "192.168.3.45",
+        "192.168.3.120",
+        "192.168.3.226"
       ],
       "rooms": [
         "akb"
@@ -233,6 +298,20 @@
       ]
     },
     {
+      "domain": "a-fds.youborafds01.com",
+      "count": 101,
+      "category": "Ad",
+      "service": "Youbora Ad Network",
+      "first_seen": "2026-01-06T01:27:17.927384",
+      "last_seen": "2026-01-06T04:15:38.972523",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "d.socdm.com",
       "count": 69,
       "category": "Ad",
@@ -264,9 +343,23 @@
       "domain": "infinity-c38.youboranqs01.com",
       "count": 30,
       "category": "Ad",
-      "service": "Ad Network",
+      "service": "Youbora Ad Network",
       "first_seen": "2026-01-06T01:27:20.965552",
       "last_seen": "2026-01-06T01:27:33.209081",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "sync.targeting.unrulymedia.com",
+      "count": 4,
+      "category": "Ad",
+      "service": "Unruly Media",
+      "first_seen": "2026-01-06T01:27:08.928010",
+      "last_seen": "2026-01-06T01:27:17.920157",
       "sample_ips": [
         "192.168.3.66"
       ],
@@ -290,6 +383,21 @@
       ]
     },
     {
+      "domain": "audible.sc.omtrdc.net",
+      "count": 777,
+      "category": "Analytics",
+      "service": "Adobe Analytics",
+      "first_seen": "2026-01-05T20:15:59.938317",
+      "last_seen": "2026-01-06T03:04:38.915253",
+      "sample_ips": [
+        "192.168.3.54",
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "analytics.apis.mcafee.com",
       "count": 373,
       "category": "Analytics",
@@ -298,6 +406,62 @@
       "last_seen": "2026-01-06T04:31:32.965687",
       "sample_ips": [
         "192.168.3.58"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "secure-origin.imrworldwide.com",
+      "count": 154,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T04:15:20.921139",
+      "last_seen": "2026-01-06T04:16:38.919726",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "hm.mieru-ca.com",
+      "count": 103,
+      "category": "Analytics",
+      "service": "Mieru-CA Analytics",
+      "first_seen": "2026-01-06T04:00:05.925596",
+      "last_seen": "2026-01-06T04:00:35.917775",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ntjp.mieru-ca.com",
+      "count": 91,
+      "category": "Analytics",
+      "service": "Mieru-CA Analytics",
+      "first_seen": "2026-01-06T04:00:05.926341",
+      "last_seen": "2026-01-06T04:00:23.915307",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "global.telemetry.insights.video.a2z.com",
+      "count": 20,
+      "category": "Analytics",
+      "service": "Telemetry",
+      "first_seen": "2026-01-06T01:33:29.936710",
+      "last_seen": "2026-01-06T01:34:41.919801",
+      "sample_ips": [
+        "192.168.3.53"
       ],
       "rooms": [
         "akb"
@@ -318,6 +482,48 @@
       ]
     },
     {
+      "domain": "api.leanplum.com",
+      "count": 12,
+      "category": "Analytics",
+      "service": "Leanplum",
+      "first_seen": "2026-01-06T04:27:36.019719",
+      "last_seen": "2026-01-06T04:27:50.946684",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "p4k6jrj0ceheadr6ekwptfmktct8u1767670874.darnuid.imrworldwide.com",
+      "count": 10,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T03:41:17.923225",
+      "last_seen": "2026-01-06T03:41:41.915102",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "secure-us.imrworldwide.com",
+      "count": 9,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T01:26:47.923737",
+      "last_seen": "2026-01-06T04:15:38.973164",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "app-analytics-services.com",
       "count": 7,
       "category": "Analytics",
@@ -326,6 +532,160 @@
       "last_seen": "2026-01-06T01:22:59.933851",
       "sample_ips": [
         "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "4ml22dnhvbq3ihzgoaxxhfakpyyn71767671933.darnuid.imrworldwide.com",
+      "count": 7,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T03:58:56.986211",
+      "last_seen": "2026-01-06T03:59:14.941860",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "skan.singular.net",
+      "count": 7,
+      "category": "Analytics",
+      "service": "Singular",
+      "first_seen": "2026-01-06T04:29:21.006788",
+      "last_seen": "2026-01-06T04:29:29.924579",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "5nkekadlqbwnlse53ihowbvdibxbh1767668333.darnuid.imrworldwide.com",
+      "count": 6,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T02:58:56.919723",
+      "last_seen": "2026-01-06T02:59:12.161906",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "fwlyzflrokwiskal9ce4csrncbtzq1767671573.darnuid.imrworldwide.com",
+      "count": 6,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T03:52:56.925451",
+      "last_seen": "2026-01-06T03:53:11.939737",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "api2.piyolog.com",
+      "count": 6,
+      "category": "Analytics",
+      "service": "Piyolog",
+      "first_seen": "2026-01-06T04:27:14.953378",
+      "last_seen": "2026-01-06T04:27:30.098828",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "sdk.iad-03.braze.com",
+      "count": 5,
+      "category": "Analytics",
+      "service": "Braze",
+      "first_seen": "2026-01-06T01:47:35.922810",
+      "last_seen": "2026-01-06T01:47:47.918332",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "sdk.fra-01.braze.eu",
+      "count": 5,
+      "category": "Analytics",
+      "service": "Braze",
+      "first_seen": "2026-01-06T04:07:32.933084",
+      "last_seen": "2026-01-06T04:07:44.995438",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "sdk.iad-07.braze.com",
+      "count": 5,
+      "category": "Analytics",
+      "service": "Braze",
+      "first_seen": "2026-01-06T04:27:36.019539",
+      "last_seen": "2026-01-06T04:27:47.929707",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "mu5nfwsizyzi3kkus72z7ewncm4xg1767668438.darnuid.imrworldwide.com",
+      "count": 4,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T03:00:41.970294",
+      "last_seen": "2026-01-06T03:00:50.981645",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "hmz9uko5wbnm8plx1lsoteinimcgt1767668438.darnuid.imrworldwide.com",
+      "count": 4,
+      "category": "Analytics",
+      "service": "Nielsen/comScore",
+      "first_seen": "2026-01-06T03:00:41.970464",
+      "last_seen": "2026-01-06T03:00:50.981780",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "in.appcenter.ms",
+      "count": 3,
+      "category": "Analytics",
+      "service": "App Center Analytics",
+      "first_seen": "2026-01-06T04:29:26.919788",
+      "last_seen": "2026-01-06T04:29:32.914099",
+      "sample_ips": [
+        "192.168.3.101"
       ],
       "rooms": [
         "akb"
@@ -472,6 +832,34 @@
       ]
     },
     {
+      "domain": "api.mousegesturesapi.com",
+      "count": 103,
+      "category": "Browser",
+      "service": "Mouse Gestures",
+      "first_seen": "2026-01-05T18:00:17.932415",
+      "last_seen": "2026-01-06T00:00:53.919524",
+      "sample_ips": [
+        "192.168.3.225"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bizsearch-asp.accelatech.com",
+      "count": 92,
+      "category": "Business",
+      "service": "Accelatech",
+      "first_seen": "2026-01-06T04:00:02.922627",
+      "last_seen": "2026-01-06T04:00:32.928868",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "sptest.n.shifen.com",
       "count": 531,
       "category": "CDN",
@@ -503,7 +891,7 @@
       "domain": "0img.hitv.com.w.kunlunhuf.com",
       "count": 317,
       "category": "CDN",
-      "service": "China CDN",
+      "service": "China CDN (Kunlun)",
       "first_seen": "2026-01-06T04:36:50.915620",
       "last_seen": "2026-01-06T04:47:20.953276",
       "sample_ips": [
@@ -570,6 +958,20 @@
       ]
     },
     {
+      "domain": "t7.a.market.c.mgslb.com",
+      "count": 232,
+      "category": "CDN",
+      "service": "Load Balancer/CDN",
+      "first_seen": "2026-01-06T04:22:41.923072",
+      "last_seen": "2026-01-06T04:30:35.937035",
+      "sample_ips": [
+        "192.168.3.82"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "static.n.shifen.com",
       "count": 211,
       "category": "CDN",
@@ -630,7 +1032,7 @@
       "domain": "h3-bdbus-turbonet.n.shifen.com",
       "count": 151,
       "category": "CDN",
-      "service": "Baidu CDN (Shifen)",
+      "service": "Baidu CDN",
       "first_seen": "2026-01-06T04:33:17.922037",
       "last_seen": "2026-01-06T04:49:32.915480",
       "sample_ips": [
@@ -658,7 +1060,7 @@
       "domain": "bdbus-turbonet.n.shifen.com",
       "count": 130,
       "category": "CDN",
-      "service": "Baidu CDN (Shifen)",
+      "service": "Baidu CDN",
       "first_seen": "2026-01-06T04:33:17.923133",
       "last_seen": "2026-01-06T04:49:47.943549",
       "sample_ips": [
@@ -767,6 +1169,20 @@
       ]
     },
     {
+      "domain": "log.byteoversea.com.ttdns2.com",
+      "count": 52,
+      "category": "CDN",
+      "service": "ByteDance",
+      "first_seen": "2026-01-06T04:33:44.949502",
+      "last_seen": "2026-01-06T04:39:29.931133",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "app-h5.dji.com.w.cdngslb.com",
       "count": 50,
       "category": "CDN",
@@ -781,6 +1197,34 @@
       ]
     },
     {
+      "domain": "ali-rwk.pull.etoote.com.w.alikunlun.net",
+      "count": 48,
+      "category": "CDN",
+      "service": "Alibaba CDN",
+      "first_seen": "2026-01-06T04:33:14.980709",
+      "last_seen": "2026-01-06T04:33:23.914385",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "use.fontawesome.com",
+      "count": 44,
+      "category": "CDN",
+      "service": "Font Awesome",
+      "first_seen": "2026-01-06T02:53:53.924422",
+      "last_seen": "2026-01-06T04:36:53.909831",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "ack.push.n.shifen.com",
       "count": 34,
       "category": "CDN",
@@ -789,6 +1233,34 @@
       "last_seen": "2026-01-06T04:44:38.915348",
       "sample_ips": [
         "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "list.szlcsc.com.w.kunluncan.com",
+      "count": 25,
+      "category": "CDN",
+      "service": "China CDN (Kunlun)",
+      "first_seen": "2026-01-06T04:43:23.917110",
+      "last_seen": "2026-01-06T04:43:32.911673",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "www.quic.cloud",
+      "count": 22,
+      "category": "CDN",
+      "service": "QUIC.cloud",
+      "first_seen": "2026-01-06T01:29:53.926738",
+      "last_seen": "2026-01-06T01:29:56.921170",
+      "sample_ips": [
+        "192.168.3.57"
       ],
       "rooms": [
         "akb"
@@ -852,6 +1324,20 @@
       ]
     },
     {
+      "domain": "log.byteoversea.com",
+      "count": 5,
+      "category": "CDN",
+      "service": "ByteDance",
+      "first_seen": "2026-01-06T04:33:44.949862",
+      "last_seen": "2026-01-06T04:33:56.917386",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "idsync.rlcdn.com",
       "count": 2,
       "category": "CDN",
@@ -860,6 +1346,20 @@
       "last_seen": "2026-01-06T01:27:02.920675",
       "sample_ips": [
         "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "quic.cloud",
+      "count": 2,
+      "category": "CDN",
+      "service": "QUIC.cloud",
+      "first_seen": "2026-01-06T01:29:53.926945",
+      "last_seen": "2026-01-06T01:29:56.920735",
+      "sample_ips": [
+        "192.168.3.57"
       ],
       "rooms": [
         "akb"
@@ -894,6 +1394,62 @@
       ]
     },
     {
+      "domain": "unknown-203-209-255-222.aliyun.com",
+      "count": 128,
+      "category": "Cloud",
+      "service": "Alibaba Cloud",
+      "first_seen": "2026-01-06T01:19:26.923066",
+      "last_seen": "2026-01-06T04:32:14.940844",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "oser.ns.aliyuncs.com.w.kunlunle.com",
+      "count": 42,
+      "category": "Cloud",
+      "service": "Alibaba Cloud",
+      "first_seen": "2026-01-06T04:46:50.921116",
+      "last_seen": "2026-01-06T04:47:26.990441",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "oser.ns.aliyuncs.com",
+      "count": 4,
+      "category": "Cloud",
+      "service": "Alibaba Cloud",
+      "first_seen": "2026-01-06T04:46:53.918431",
+      "last_seen": "2026-01-06T04:46:56.927746",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "b79c66077e27a1c100292a6aa5da291cfa7da7ef982a7d0d2708be38d76b31f.us-east-1.prod.service.minerva.devices.a2z.com",
+      "count": 2,
+      "category": "Cloud",
+      "service": "AWS (Amazon)",
+      "first_seen": "2026-01-06T02:28:26.923508",
+      "last_seen": "2026-01-06T02:28:29.926318",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "releases.obsidian.md",
       "count": 359,
       "category": "Development",
@@ -902,6 +1458,76 @@
       "last_seen": "2026-01-06T04:39:42.040394",
       "sample_ips": [
         "192.168.3.225"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "openlitespeed.org",
+      "count": 4,
+      "category": "Development",
+      "service": "OpenLiteSpeed",
+      "first_seen": "2026-01-06T01:29:53.926836",
+      "last_seen": "2026-01-06T01:29:56.920672",
+      "sample_ips": [
+        "192.168.3.57"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "content.diagnose.tdos.vip",
+      "count": 3,
+      "category": "Development",
+      "service": "TDOS",
+      "first_seen": "2026-01-06T04:52:05.919314",
+      "last_seen": "2026-01-06T04:52:11.915927",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "cache.api.wujisite.com",
+      "count": 2,
+      "category": "Development",
+      "service": "Wuji Site",
+      "first_seen": "2026-01-06T04:52:08.914941",
+      "last_seen": "2026-01-06T04:52:11.916343",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "glcs.listdl.com",
+      "count": 53,
+      "category": "Download",
+      "service": "List Download",
+      "first_seen": "2026-01-06T04:43:53.917340",
+      "last_seen": "2026-01-06T04:44:29.937907",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "dl.listdl.com",
+      "count": 28,
+      "category": "Download",
+      "service": "List Download",
+      "first_seen": "2026-01-06T04:42:32.976785",
+      "last_seen": "2026-01-06T04:47:20.954571",
+      "sample_ips": [
+        "192.168.3.105"
       ],
       "rooms": [
         "akb"
@@ -928,6 +1554,20 @@
       "service": "Yostar Games",
       "first_seen": "2026-01-06T04:46:53.919336",
       "last_seen": "2026-01-06T04:49:23.912315",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bta9p7hynf6feeht.ysdp.top",
+      "count": 328,
+      "category": "Gaming",
+      "service": "Gaming Service",
+      "first_seen": "2026-01-06T04:46:56.930881",
+      "last_seen": "2026-01-06T04:47:11.921329",
       "sample_ips": [
         "192.168.3.105"
       ],
@@ -967,7 +1607,7 @@
       "domain": "us-datareceiver.aki-game.net",
       "count": 158,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:26.926100",
       "last_seen": "2026-01-06T04:47:03.045256",
       "sample_ips": [
@@ -1006,10 +1646,24 @@
       ]
     },
     {
+      "domain": "android.crashsight.wetest.net",
+      "count": 130,
+      "category": "Gaming",
+      "service": "Tencent Gaming Services",
+      "first_seen": "2026-01-06T04:46:02.917230",
+      "last_seen": "2026-01-06T04:49:26.964614",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "cdn-qcloud-hw-mc.aki-game.net.eo.dnse0.com",
       "count": 92,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:29.968936",
       "last_seen": "2026-01-06T04:47:03.045202",
       "sample_ips": [
@@ -1023,7 +1677,7 @@
       "domain": "aki-config-qcloud.aki-game2.net.cdn.dnsv1.com",
       "count": 85,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:23.973458",
       "last_seen": "2026-01-06T04:46:42.031296",
       "sample_ips": [
@@ -1037,7 +1691,7 @@
       "domain": "aki-config-qcloud.aki-game.net.cdn.dnsv1.com",
       "count": 80,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:20.920243",
       "last_seen": "2026-01-06T04:46:35.911519",
       "sample_ips": [
@@ -1051,9 +1705,23 @@
       "domain": "aki-config-huoshan.aki-game2.net.volcgslb.com",
       "count": 79,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:26.925563",
       "last_seen": "2026-01-06T04:46:42.031670",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "launcher.hggslb.com",
+      "count": 78,
+      "category": "Gaming",
+      "service": "Game Launcher",
+      "first_seen": "2026-01-06T04:47:35.915608",
+      "last_seen": "2026-01-06T04:47:50.914496",
       "sample_ips": [
         "192.168.3.105"
       ],
@@ -1065,7 +1733,7 @@
       "domain": "aki-config-huoshan.aki-game.net.volcgslb.com",
       "count": 56,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:23.972534",
       "last_seen": "2026-01-06T04:46:35.911421",
       "sample_ips": [
@@ -1132,6 +1800,48 @@
       ]
     },
     {
+      "domain": "auth-launcher-jp.hismarttv.com",
+      "count": 17,
+      "category": "Gaming",
+      "service": "Game Launcher",
+      "first_seen": "2026-01-05T22:22:38.992527",
+      "last_seen": "2026-01-06T00:10:32.919829",
+      "sample_ips": [
+        "192.168.3.97"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "upload-os-bbs.hoyolab.com",
+      "count": 15,
+      "category": "Gaming",
+      "service": "miHoYo Community",
+      "first_seen": "2026-01-06T04:44:11.919035",
+      "last_seen": "2026-01-06T04:44:17.913690",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "hoyolab-upload.hoyolab.com",
+      "count": 12,
+      "category": "Gaming",
+      "service": "miHoYo Community",
+      "first_seen": "2026-01-06T04:44:14.952472",
+      "last_seen": "2026-01-06T04:44:32.919448",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "globaldp-prod-os01.starrails.com",
       "count": 10,
       "category": "Gaming",
@@ -1152,6 +1862,34 @@
       "service": "Honkai: Star Rail (miHoYo)",
       "first_seen": "2026-01-06T04:43:08.935382",
       "last_seen": "2026-01-06T04:43:23.913122",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bbs-api-os-ab.hoyolab.com",
+      "count": 6,
+      "category": "Gaming",
+      "service": "miHoYo Community",
+      "first_seen": "2026-01-06T04:44:14.952806",
+      "last_seen": "2026-01-06T04:44:21.717304",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bbs-api-os.hoyolab.com",
+      "count": 6,
+      "category": "Gaming",
+      "service": "miHoYo Community",
+      "first_seen": "2026-01-06T04:44:20.916674",
+      "last_seen": "2026-01-06T04:44:32.921515",
       "sample_ips": [
         "192.168.3.105"
       ],
@@ -1219,7 +1957,7 @@
       "domain": "aki-config-qcloud.aki-game.net",
       "count": 5,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:20.920441",
       "last_seen": "2026-01-06T04:46:32.919143",
       "sample_ips": [
@@ -1233,7 +1971,7 @@
       "domain": "aki-config-qcloud.aki-game2.net",
       "count": 5,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:23.973524",
       "last_seen": "2026-01-06T04:46:35.912071",
       "sample_ips": [
@@ -1247,7 +1985,7 @@
       "domain": "cdn-qcloud-hw-mc.aki-game.net",
       "count": 5,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:29.969025",
       "last_seen": "2026-01-06T04:46:42.030819",
       "sample_ips": [
@@ -1261,7 +1999,7 @@
       "domain": "aki-config-huoshan.aki-game.net",
       "count": 4,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:23.972620",
       "last_seen": "2026-01-06T04:46:32.920048",
       "sample_ips": [
@@ -1275,9 +2013,37 @@
       "domain": "aki-config-huoshan.aki-game2.net",
       "count": 4,
       "category": "Gaming",
-      "service": "Gaming",
+      "service": "Wuthering Waves (Kuro Games)",
       "first_seen": "2026-01-06T04:46:26.925706",
       "last_seen": "2026-01-06T04:46:35.912973",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bbs-api-os-static.hoyolab.com",
+      "count": 3,
+      "category": "Gaming",
+      "service": "miHoYo Community",
+      "first_seen": "2026-01-06T04:44:11.919182",
+      "last_seen": "2026-01-06T04:44:17.913285",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ba-jp-sdk.bluearchive.jp",
+      "count": 3,
+      "category": "Gaming",
+      "service": "Blue Archive",
+      "first_seen": "2026-01-06T04:46:53.920999",
+      "last_seen": "2026-01-06T04:46:59.965226",
       "sample_ips": [
         "192.168.3.105"
       ],
@@ -1314,6 +2080,34 @@
       ]
     },
     {
+      "domain": "124-146-155-170.pro.static.arena.ne.jp",
+      "count": 81,
+      "category": "ISP",
+      "service": "NTT Arena",
+      "first_seen": "2026-01-06T03:04:47.924630",
+      "last_seen": "2026-01-06T03:05:32.918463",
+      "sample_ips": [
+        "192.168.3.91"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ntv2.media.ylive.jp",
+      "count": 5,
+      "category": "ISP",
+      "service": "Yahoo Live",
+      "first_seen": "2026-01-06T01:26:20.922915",
+      "last_seen": "2026-01-06T01:26:32.924305",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "prod-dkappfiles.daikinsmartdb.jp",
       "count": 3787,
       "category": "IoT",
@@ -1328,26 +2122,26 @@
       ]
     },
     {
-      "domain": "ntp-jp.hismarttv.com",
-      "count": 17,
+      "domain": "api.tplinkra.com",
+      "count": 29,
       "category": "IoT",
-      "service": "IoT",
-      "first_seen": "2026-01-05T22:22:38.992362",
-      "last_seen": "2026-01-06T00:10:32.919720",
+      "service": "TP-Link Router",
+      "first_seen": "2026-01-06T01:22:32.923234",
+      "last_seen": "2026-01-06T03:36:32.918458",
       "sample_ips": [
-        "192.168.3.97"
+        "192.168.3.100"
       ],
       "rooms": [
         "akb"
       ]
     },
     {
-      "domain": "auth-launcher-jp.hismarttv.com",
+      "domain": "ntp-jp.hismarttv.com",
       "count": 17,
       "category": "IoT",
       "service": "IoT",
-      "first_seen": "2026-01-05T22:22:38.992527",
-      "last_seen": "2026-01-06T00:10:32.919829",
+      "first_seen": "2026-01-05T22:22:38.992362",
+      "last_seen": "2026-01-06T00:10:32.919720",
       "sample_ips": [
         "192.168.3.97"
       ],
@@ -1398,6 +2192,188 @@
       ]
     },
     {
+      "domain": "events.mapbox.com",
+      "count": 45,
+      "category": "Maps",
+      "service": "Mapbox",
+      "first_seen": "2026-01-06T01:21:15.162055",
+      "last_seen": "2026-01-06T01:21:29.931607",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "api.mapbox.com",
+      "count": 3,
+      "category": "Maps",
+      "service": "Mapbox",
+      "first_seen": "2026-01-06T01:21:11.921654",
+      "last_seen": "2026-01-06T01:21:18.257839",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bookingdotcomb2b.germany-2.evergage.com",
+      "count": 34,
+      "category": "Marketing",
+      "service": "Evergage",
+      "first_seen": "2026-01-06T01:29:20.981924",
+      "last_seen": "2026-01-06T01:53:53.917636",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "zn2cd3q3b8veiooeg-booking.siteintercept.qualtrics.com",
+      "count": 11,
+      "category": "Marketing",
+      "service": "Qualtrics",
+      "first_seen": "2026-01-06T01:29:20.982104",
+      "last_seen": "2026-01-06T01:55:14.946305",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "www.surveygizmo.eu",
+      "count": 11,
+      "category": "Marketing",
+      "service": "SurveyGizmo",
+      "first_seen": "2026-01-06T01:29:17.924935",
+      "last_seen": "2026-01-06T01:57:30.005362",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "munchkin.marketo.net",
+      "count": 6,
+      "category": "Marketing",
+      "service": "Marketo",
+      "first_seen": "2026-01-06T01:54:47.924712",
+      "last_seen": "2026-01-06T01:55:02.919901",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "aa.agkn.com",
+      "count": 2,
+      "category": "Marketing",
+      "service": "Neustar",
+      "first_seen": "2026-01-06T01:27:02.922113",
+      "last_seen": "2026-01-06T01:27:05.918489",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "sync.1rx.io",
+      "count": 2,
+      "category": "Marketing",
+      "service": "1rx",
+      "first_seen": "2026-01-06T01:27:02.922835",
+      "last_seen": "2026-01-06T01:27:05.919210",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "img.vidaahub.com",
+      "count": 17,
+      "category": "Media",
+      "service": "Vidaa Hub",
+      "first_seen": "2026-01-05T22:22:38.992453",
+      "last_seen": "2026-01-06T00:10:32.920106",
+      "sample_ips": [
+        "192.168.3.97"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "play-aws.wetvinfo.com",
+      "count": 6,
+      "category": "Media",
+      "service": "WeTV",
+      "first_seen": "2026-01-06T04:52:05.918998",
+      "last_seen": "2026-01-06T04:52:14.964531",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "appcfg.wetvinfo.com",
+      "count": 6,
+      "category": "Media",
+      "service": "WeTV",
+      "first_seen": "2026-01-06T04:52:05.919248",
+      "last_seen": "2026-01-06T04:52:14.965180",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "play.wetvinfo.com",
+      "count": 5,
+      "category": "Media",
+      "service": "WeTV",
+      "first_seen": "2026-01-06T04:52:14.971085",
+      "last_seen": "2026-01-06T04:52:23.917386",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "wuji.wetvinfo.com",
+      "count": 3,
+      "category": "Media",
+      "service": "WeTV",
+      "first_seen": "2026-01-06T04:52:05.919204",
+      "last_seen": "2026-01-06T04:52:11.915832",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "b.im-apps.net",
       "count": 352,
       "category": "Messaging",
@@ -1426,6 +2402,20 @@
       ]
     },
     {
+      "domain": "sms-forwarder.com",
+      "count": 99,
+      "category": "Messaging",
+      "service": "SMS Forwarder",
+      "first_seen": "2026-01-06T01:19:11.929712",
+      "last_seen": "2026-01-06T02:19:59.926131",
+      "sample_ips": [
+        "192.168.3.99"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "score.im-apps.net",
       "count": 90,
       "category": "Messaging",
@@ -1434,6 +2424,20 @@
       "last_seen": "2026-01-06T01:30:59.930284",
       "sample_ips": [
         "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "vibeaconstr.onezapp.com",
+      "count": 3,
+      "category": "Messaging",
+      "service": "OneZapp",
+      "first_seen": "2026-01-06T04:52:02.915376",
+      "last_seen": "2026-01-06T04:52:08.913904",
+      "sample_ips": [
+        "192.168.3.105"
       ],
       "rooms": [
         "akb"
@@ -1493,6 +2497,21 @@
       "service": "OneDrive",
       "first_seen": "2026-01-05T19:44:11.930502",
       "last_seen": "2026-01-06T04:41:54.035835",
+      "sample_ips": [
+        "192.168.3.66",
+        "192.168.3.102"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "apis.live.net",
+      "count": 68,
+      "category": "Microsoft",
+      "service": "Microsoft Live",
+      "first_seen": "2026-01-05T19:44:11.930585",
+      "last_seen": "2026-01-06T04:41:54.035763",
       "sample_ips": [
         "192.168.3.66",
         "192.168.3.102"
@@ -1601,6 +2620,62 @@
       ]
     },
     {
+      "domain": "apisonar-liveaccess.go.usonar.jp",
+      "count": 109,
+      "category": "Monitoring",
+      "service": "U-SONAR Analytics",
+      "first_seen": "2026-01-06T04:00:05.924954",
+      "last_seen": "2026-01-06T04:00:35.917672",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "apisonar.go.usonar.jp",
+      "count": 81,
+      "category": "Monitoring",
+      "service": "U-SONAR Analytics",
+      "first_seen": "2026-01-06T04:00:05.923083",
+      "last_seen": "2026-01-06T04:00:35.917867",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "browser-intake-datadoghq.com",
+      "count": 48,
+      "category": "Monitoring",
+      "service": "Datadog",
+      "first_seen": "2026-01-06T02:28:44.950929",
+      "last_seen": "2026-01-06T02:29:05.916136",
+      "sample_ips": [
+        "192.168.3.91"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "cookie.sync.usonar.jp",
+      "count": 6,
+      "category": "Monitoring",
+      "service": "U-SONAR Analytics",
+      "first_seen": "2026-01-06T04:00:05.925562",
+      "last_seen": "2026-01-06T04:00:20.913771",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "ipv4only.arpa",
       "count": 1242,
       "category": "Network",
@@ -1671,6 +2746,20 @@
       "sample_ips": [
         "192.168.3.72",
         "192.168.3.77"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "lb-133-237-128-251.lbaas.jpe2b.rdcnw.net",
+      "count": 399,
+      "category": "Network",
+      "service": "Load Balancer",
+      "first_seen": "2026-01-06T03:20:02.924034",
+      "last_seen": "2026-01-06T03:20:35.922902",
+      "sample_ips": [
+        "192.168.3.101"
       ],
       "rooms": [
         "akb"
@@ -1914,6 +3003,21 @@
       ]
     },
     {
+      "domain": "one.one.one.one",
+      "count": 125,
+      "category": "Network",
+      "service": "Cloudflare DNS (1.1.1.1)",
+      "first_seen": "2026-01-06T04:32:08.916934",
+      "last_seen": "2026-01-06T04:32:41.911698",
+      "sample_ips": [
+        "192.168.3.102",
+        "192.168.3.86"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "ec2.web.il-central-1.prod.diagnostic.networking.aws.dev",
       "count": 109,
       "category": "Network",
@@ -1950,6 +3054,34 @@
       "last_seen": "2026-01-06T03:43:41.983284",
       "sample_ips": [
         "192.168.3.77"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "pdns.dnspod.cn",
+      "count": 96,
+      "category": "Network",
+      "service": "DNSPod",
+      "first_seen": "2026-01-06T04:36:32.919043",
+      "last_seen": "2026-01-06T04:46:56.925246",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "206.193.250.142.in-addr.arpa",
+      "count": 72,
+      "category": "Network",
+      "service": "Reverse DNS",
+      "first_seen": "2026-01-06T02:04:32.924583",
+      "last_seen": "2026-01-06T02:05:02.914924",
+      "sample_ips": [
+        "192.168.3.53"
       ],
       "rooms": [
         "akb"
@@ -2034,6 +3166,76 @@
       "last_seen": "2026-01-05T23:24:14.954538",
       "sample_ips": [
         "192.168.3.77"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "43.132.55.55",
+      "count": 17,
+      "category": "Network",
+      "service": "IP Address",
+      "first_seen": "2026-01-06T04:52:08.915261",
+      "last_seen": "2026-01-06T04:52:14.965304",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "119.29.29.90",
+      "count": 11,
+      "category": "Network",
+      "service": "IP Address",
+      "first_seen": "2026-01-06T04:37:05.921331",
+      "last_seen": "2026-01-06T04:43:41.917950",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "119.29.29.88",
+      "count": 11,
+      "category": "Network",
+      "service": "IP Address",
+      "first_seen": "2026-01-06T04:36:32.919181",
+      "last_seen": "2026-01-06T04:46:53.916208",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ip2c.landscape.co.jp",
+      "count": 5,
+      "category": "Network",
+      "service": "Landscape",
+      "first_seen": "2026-01-06T04:00:05.924738",
+      "last_seen": "2026-01-06T04:00:17.925379",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "43.132.43.43",
+      "count": 2,
+      "category": "Network",
+      "service": "IP Address",
+      "first_seen": "2026-01-06T04:52:20.915306",
+      "last_seen": "2026-01-06T04:52:23.916941",
+      "sample_ips": [
+        "192.168.3.105"
       ],
       "rooms": [
         "akb"
@@ -2194,6 +3396,63 @@
       ]
     },
     {
+      "domain": "gw.alipayobjects.com",
+      "count": 42,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T01:19:21.038505",
+      "last_seen": "2026-01-06T04:32:47.917362",
+      "sample_ips": [
+        "192.168.3.100",
+        "192.168.3.103"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "datagw-edge.alipay.com",
+      "count": 33,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T01:19:26.924180",
+      "last_seen": "2026-01-06T04:30:44.952079",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "amdc.alipaydns.com",
+      "count": 21,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T04:32:32.917424",
+      "last_seen": "2026-01-06T04:32:44.964552",
+      "sample_ips": [
+        "192.168.3.103"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "www.aexp-static.com",
+      "count": 16,
+      "category": "Payment",
+      "service": "American Express",
+      "first_seen": "2026-01-06T01:58:38.924232",
+      "last_seen": "2026-01-06T01:58:47.926849",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "safekey1uplifthydra.americanexpress.com",
       "count": 15,
       "category": "Payment",
@@ -2250,6 +3509,48 @@
       ]
     },
     {
+      "domain": "mdn.alipayobjects.com",
+      "count": 12,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T01:19:21.038563",
+      "last_seen": "2026-01-06T04:30:41.926601",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bailingual-assets.alipay.com",
+      "count": 11,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T01:19:29.948972",
+      "last_seen": "2026-01-06T04:30:50.917737",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "nichigas.payhub.jp",
+      "count": 10,
+      "category": "Payment",
+      "service": "PayHub",
+      "first_seen": "2026-01-06T01:47:44.993184",
+      "last_seen": "2026-01-06T01:47:56.919524",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "safekey-1.americanexpress.com",
       "count": 9,
       "category": "Payment",
@@ -2286,6 +3587,34 @@
       "last_seen": "2026-01-06T01:59:06.009588",
       "sample_ips": [
         "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ashort.alipay.com.cn",
+      "count": 7,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T01:19:26.923312",
+      "last_seen": "2026-01-06T04:30:44.951260",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "mgw.alipay.com",
+      "count": 6,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T01:19:26.923213",
+      "last_seen": "2026-01-06T04:30:41.926895",
+      "sample_ips": [
+        "192.168.3.100"
       ],
       "rooms": [
         "akb"
@@ -2348,6 +3677,20 @@
       ]
     },
     {
+      "domain": "amdc.alipay.com",
+      "count": 4,
+      "category": "Payment",
+      "service": "Alipay",
+      "first_seen": "2026-01-06T04:30:35.943436",
+      "last_seen": "2026-01-06T04:30:44.951047",
+      "sample_ips": [
+        "192.168.3.100"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "errors.stripe.com",
       "count": 3,
       "category": "Payment",
@@ -2368,6 +3711,20 @@
       "service": "Stripe",
       "first_seen": "2026-01-06T01:58:06.310406",
       "last_seen": "2026-01-06T01:58:11.918154",
+      "sample_ips": [
+        "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "m.stripe.network",
+      "count": 2,
+      "category": "Payment",
+      "service": "Stripe",
+      "first_seen": "2026-01-06T01:58:08.974437",
+      "last_seen": "2026-01-06T01:58:11.919018",
       "sample_ips": [
         "192.168.3.66"
       ],
@@ -2398,6 +3755,188 @@
       "last_seen": "2026-01-06T01:58:11.920252",
       "sample_ips": [
         "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "unleash-edge.goodnotes-devops.com",
+      "count": 36,
+      "category": "Productivity",
+      "service": "GoodNotes",
+      "first_seen": "2026-01-06T02:20:47.702713",
+      "last_seen": "2026-01-06T02:36:41.923062",
+      "sample_ips": [
+        "192.168.3.91"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "images-udp.app.starbucks.co.jp",
+      "count": 9,
+      "category": "Retail",
+      "service": "Starbucks",
+      "first_seen": "2026-01-06T01:56:20.926381",
+      "last_seen": "2026-01-06T01:56:45.221647",
+      "sample_ips": [
+        "192.168.3.101"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "sptest.baidu.com",
+      "count": 49,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:33:20.918827",
+      "last_seen": "2026-01-06T04:49:59.924359",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "bdbus-turbonet.baidu.com",
+      "count": 32,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:33:11.917609",
+      "last_seen": "2026-01-06T04:49:05.915093",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "nsclick.baidu.com",
+      "count": 15,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:33:26.918822",
+      "last_seen": "2026-01-06T04:41:59.940922",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "h2tcbox.baidu.com",
+      "count": 14,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:44:32.925800",
+      "last_seen": "2026-01-06T04:48:41.979261",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "loc.map.baidu.com",
+      "count": 10,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:41:29.961651",
+      "last_seen": "2026-01-06T04:41:41.973973",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "mbd.baidu.com",
+      "count": 10,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:41:29.962097",
+      "last_seen": "2026-01-06T04:41:41.974524",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ofloc.map.baidu.com",
+      "count": 6,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:41:29.965648",
+      "last_seen": "2026-01-06T04:41:44.977500",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "sofire.baidu.com",
+      "count": 6,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:41:32.925326",
+      "last_seen": "2026-01-06T04:41:47.916813",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ossapi.baidu.com",
+      "count": 6,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:41:35.924209",
+      "last_seen": "2026-01-06T04:41:50.923353",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "aispace.baidu.com",
+      "count": 5,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:41:29.963795",
+      "last_seen": "2026-01-06T04:41:41.974843",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ack.tuisong.baidu.com",
+      "count": 4,
+      "category": "Search",
+      "service": "Baidu",
+      "first_seen": "2026-01-06T04:44:29.946569",
+      "last_seen": "2026-01-06T04:44:38.914858",
+      "sample_ips": [
+        "192.168.3.105"
       ],
       "rooms": [
         "akb"
@@ -2454,6 +3993,20 @@
       "last_seen": "2026-01-06T02:55:08.915212",
       "sample_ips": [
         "192.168.3.58"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "crl.cybertrust.ne.jp",
+      "count": 11,
+      "category": "Security",
+      "service": "Cybertrust",
+      "first_seen": "2026-01-06T03:04:47.924714",
+      "last_seen": "2026-01-06T03:05:17.920421",
+      "sample_ips": [
+        "192.168.3.91"
       ],
       "rooms": [
         "akb"
@@ -2544,6 +4097,34 @@
       ]
     },
     {
+      "domain": "graph.fbpigeon.com",
+      "count": 8,
+      "category": "Social",
+      "service": "Facebook",
+      "first_seen": "2026-01-06T04:51:54.069323",
+      "last_seen": "2026-01-06T04:52:02.909552",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "tvax2.sinaimg.cn",
+      "count": 7,
+      "category": "Social",
+      "service": "Sina Weibo",
+      "first_seen": "2026-01-06T04:50:05.941457",
+      "last_seen": "2026-01-06T04:50:23.914062",
+      "sample_ips": [
+        "192.168.3.105"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
       "domain": "eb2.3lift.com",
       "count": 2,
       "category": "Social",
@@ -2552,6 +4133,48 @@
       "last_seen": "2026-01-06T01:27:05.918871",
       "sample_ips": [
         "192.168.3.66"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "ice.clip-studio.com",
+      "count": 87,
+      "category": "Software",
+      "service": "Clip Studio",
+      "first_seen": "2026-01-05T17:31:32.937043",
+      "last_seen": "2026-01-06T04:32:44.967542",
+      "sample_ips": [
+        "192.168.3.54"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "download.amd.com",
+      "count": 16,
+      "category": "Software",
+      "service": "AMD",
+      "first_seen": "2026-01-06T02:29:05.921941",
+      "last_seen": "2026-01-06T02:29:26.914445",
+      "sample_ips": [
+        "192.168.3.45"
+      ],
+      "rooms": [
+        "akb"
+      ]
+    },
+    {
+      "domain": "test-mijeos.but.jp",
+      "count": 65,
+      "category": "Testing",
+      "service": "Testing Domain",
+      "first_seen": "2026-01-05T17:31:26.939300",
+      "last_seen": "2026-01-06T03:31:44.941998",
+      "sample_ips": [
+        "192.168.3.57"
       ],
       "rooms": [
         "akb"
@@ -2588,479 +4211,10 @@
       ]
     },
     {
-      "domain": "default.exp-tas.com",
-      "count": 1757,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-05T17:37:56.944070",
-      "last_seen": "2026-01-06T04:49:14.968761",
-      "sample_ips": [
-        "192.168.3.225",
-        "192.168.3.45",
-        "192.168.3.120",
-        "192.168.3.226"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "audible.sc.omtrdc.net",
-      "count": 777,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-05T20:15:59.938317",
-      "last_seen": "2026-01-06T03:04:38.915253",
-      "sample_ips": [
-        "192.168.3.54",
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "lb-133-237-128-251.lbaas.jpe2b.rdcnw.net",
-      "count": 399,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:20:02.924034",
-      "last_seen": "2026-01-06T03:20:35.922902",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bta9p7hynf6feeht.ysdp.top",
-      "count": 328,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:46:56.930881",
-      "last_seen": "2026-01-06T04:47:11.921329",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "t7.a.market.c.mgslb.com",
-      "count": 232,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:22:41.923072",
-      "last_seen": "2026-01-06T04:30:35.937035",
-      "sample_ips": [
-        "192.168.3.82"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "secure-origin.imrworldwide.com",
-      "count": 154,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:15:20.921139",
-      "last_seen": "2026-01-06T04:16:38.919726",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "android.crashsight.wetest.net",
-      "count": 130,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:46:02.917230",
-      "last_seen": "2026-01-06T04:49:26.964614",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "unknown-203-209-255-222.aliyun.com",
-      "count": 128,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:26.923066",
-      "last_seen": "2026-01-06T04:32:14.940844",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "one.one.one.one",
-      "count": 125,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:32:08.916934",
-      "last_seen": "2026-01-06T04:32:41.911698",
-      "sample_ips": [
-        "192.168.3.102",
-        "192.168.3.86"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "apisonar-liveaccess.go.usonar.jp",
-      "count": 109,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:00:05.924954",
-      "last_seen": "2026-01-06T04:00:35.917672",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "api.mousegesturesapi.com",
-      "count": 103,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-05T18:00:17.932415",
-      "last_seen": "2026-01-06T00:00:53.919524",
-      "sample_ips": [
-        "192.168.3.225"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "hm.mieru-ca.com",
-      "count": 103,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:00:05.925596",
-      "last_seen": "2026-01-06T04:00:35.917775",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "a-fds.youborafds01.com",
-      "count": 101,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:27:17.927384",
-      "last_seen": "2026-01-06T04:15:38.972523",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sms-forwarder.com",
-      "count": 99,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:11.929712",
-      "last_seen": "2026-01-06T02:19:59.926131",
-      "sample_ips": [
-        "192.168.3.99"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "pdns.dnspod.cn",
-      "count": 96,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:36:32.919043",
-      "last_seen": "2026-01-06T04:46:56.925246",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bizsearch-asp.accelatech.com",
-      "count": 92,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:00:02.922627",
-      "last_seen": "2026-01-06T04:00:32.928868",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ntjp.mieru-ca.com",
-      "count": 91,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:00:05.926341",
-      "last_seen": "2026-01-06T04:00:23.915307",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ice.clip-studio.com",
-      "count": 87,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-05T17:31:32.937043",
-      "last_seen": "2026-01-06T04:32:44.967542",
-      "sample_ips": [
-        "192.168.3.54"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "124-146-155-170.pro.static.arena.ne.jp",
-      "count": 81,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:04:47.924630",
-      "last_seen": "2026-01-06T03:05:32.918463",
-      "sample_ips": [
-        "192.168.3.91"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "apisonar.go.usonar.jp",
-      "count": 81,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:00:05.923083",
-      "last_seen": "2026-01-06T04:00:35.917867",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "launcher.hggslb.com",
-      "count": 78,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:47:35.915608",
-      "last_seen": "2026-01-06T04:47:50.914496",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "206.193.250.142.in-addr.arpa",
-      "count": 72,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T02:04:32.924583",
-      "last_seen": "2026-01-06T02:05:02.914924",
-      "sample_ips": [
-        "192.168.3.53"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "apis.live.net",
-      "count": 68,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-05T19:44:11.930585",
-      "last_seen": "2026-01-06T04:41:54.035763",
-      "sample_ips": [
-        "192.168.3.66",
-        "192.168.3.102"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "test-mijeos.but.jp",
-      "count": 65,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-05T17:31:26.939300",
-      "last_seen": "2026-01-06T03:31:44.941998",
-      "sample_ips": [
-        "192.168.3.57"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "glcs.listdl.com",
-      "count": 53,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:43:53.917340",
-      "last_seen": "2026-01-06T04:44:29.937907",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "log.byteoversea.com.ttdns2.com",
-      "count": 52,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:33:44.949502",
-      "last_seen": "2026-01-06T04:39:29.931133",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sptest.baidu.com",
-      "count": 49,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:33:20.918827",
-      "last_seen": "2026-01-06T04:49:59.924359",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "browser-intake-datadoghq.com",
-      "count": 48,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T02:28:44.950929",
-      "last_seen": "2026-01-06T02:29:05.916136",
-      "sample_ips": [
-        "192.168.3.91"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ali-rwk.pull.etoote.com.w.alikunlun.net",
-      "count": 48,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:33:14.980709",
-      "last_seen": "2026-01-06T04:33:23.914385",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "events.mapbox.com",
-      "count": 45,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:21:15.162055",
-      "last_seen": "2026-01-06T01:21:29.931607",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "use.fontawesome.com",
-      "count": 44,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T02:53:53.924422",
-      "last_seen": "2026-01-06T04:36:53.909831",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "gw.alipayobjects.com",
-      "count": 42,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:21.038505",
-      "last_seen": "2026-01-06T04:32:47.917362",
-      "sample_ips": [
-        "192.168.3.100",
-        "192.168.3.103"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "oser.ns.aliyuncs.com.w.kunlunle.com",
-      "count": 42,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:46:50.921116",
-      "last_seen": "2026-01-06T04:47:26.990441",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
       "domain": "cn-neg-geo.cfe.uber.com",
       "count": 38,
-      "category": "Unknown",
-      "service": "Unknown",
+      "category": "Transport",
+      "service": "Uber",
       "first_seen": "2026-01-06T02:28:23.921254",
       "last_seen": "2026-01-06T02:28:29.927538",
       "sample_ips": [
@@ -3071,1120 +4225,14 @@
       ]
     },
     {
-      "domain": "unleash-edge.goodnotes-devops.com",
-      "count": 36,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T02:20:47.702713",
-      "last_seen": "2026-01-06T02:36:41.923062",
-      "sample_ips": [
-        "192.168.3.91"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bookingdotcomb2b.germany-2.evergage.com",
-      "count": 34,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:29:20.981924",
-      "last_seen": "2026-01-06T01:53:53.917636",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "datagw-edge.alipay.com",
-      "count": 33,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:26.924180",
-      "last_seen": "2026-01-06T04:30:44.952079",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bdbus-turbonet.baidu.com",
-      "count": 32,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:33:11.917609",
-      "last_seen": "2026-01-06T04:49:05.915093",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "api.tplinkra.com",
-      "count": 29,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:22:32.923234",
-      "last_seen": "2026-01-06T03:36:32.918458",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "dl.listdl.com",
-      "count": 28,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:42:32.976785",
-      "last_seen": "2026-01-06T04:47:20.954571",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "list.szlcsc.com.w.kunluncan.com",
-      "count": 25,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:43:23.917110",
-      "last_seen": "2026-01-06T04:43:32.911673",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "www.quic.cloud",
-      "count": 22,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:29:53.926738",
-      "last_seen": "2026-01-06T01:29:56.921170",
-      "sample_ips": [
-        "192.168.3.57"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "amdc.alipaydns.com",
-      "count": 21,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:32:32.917424",
-      "last_seen": "2026-01-06T04:32:44.964552",
-      "sample_ips": [
-        "192.168.3.103"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "global.telemetry.insights.video.a2z.com",
-      "count": 20,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:33:29.936710",
-      "last_seen": "2026-01-06T01:34:41.919801",
-      "sample_ips": [
-        "192.168.3.53"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "img.vidaahub.com",
-      "count": 17,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-05T22:22:38.992453",
-      "last_seen": "2026-01-06T00:10:32.920106",
-      "sample_ips": [
-        "192.168.3.97"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "43.132.55.55",
-      "count": 17,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:08.915261",
-      "last_seen": "2026-01-06T04:52:14.965304",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "www.aexp-static.com",
-      "count": 16,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:58:38.924232",
-      "last_seen": "2026-01-06T01:58:47.926849",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "download.amd.com",
-      "count": 16,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T02:29:05.921941",
-      "last_seen": "2026-01-06T02:29:26.914445",
-      "sample_ips": [
-        "192.168.3.45"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "nsclick.baidu.com",
-      "count": 15,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:33:26.918822",
-      "last_seen": "2026-01-06T04:41:59.940922",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "upload-os-bbs.hoyolab.com",
-      "count": 15,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:44:11.919035",
-      "last_seen": "2026-01-06T04:44:17.913690",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "h2tcbox.baidu.com",
-      "count": 14,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:44:32.925800",
-      "last_seen": "2026-01-06T04:48:41.979261",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "api.leanplum.com",
-      "count": 12,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:27:36.019719",
-      "last_seen": "2026-01-06T04:27:50.946684",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "mdn.alipayobjects.com",
-      "count": 12,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:21.038563",
-      "last_seen": "2026-01-06T04:30:41.926601",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "hoyolab-upload.hoyolab.com",
-      "count": 12,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:44:14.952472",
-      "last_seen": "2026-01-06T04:44:32.919448",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "zn2cd3q3b8veiooeg-booking.siteintercept.qualtrics.com",
-      "count": 11,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:29:20.982104",
-      "last_seen": "2026-01-06T01:55:14.946305",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "www.surveygizmo.eu",
-      "count": 11,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:29:17.924935",
-      "last_seen": "2026-01-06T01:57:30.005362",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "crl.cybertrust.ne.jp",
-      "count": 11,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:04:47.924714",
-      "last_seen": "2026-01-06T03:05:17.920421",
-      "sample_ips": [
-        "192.168.3.91"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bailingual-assets.alipay.com",
-      "count": 11,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:29.948972",
-      "last_seen": "2026-01-06T04:30:50.917737",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "119.29.29.90",
-      "count": 11,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:37:05.921331",
-      "last_seen": "2026-01-06T04:43:41.917950",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "119.29.29.88",
-      "count": 11,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:36:32.919181",
-      "last_seen": "2026-01-06T04:46:53.916208",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "nichigas.payhub.jp",
-      "count": 10,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:47:44.993184",
-      "last_seen": "2026-01-06T01:47:56.919524",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "p4k6jrj0ceheadr6ekwptfmktct8u1767670874.darnuid.imrworldwide.com",
-      "count": 10,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:41:17.923225",
-      "last_seen": "2026-01-06T03:41:41.915102",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "loc.map.baidu.com",
-      "count": 10,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:41:29.961651",
-      "last_seen": "2026-01-06T04:41:41.973973",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "mbd.baidu.com",
-      "count": 10,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:41:29.962097",
-      "last_seen": "2026-01-06T04:41:41.974524",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "images-udp.app.starbucks.co.jp",
-      "count": 9,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:56:20.926381",
-      "last_seen": "2026-01-06T01:56:45.221647",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "secure-us.imrworldwide.com",
-      "count": 9,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:26:47.923737",
-      "last_seen": "2026-01-06T04:15:38.973164",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "graph.fbpigeon.com",
-      "count": 8,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:51:54.069323",
-      "last_seen": "2026-01-06T04:52:02.909552",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "4ml22dnhvbq3ihzgoaxxhfakpyyn71767671933.darnuid.imrworldwide.com",
-      "count": 7,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:58:56.986211",
-      "last_seen": "2026-01-06T03:59:14.941860",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "skan.singular.net",
-      "count": 7,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:29:21.006788",
-      "last_seen": "2026-01-06T04:29:29.924579",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ashort.alipay.com.cn",
-      "count": 7,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:26.923312",
-      "last_seen": "2026-01-06T04:30:44.951260",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "tvax2.sinaimg.cn",
-      "count": 7,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:50:05.941457",
-      "last_seen": "2026-01-06T04:50:23.914062",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "munchkin.marketo.net",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:54:47.924712",
-      "last_seen": "2026-01-06T01:55:02.919901",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "5nkekadlqbwnlse53ihowbvdibxbh1767668333.darnuid.imrworldwide.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T02:58:56.919723",
-      "last_seen": "2026-01-06T02:59:12.161906",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "fwlyzflrokwiskal9ce4csrncbtzq1767671573.darnuid.imrworldwide.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:52:56.925451",
-      "last_seen": "2026-01-06T03:53:11.939737",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "cookie.sync.usonar.jp",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:00:05.925562",
-      "last_seen": "2026-01-06T04:00:20.913771",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "api2.piyolog.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:27:14.953378",
-      "last_seen": "2026-01-06T04:27:30.098828",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "mgw.alipay.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:19:26.923213",
-      "last_seen": "2026-01-06T04:30:41.926895",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ofloc.map.baidu.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:41:29.965648",
-      "last_seen": "2026-01-06T04:41:44.977500",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sofire.baidu.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:41:32.925326",
-      "last_seen": "2026-01-06T04:41:47.916813",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ossapi.baidu.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:41:35.924209",
-      "last_seen": "2026-01-06T04:41:50.923353",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bbs-api-os-ab.hoyolab.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:44:14.952806",
-      "last_seen": "2026-01-06T04:44:21.717304",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bbs-api-os.hoyolab.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:44:20.916674",
-      "last_seen": "2026-01-06T04:44:32.921515",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "play-aws.wetvinfo.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:05.918998",
-      "last_seen": "2026-01-06T04:52:14.964531",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "appcfg.wetvinfo.com",
-      "count": 6,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:05.919248",
-      "last_seen": "2026-01-06T04:52:14.965180",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ntv2.media.ylive.jp",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:26:20.922915",
-      "last_seen": "2026-01-06T01:26:32.924305",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sdk.iad-03.braze.com",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:47:35.922810",
-      "last_seen": "2026-01-06T01:47:47.918332",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ip2c.landscape.co.jp",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:00:05.924738",
-      "last_seen": "2026-01-06T04:00:17.925379",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sdk.fra-01.braze.eu",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:07:32.933084",
-      "last_seen": "2026-01-06T04:07:44.995438",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sdk.iad-07.braze.com",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:27:36.019539",
-      "last_seen": "2026-01-06T04:27:47.929707",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "log.byteoversea.com",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:33:44.949862",
-      "last_seen": "2026-01-06T04:33:56.917386",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "aispace.baidu.com",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:41:29.963795",
-      "last_seen": "2026-01-06T04:41:41.974843",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "play.wetvinfo.com",
-      "count": 5,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:14.971085",
-      "last_seen": "2026-01-06T04:52:23.917386",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sync.targeting.unrulymedia.com",
-      "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:27:08.928010",
-      "last_seen": "2026-01-06T01:27:17.920157",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "openlitespeed.org",
-      "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:29:53.926836",
-      "last_seen": "2026-01-06T01:29:56.920672",
-      "sample_ips": [
-        "192.168.3.57"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
       "domain": "pusher.uber.com",
       "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
+      "category": "Transport",
+      "service": "Uber",
       "first_seen": "2026-01-06T02:28:23.921348",
       "last_seen": "2026-01-06T02:28:26.922333",
       "sample_ips": [
         "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "mu5nfwsizyzi3kkus72z7ewncm4xg1767668438.darnuid.imrworldwide.com",
-      "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:00:41.970294",
-      "last_seen": "2026-01-06T03:00:50.981645",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "hmz9uko5wbnm8plx1lsoteinimcgt1767668438.darnuid.imrworldwide.com",
-      "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T03:00:41.970464",
-      "last_seen": "2026-01-06T03:00:50.981780",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "amdc.alipay.com",
-      "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:30:35.943436",
-      "last_seen": "2026-01-06T04:30:44.951047",
-      "sample_ips": [
-        "192.168.3.100"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ack.tuisong.baidu.com",
-      "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:44:29.946569",
-      "last_seen": "2026-01-06T04:44:38.914858",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "oser.ns.aliyuncs.com",
-      "count": 4,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:46:53.918431",
-      "last_seen": "2026-01-06T04:46:56.927746",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "api.mapbox.com",
-      "count": 3,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:21:11.921654",
-      "last_seen": "2026-01-06T01:21:18.257839",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "in.appcenter.ms",
-      "count": 3,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:29:26.919788",
-      "last_seen": "2026-01-06T04:29:32.914099",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "bbs-api-os-static.hoyolab.com",
-      "count": 3,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:44:11.919182",
-      "last_seen": "2026-01-06T04:44:17.913285",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "ba-jp-sdk.bluearchive.jp",
-      "count": 3,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:46:53.920999",
-      "last_seen": "2026-01-06T04:46:59.965226",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "vibeaconstr.onezapp.com",
-      "count": 3,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:02.915376",
-      "last_seen": "2026-01-06T04:52:08.913904",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "wuji.wetvinfo.com",
-      "count": 3,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:05.919204",
-      "last_seen": "2026-01-06T04:52:11.915832",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "content.diagnose.tdos.vip",
-      "count": 3,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:05.919314",
-      "last_seen": "2026-01-06T04:52:11.915927",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "aa.agkn.com",
-      "count": 2,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:27:02.922113",
-      "last_seen": "2026-01-06T01:27:05.918489",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "sync.1rx.io",
-      "count": 2,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:27:02.922835",
-      "last_seen": "2026-01-06T01:27:05.919210",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "quic.cloud",
-      "count": 2,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:29:53.926945",
-      "last_seen": "2026-01-06T01:29:56.920735",
-      "sample_ips": [
-        "192.168.3.57"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "m.stripe.network",
-      "count": 2,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T01:58:08.974437",
-      "last_seen": "2026-01-06T01:58:11.919018",
-      "sample_ips": [
-        "192.168.3.66"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "b79c66077e27a1c100292a6aa5da291cfa7da7ef982a7d0d2708be38d76b31f.us-east-1.prod.service.minerva.devices.a2z.com",
-      "count": 2,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T02:28:26.923508",
-      "last_seen": "2026-01-06T02:28:29.926318",
-      "sample_ips": [
-        "192.168.3.101"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "cache.api.wujisite.com",
-      "count": 2,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:08.914941",
-      "last_seen": "2026-01-06T04:52:11.916343",
-      "sample_ips": [
-        "192.168.3.105"
-      ],
-      "rooms": [
-        "akb"
-      ]
-    },
-    {
-      "domain": "43.132.43.43",
-      "count": 2,
-      "category": "Unknown",
-      "service": "Unknown",
-      "first_seen": "2026-01-06T04:52:20.915306",
-      "last_seen": "2026-01-06T04:52:23.916941",
-      "sample_ips": [
-        "192.168.3.105"
       ],
       "rooms": [
         "akb"

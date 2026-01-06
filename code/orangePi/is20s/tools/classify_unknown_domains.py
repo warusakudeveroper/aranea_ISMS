@@ -11,11 +11,16 @@ from typing import Dict, Tuple
 # カテゴリ分類ルール（優先順位順）
 CLASSIFICATION_RULES = [
     # Gaming
-    (["yuanshen", "genshin", "mihoyo", "hoyoverse"], "Gaming", "Genshin Impact (miHoYo)"),
+    (["yuanshen", "genshin"], "Gaming", "Genshin Impact (miHoYo)"),
     (["starrails", "honkai"], "Gaming", "Honkai: Star Rail (miHoYo)"),
     (["zenlesszonezero", "zenless"], "Gaming", "Zenless Zone Zero (miHoYo)"),
-    (["kurogame", "mingchao", "wuthering"], "Gaming", "Wuthering Waves (Kuro Games)"),
+    (["hoyolab.com", "mihoyo", "hoyoverse"], "Gaming", "miHoYo Community"),
+    (["kurogame", "mingchao", "wuthering", "aki-game"], "Gaming", "Wuthering Waves (Kuro Games)"),
     (["yostar"], "Gaming", "Yostar Games"),
+    (["wetest.net", "crashsight"], "Gaming", "Tencent Gaming Services"),
+    (["ysdp.top"], "Gaming", "Gaming Service"),
+    (["bluearchive.jp"], "Gaming", "Blue Archive"),
+    (["launcher", "hggslb.com"], "Gaming", "Game Launcher"),
     (["game", "gaming"], "Gaming", "Gaming"),
 
     # AI/ML
@@ -26,94 +31,165 @@ CLASSIFICATION_RULES = [
     (["nr-data.net", "newrelic"], "Monitoring", "New Relic"),
     (["sentry.io"], "Monitoring", "Sentry"),
     (["honeycomb.io"], "Monitoring", "Honeycomb"),
+    (["datadog", "datadoghq"], "Monitoring", "Datadog"),
+    (["usonar.jp", "sonar"], "Monitoring", "U-SONAR Analytics"),
 
     # Tracking & Analytics
     (["keepa.com"], "Tracker", "Keepa (Price Tracker)"),
     (["app-measurement.com"], "Analytics", "Google Analytics"),
+    (["omtrdc.net", "omtr"], "Analytics", "Adobe Analytics"),
+    (["imrworldwide.com", "comscore"], "Analytics", "Nielsen/comScore"),
+    (["mieru-ca.com"], "Analytics", "Mieru-CA Analytics"),
+    (["leanplum.com"], "Analytics", "Leanplum"),
+    (["braze.com", "braze.eu"], "Analytics", "Braze"),
+    (["appcenter.ms"], "Analytics", "App Center Analytics"),
+    (["singular.net"], "Analytics", "Singular"),
+    (["piyolog.com"], "Analytics", "Piyolog"),
+    (["telemetry"], "Analytics", "Telemetry"),
     (["analytics", "measurement", "metrics"], "Analytics", "Analytics"),
     (["pixel", "tracking", "tracker"], "Tracker", "Tracker"),
+
+    # Marketing Automation
+    (["evergage.com"], "Marketing", "Evergage"),
+    (["marketo.net"], "Marketing", "Marketo"),
+    (["qualtrics.com"], "Marketing", "Qualtrics"),
+    (["surveygizmo.eu"], "Marketing", "SurveyGizmo"),
+    (["agkn.com"], "Marketing", "Neustar"),
+    (["1rx.io"], "Marketing", "1rx"),
 
     # Booking & Travel
     (["booking.com", "beds24.com"], "Booking", "Booking Service"),
 
     # IoT
     (["daikinsmartdb.jp", "daikin"], "IoT", "Daikin Smart"),
+    (["tplinkra.com", "tplink"], "IoT", "TP-Link Router"),
     (["iot", "smart"], "IoT", "IoT"),
 
     # Ad Network
+    (["exp-tas.com", "exponential"], "Ad", "Exponential (Ad Network)"),
+    (["youborafds", "youboranqs"], "Ad", "Youbora Ad Network"),
     (["adnexus", "doubleclick", "ad-stir", "ad.as", "amanad", "socdm", "adtdp"], "Ad", "Ad Network"),
-    (["youboranqs01.com"], "Ad", "Ad Network"),
     (["creativecdn.com"], "Ad", "Creative CDN"),
     (["uncn.jp"], "Ad", "Ad Network (Japan)"),
     (["a-dsp.com"], "Ad", "DSP"),
     (["nielsen.com"], "Ad", "Nielsen"),
     (["onelink.me"], "Ad", "AppsFlyer OneLink"),
+    (["unrulymedia.com"], "Ad", "Unruly Media"),
 
     # AWS Services
     (["diagnostic.networking.aws.dev"], "Network", "AWS Network Diagnostics"),
     (["awswaf.com"], "Security", "AWS WAF"),
     (["cloudfront"], "CDN", "AWS CloudFront"),
+    (["a2z.com"], "Cloud", "AWS (Amazon)"),
     (["amazonaws.com"], "Cloud", "AWS"),
 
-    # CDN
-    (["cdn", "cloudflare", "akamai", "fastly"], "CDN", "CDN"),
+    # Alibaba Cloud & Services
+    (["aliyun", "aliyuncs"], "Cloud", "Alibaba Cloud"),
+    (["alipay", "alipaydns", "alipayobjects"], "Payment", "Alipay"),
+    (["alicdn", "alikunlun"], "CDN", "Alibaba CDN"),
+
+    # Baidu Services
+    (["baidu.com"], "Search", "Baidu"),
+    (["bdstatic.com", "bdydns.com", "bdbus"], "CDN", "Baidu CDN"),
+    (["shifen.com"], "CDN", "Baidu CDN (Shifen)"),
+
+    # ByteDance
+    (["byteoversea.com", "bytedance"], "CDN", "ByteDance"),
     (["byteglb.com"], "CDN", "ByteDance Global CDN"),
-    (["kunlunhuf.com", "lahuashanbx.com"], "CDN", "China CDN"),
-    (["bdydns.com", "bdstatic.com"], "CDN", "Baidu CDN"),
+
+    # CDN & Load Balancer
+    (["mgslb.com"], "CDN", "Load Balancer/CDN"),
+    (["lbaas", "lb-"], "Network", "Load Balancer"),
+    (["kunlunhuf", "lahuashanbx", "kunlunle", "kunluncan"], "CDN", "China CDN (Kunlun)"),
+    (["quic.cloud"], "CDN", "QUIC.cloud"),
+    (["fontawesome.com"], "CDN", "Font Awesome"),
+    (["cdn", "cloudflare", "akamai", "fastly"], "CDN", "CDN"),
+
+    # Network Infrastructure
+    (["one.one.one.one"], "Network", "Cloudflare DNS (1.1.1.1)"),
+    (["ipv4only.arpa"], "Network", "IPv4 Test"),
+    (["in-addr.arpa"], "Network", "Reverse DNS"),
+    (["dnspod.cn"], "Network", "DNSPod"),
+    (["arena.ne.jp"], "ISP", "NTT Arena"),
+    (["ylive.jp"], "ISP", "Yahoo Live"),
+    (["landscape.co.jp"], "Network", "Landscape"),
 
     # Security
     (["mcafee.com"], "Security", "McAfee"),
     (["hcaptcha.com"], "Security", "hCaptcha"),
+    (["cybertrust.ne.jp"], "Security", "Cybertrust"),
     (["waf"], "Security", "WAF"),
 
     # Payment
-    (["stripe.com"], "Payment", "Stripe"),
-    (["americanexpress.com"], "Payment", "American Express"),
+    (["stripe.com", "stripe.network"], "Payment", "Stripe"),
+    (["americanexpress.com", "aexp-static.com"], "Payment", "American Express"),
     (["paypal"], "Payment", "PayPal"),
+    (["payhub.jp"], "Payment", "PayHub"),
 
     # Microsoft
     (["msidentity.com", "msa.msidentity"], "Microsoft", "Microsoft Identity"),
     (["sharepoint.com"], "Microsoft", "SharePoint"),
     (["1drv.com", "onedrive"], "Microsoft", "OneDrive"),
+    (["live.net"], "Microsoft", "Microsoft Live"),
     (["microsoft"], "Microsoft", "Microsoft"),
 
-    # Social Media
+    # Social Media & Communication
     (["t.co"], "Social", "Twitter (X)"),
+    (["fbpigeon.com"], "Social", "Facebook"),
+    (["sinaimg.cn"], "Social", "Sina Weibo"),
     (["ameblo.jp"], "Blog", "Ameba Blog"),
     (["twitter", "facebook", "instagram"], "Social", "Social Media"),
 
-    # Development Tools
+    # Development Tools & Software
     (["vscode-cdn.net"], "Development", "VS Code"),
     (["obsidian.md"], "Development", "Obsidian"),
     (["github"], "Development", "GitHub"),
     (["growthbook.io"], "Development", "GrowthBook"),
+    (["openlitespeed.org"], "Development", "OpenLiteSpeed"),
+    (["clip-studio.com"], "Software", "Clip Studio"),
+    (["amd.com"], "Software", "AMD"),
+
+    # Apps & Services
+    (["starbucks.co.jp"], "Retail", "Starbucks"),
+    (["uber.com"], "Transport", "Uber"),
+    (["goodnotes"], "Productivity", "GoodNotes"),
+    (["mapbox.com"], "Maps", "Mapbox"),
+    (["mousegestures"], "Browser", "Mouse Gestures"),
 
     # Xiaomi / MIUI
     (["miui.com", "xiaomi"], "Xiaomi", "Xiaomi/MIUI"),
-    (["n.shifen.com"], "CDN", "Baidu CDN (Shifen)"),
 
     # News & Media
     (["newspicks.com"], "News", "NewsPicks"),
     (["hjholdings.tv"], "Media", "HJ Holdings"),
+    (["vidaahub.com"], "Media", "Vidaa Hub"),
+    (["wetvinfo.com"], "Media", "WeTV"),
 
-    # Hosting
+    # Hosting & Infrastructure
     (["vultrusercontent.com"], "Hosting", "Vultr"),
     (["lolipop.jp"], "Hosting", "Lolipop"),
 
-    # Network Infrastructure
-    (["ipv4only.arpa"], "Network", "IPv4 Test"),
-
-    # E-commerce
+    # E-commerce & Business
+    (["szlcsc.com"], "Shopping", "LCSC Electronics"),
+    (["accelatech.com"], "Business", "Accelatech"),
+    (["listdl.com"], "Download", "List Download"),
     (["amazon", "rakuten", "yahoo"], "Shopping", "E-commerce"),
 
     # Cloud Functions
     (["cloudfunctions.net"], "Cloud", "Google Cloud Functions"),
     (["force.com"], "Cloud", "Salesforce"),
 
-    # Messaging
+    # Messaging & Communication
     (["im-apps.net"], "Messaging", "Messaging Service"),
+    (["sms-forwarder.com"], "Messaging", "SMS Forwarder"),
+    (["onezapp.com"], "Messaging", "OneZapp"),
 
-    # Telecom
+    # Testing & Development
+    (["but.jp"], "Testing", "Testing Domain"),
+    (["wujisite.com"], "Development", "Wuji Site"),
+    (["tdos.vip"], "Development", "TDOS"),
+
+    # ISP & Telecom
     (["ntt", "softbank", "docomo"], "Telecom", "Telecom"),
 ]
 
@@ -125,6 +201,11 @@ def classify_domain(domain: str) -> Tuple[str, str]:
         (category, service) のタプル
     """
     domain_lower = domain.lower()
+
+    # IPアドレス判定（xxx.xxx.xxx.xxx形式）
+    import re
+    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', domain):
+        return ("Network", "IP Address")
 
     for keywords, category, service in CLASSIFICATION_RULES:
         if any(kw in domain_lower for kw in keywords):

@@ -1,0 +1,667 @@
+[
+  {
+    "domain_pattern": "exp-tas.com",
+    "service": "Exponential (Ad Network)",
+    "category": "Ad",
+    "hits": 1757,
+    "original_domain": "default.exp-tas.com"
+  },
+  {
+    "domain_pattern": "omtrdc.net",
+    "service": "Adobe Analytics",
+    "category": "Analytics",
+    "hits": 777,
+    "original_domain": "audible.sc.omtrdc.net"
+  },
+  {
+    "domain_pattern": "rdcnw.net",
+    "service": "Load Balancer",
+    "category": "Network",
+    "hits": 399,
+    "original_domain": "lb-133-237-128-251.lbaas.jpe2b.rdcnw.net"
+  },
+  {
+    "domain_pattern": "ysdp.top",
+    "service": "Gaming Service",
+    "category": "Gaming",
+    "hits": 328,
+    "original_domain": "bta9p7hynf6feeht.ysdp.top"
+  },
+  {
+    "domain_pattern": "mgslb.com",
+    "service": "Load Balancer/CDN",
+    "category": "CDN",
+    "hits": 232,
+    "original_domain": "t7.a.market.c.mgslb.com"
+  },
+  {
+    "domain_pattern": "imrworldwide.com",
+    "service": "Nielsen/comScore",
+    "category": "Analytics",
+    "hits": 154,
+    "original_domain": "secure-origin.imrworldwide.com"
+  },
+  {
+    "domain_pattern": "wetest.net",
+    "service": "Tencent Gaming Services",
+    "category": "Gaming",
+    "hits": 130,
+    "original_domain": "android.crashsight.wetest.net"
+  },
+  {
+    "domain_pattern": "aliyun.com",
+    "service": "Alibaba Cloud",
+    "category": "Cloud",
+    "hits": 128,
+    "original_domain": "unknown-203-209-255-222.aliyun.com"
+  },
+  {
+    "domain_pattern": "one.one",
+    "service": "Cloudflare DNS (1.1.1.1)",
+    "category": "Network",
+    "hits": 125,
+    "original_domain": "one.one.one.one"
+  },
+  {
+    "domain_pattern": "usonar.jp",
+    "service": "U-SONAR Analytics",
+    "category": "Monitoring",
+    "hits": 109,
+    "original_domain": "apisonar-liveaccess.go.usonar.jp"
+  },
+  {
+    "domain_pattern": "mieru-ca.com",
+    "service": "Mieru-CA Analytics",
+    "category": "Analytics",
+    "hits": 103,
+    "original_domain": "hm.mieru-ca.com"
+  },
+  {
+    "domain_pattern": "mousegesturesapi.com",
+    "service": "Mouse Gestures",
+    "category": "Browser",
+    "hits": 103,
+    "original_domain": "api.mousegesturesapi.com"
+  },
+  {
+    "domain_pattern": "youborafds01.com",
+    "service": "Youbora Ad Network",
+    "category": "Ad",
+    "hits": 101,
+    "original_domain": "a-fds.youborafds01.com"
+  },
+  {
+    "domain_pattern": "sms-forwarder.com",
+    "service": "SMS Forwarder",
+    "category": "Messaging",
+    "hits": 99,
+    "original_domain": "sms-forwarder.com"
+  },
+  {
+    "domain_pattern": "dnspod.cn",
+    "service": "DNSPod",
+    "category": "Network",
+    "hits": 96,
+    "original_domain": "pdns.dnspod.cn"
+  },
+  {
+    "domain_pattern": "accelatech.com",
+    "service": "Accelatech",
+    "category": "Business",
+    "hits": 92,
+    "original_domain": "bizsearch-asp.accelatech.com"
+  },
+  {
+    "domain_pattern": "dnse0.com",
+    "service": "Wuthering Waves (Kuro Games)",
+    "category": "Gaming",
+    "hits": 92,
+    "original_domain": "cdn-qcloud-hw-mc.aki-game.net.eo.dnse0.com"
+  },
+  {
+    "domain_pattern": "clip-studio.com",
+    "service": "Clip Studio",
+    "category": "Software",
+    "hits": 87,
+    "original_domain": "ice.clip-studio.com"
+  },
+  {
+    "domain_pattern": "dnsv1.com",
+    "service": "Wuthering Waves (Kuro Games)",
+    "category": "Gaming",
+    "hits": 85,
+    "original_domain": "aki-config-qcloud.aki-game2.net.cdn.dnsv1.com"
+  },
+  {
+    "domain_pattern": "ne.jp",
+    "service": "NTT Arena",
+    "category": "ISP",
+    "hits": 81,
+    "original_domain": "124-146-155-170.pro.static.arena.ne.jp"
+  },
+  {
+    "domain_pattern": "volcgslb.com",
+    "service": "Wuthering Waves (Kuro Games)",
+    "category": "Gaming",
+    "hits": 79,
+    "original_domain": "aki-config-huoshan.aki-game2.net.volcgslb.com"
+  },
+  {
+    "domain_pattern": "hggslb.com",
+    "service": "Game Launcher",
+    "category": "Gaming",
+    "hits": 78,
+    "original_domain": "launcher.hggslb.com"
+  },
+  {
+    "domain_pattern": "in-addr.arpa",
+    "service": "Reverse DNS",
+    "category": "Network",
+    "hits": 72,
+    "original_domain": "206.193.250.142.in-addr.arpa"
+  },
+  {
+    "domain_pattern": "pubmnet.com",
+    "service": "Twitter (X)",
+    "category": "Social",
+    "hits": 72,
+    "original_domain": "image2v2.pubmnet.com"
+  },
+  {
+    "domain_pattern": "rlcdn.com",
+    "service": "CDN",
+    "category": "CDN",
+    "hits": 71,
+    "original_domain": "id.rlcdn.com"
+  },
+  {
+    "domain_pattern": "revenuecat.com",
+    "service": "Twitter (X)",
+    "category": "Social",
+    "hits": 70,
+    "original_domain": "api.revenuecat.com"
+  },
+  {
+    "domain_pattern": "live.net",
+    "service": "Microsoft Live",
+    "category": "Microsoft",
+    "hits": 68,
+    "original_domain": "apis.live.net"
+  },
+  {
+    "domain_pattern": "but.jp",
+    "service": "Testing Domain",
+    "category": "Testing",
+    "hits": 65,
+    "original_domain": "test-mijeos.but.jp"
+  },
+  {
+    "domain_pattern": "bdstatic.com",
+    "service": "Baidu CDN",
+    "category": "CDN",
+    "hits": 57,
+    "original_domain": "nmtest.bdstatic.com"
+  },
+  {
+    "domain_pattern": "listdl.com",
+    "service": "List Download",
+    "category": "Download",
+    "hits": 53,
+    "original_domain": "glcs.listdl.com"
+  },
+  {
+    "domain_pattern": "ttdns2.com",
+    "service": "ByteDance",
+    "category": "CDN",
+    "hits": 52,
+    "original_domain": "log.byteoversea.com.ttdns2.com"
+  },
+  {
+    "domain_pattern": "baidu.com",
+    "service": "Baidu",
+    "category": "Search",
+    "hits": 49,
+    "original_domain": "sptest.baidu.com"
+  },
+  {
+    "domain_pattern": "alikunlun.net",
+    "service": "Alibaba CDN",
+    "category": "CDN",
+    "hits": 48,
+    "original_domain": "ali-rwk.pull.etoote.com.w.alikunlun.net"
+  },
+  {
+    "domain_pattern": "browser-intake-datadoghq.com",
+    "service": "Datadog",
+    "category": "Monitoring",
+    "hits": 48,
+    "original_domain": "browser-intake-datadoghq.com"
+  },
+  {
+    "domain_pattern": "mapbox.com",
+    "service": "Mapbox",
+    "category": "Maps",
+    "hits": 45,
+    "original_domain": "events.mapbox.com"
+  },
+  {
+    "domain_pattern": "fontawesome.com",
+    "service": "Font Awesome",
+    "category": "CDN",
+    "hits": 44,
+    "original_domain": "use.fontawesome.com"
+  },
+  {
+    "domain_pattern": "zenlesszonezero.com",
+    "service": "Zenless Zone Zero (miHoYo)",
+    "category": "Gaming",
+    "hits": 44,
+    "original_domain": "globaldp-prod-os01.zenlesszonezero.com"
+  },
+  {
+    "domain_pattern": "kunlunle.com",
+    "service": "Alibaba Cloud",
+    "category": "Cloud",
+    "hits": 42,
+    "original_domain": "oser.ns.aliyuncs.com.w.kunlunle.com"
+  },
+  {
+    "domain_pattern": "alipayobjects.com",
+    "service": "Alipay",
+    "category": "Payment",
+    "hits": 42,
+    "original_domain": "gw.alipayobjects.com"
+  },
+  {
+    "domain_pattern": "uber.com",
+    "service": "Uber",
+    "category": "Transport",
+    "hits": 38,
+    "original_domain": "cn-neg-geo.cfe.uber.com"
+  },
+  {
+    "domain_pattern": "goodnotes-devops.com",
+    "service": "GoodNotes",
+    "category": "Productivity",
+    "hits": 36,
+    "original_domain": "unleash-edge.goodnotes-devops.com"
+  },
+  {
+    "domain_pattern": "evergage.com",
+    "service": "Evergage",
+    "category": "Marketing",
+    "hits": 34,
+    "original_domain": "bookingdotcomb2b.germany-2.evergage.com"
+  },
+  {
+    "domain_pattern": "alipay.com",
+    "service": "Alipay",
+    "category": "Payment",
+    "hits": 33,
+    "original_domain": "datagw-edge.alipay.com"
+  },
+  {
+    "domain_pattern": "tplinkra.com",
+    "service": "TP-Link Router",
+    "category": "IoT",
+    "hits": 29,
+    "original_domain": "api.tplinkra.com"
+  },
+  {
+    "domain_pattern": "kunluncan.com",
+    "service": "China CDN (Kunlun)",
+    "category": "CDN",
+    "hits": 25,
+    "original_domain": "list.szlcsc.com.w.kunluncan.com"
+  },
+  {
+    "domain_pattern": "starrails.com",
+    "service": "Honkai: Star Rail (miHoYo)",
+    "category": "Gaming",
+    "hits": 25,
+    "original_domain": "autopatchos.starrails.com"
+  },
+  {
+    "domain_pattern": "quic.cloud",
+    "service": "QUIC.cloud",
+    "category": "CDN",
+    "hits": 22,
+    "original_domain": "www.quic.cloud"
+  },
+  {
+    "domain_pattern": "alipaydns.com",
+    "service": "Alipay",
+    "category": "Payment",
+    "hits": 21,
+    "original_domain": "amdc.alipaydns.com"
+  },
+  {
+    "domain_pattern": "a2z.com",
+    "service": "Telemetry",
+    "category": "Analytics",
+    "hits": 20,
+    "original_domain": "global.telemetry.insights.video.a2z.com"
+  },
+  {
+    "domain_pattern": "yostarplat.com",
+    "service": "Yostar Games",
+    "category": "Gaming",
+    "hits": 19,
+    "original_domain": "jp-sdk-api.yostarplat.com"
+  },
+  {
+    "domain_pattern": "hismarttv.com",
+    "service": "Game Launcher",
+    "category": "Gaming",
+    "hits": 17,
+    "original_domain": "auth-launcher-jp.hismarttv.com"
+  },
+  {
+    "domain_pattern": "vidaahub.com",
+    "service": "Vidaa Hub",
+    "category": "Media",
+    "hits": 17,
+    "original_domain": "img.vidaahub.com"
+  },
+  {
+    "domain_pattern": "55.55",
+    "service": "IP Address",
+    "category": "Network",
+    "hits": 17,
+    "original_domain": "43.132.55.55"
+  },
+  {
+    "domain_pattern": "aexp-static.com",
+    "service": "American Express",
+    "category": "Payment",
+    "hits": 16,
+    "original_domain": "www.aexp-static.com"
+  },
+  {
+    "domain_pattern": "amd.com",
+    "service": "AMD",
+    "category": "Software",
+    "hits": 16,
+    "original_domain": "download.amd.com"
+  },
+  {
+    "domain_pattern": "hoyolab.com",
+    "service": "miHoYo Community",
+    "category": "Gaming",
+    "hits": 15,
+    "original_domain": "upload-os-bbs.hoyolab.com"
+  },
+  {
+    "domain_pattern": "leanplum.com",
+    "service": "Leanplum",
+    "category": "Analytics",
+    "hits": 12,
+    "original_domain": "api.leanplum.com"
+  },
+  {
+    "domain_pattern": "astockcdn.net",
+    "service": "CDN",
+    "category": "CDN",
+    "hits": 12,
+    "original_domain": "stock-notifications.astockcdn.net"
+  },
+  {
+    "domain_pattern": "qualtrics.com",
+    "service": "Qualtrics",
+    "category": "Marketing",
+    "hits": 11,
+    "original_domain": "zn2cd3q3b8veiooeg-booking.siteintercept.qualtrics.com"
+  },
+  {
+    "domain_pattern": "surveygizmo.eu",
+    "service": "SurveyGizmo",
+    "category": "Marketing",
+    "hits": 11,
+    "original_domain": "www.surveygizmo.eu"
+  },
+  {
+    "domain_pattern": "29.90",
+    "service": "IP Address",
+    "category": "Network",
+    "hits": 11,
+    "original_domain": "119.29.29.90"
+  },
+  {
+    "domain_pattern": "29.88",
+    "service": "IP Address",
+    "category": "Network",
+    "hits": 11,
+    "original_domain": "119.29.29.88"
+  },
+  {
+    "domain_pattern": "payhub.jp",
+    "service": "PayHub",
+    "category": "Payment",
+    "hits": 10,
+    "original_domain": "nichigas.payhub.jp"
+  },
+  {
+    "domain_pattern": "pv-cdn.net",
+    "service": "CDN",
+    "category": "CDN",
+    "hits": 8,
+    "original_domain": "cf-trickplay.aux.pv-cdn.net"
+  },
+  {
+    "domain_pattern": "evgnet.com",
+    "service": "CDN",
+    "category": "CDN",
+    "hits": 8,
+    "original_domain": "cdn.evgnet.com"
+  },
+  {
+    "domain_pattern": "fbpigeon.com",
+    "service": "Facebook",
+    "category": "Social",
+    "hits": 8,
+    "original_domain": "graph.fbpigeon.com"
+  },
+  {
+    "domain_pattern": "app-analytics-services.com",
+    "service": "Analytics",
+    "category": "Analytics",
+    "hits": 7,
+    "original_domain": "app-analytics-services.com"
+  },
+  {
+    "domain_pattern": "singular.net",
+    "service": "Singular",
+    "category": "Analytics",
+    "hits": 7,
+    "original_domain": "skan.singular.net"
+  },
+  {
+    "domain_pattern": "aliapp.org",
+    "service": "CDN",
+    "category": "CDN",
+    "hits": 7,
+    "original_domain": "cdn.ynuf.aliapp.org"
+  },
+  {
+    "domain_pattern": "com.cn",
+    "service": "Alipay",
+    "category": "Payment",
+    "hits": 7,
+    "original_domain": "ashort.alipay.com.cn"
+  },
+  {
+    "domain_pattern": "sinaimg.cn",
+    "service": "Sina Weibo",
+    "category": "Social",
+    "hits": 7,
+    "original_domain": "tvax2.sinaimg.cn"
+  },
+  {
+    "domain_pattern": "piyolog.com",
+    "service": "Piyolog",
+    "category": "Analytics",
+    "hits": 6,
+    "original_domain": "api2.piyolog.com"
+  },
+  {
+    "domain_pattern": "marketo.net",
+    "service": "Marketo",
+    "category": "Marketing",
+    "hits": 6,
+    "original_domain": "munchkin.marketo.net"
+  },
+  {
+    "domain_pattern": "wetvinfo.com",
+    "service": "WeTV",
+    "category": "Media",
+    "hits": 6,
+    "original_domain": "play-aws.wetvinfo.com"
+  },
+  {
+    "domain_pattern": "braze.com",
+    "service": "Braze",
+    "category": "Analytics",
+    "hits": 5,
+    "original_domain": "sdk.iad-03.braze.com"
+  },
+  {
+    "domain_pattern": "braze.eu",
+    "service": "Braze",
+    "category": "Analytics",
+    "hits": 5,
+    "original_domain": "sdk.fra-01.braze.eu"
+  },
+  {
+    "domain_pattern": "byteoversea.com",
+    "service": "ByteDance",
+    "category": "CDN",
+    "hits": 5,
+    "original_domain": "log.byteoversea.com"
+  },
+  {
+    "domain_pattern": "kurogame-service.com",
+    "service": "Wuthering Waves (Kuro Games)",
+    "category": "Gaming",
+    "hits": 5,
+    "original_domain": "sdkapi.kurogame-service.com"
+  },
+  {
+    "domain_pattern": "aki-game2.net",
+    "service": "Wuthering Waves (Kuro Games)",
+    "category": "Gaming",
+    "hits": 5,
+    "original_domain": "aki-config-qcloud.aki-game2.net"
+  },
+  {
+    "domain_pattern": "ylive.jp",
+    "service": "Yahoo Live",
+    "category": "ISP",
+    "hits": 5,
+    "original_domain": "ntv2.media.ylive.jp"
+  },
+  {
+    "domain_pattern": "co.jp",
+    "service": "Landscape",
+    "category": "Network",
+    "hits": 5,
+    "original_domain": "ip2c.landscape.co.jp"
+  },
+  {
+    "domain_pattern": "unrulymedia.com",
+    "service": "Unruly Media",
+    "category": "Ad",
+    "hits": 4,
+    "original_domain": "sync.targeting.unrulymedia.com"
+  },
+  {
+    "domain_pattern": "openlitespeed.org",
+    "service": "OpenLiteSpeed",
+    "category": "Development",
+    "hits": 4,
+    "original_domain": "openlitespeed.org"
+  },
+  {
+    "domain_pattern": "appcenter.ms",
+    "service": "App Center Analytics",
+    "category": "Analytics",
+    "hits": 3,
+    "original_domain": "in.appcenter.ms"
+  },
+  {
+    "domain_pattern": "tdos.vip",
+    "service": "TDOS",
+    "category": "Development",
+    "hits": 3,
+    "original_domain": "content.diagnose.tdos.vip"
+  },
+  {
+    "domain_pattern": "bluearchive.jp",
+    "service": "Blue Archive",
+    "category": "Gaming",
+    "hits": 3,
+    "original_domain": "ba-jp-sdk.bluearchive.jp"
+  },
+  {
+    "domain_pattern": "smartadserver.com",
+    "service": "IoT",
+    "category": "IoT",
+    "hits": 3,
+    "original_domain": "rtb-csync.smartadserver.com"
+  },
+  {
+    "domain_pattern": "onezapp.com",
+    "service": "OneZapp",
+    "category": "Messaging",
+    "hits": 3,
+    "original_domain": "vibeaconstr.onezapp.com"
+  },
+  {
+    "domain_pattern": "cdn-net.com",
+    "service": "CDN",
+    "category": "CDN",
+    "hits": 2,
+    "original_domain": "www.cdn-net.com"
+  },
+  {
+    "domain_pattern": "wujisite.com",
+    "service": "Wuji Site",
+    "category": "Development",
+    "hits": 2,
+    "original_domain": "cache.api.wujisite.com"
+  },
+  {
+    "domain_pattern": "agkn.com",
+    "service": "Neustar",
+    "category": "Marketing",
+    "hits": 2,
+    "original_domain": "aa.agkn.com"
+  },
+  {
+    "domain_pattern": "1rx.io",
+    "service": "1rx",
+    "category": "Marketing",
+    "hits": 2,
+    "original_domain": "sync.1rx.io"
+  },
+  {
+    "domain_pattern": "43.43",
+    "service": "IP Address",
+    "category": "Network",
+    "hits": 2,
+    "original_domain": "43.132.43.43"
+  },
+  {
+    "domain_pattern": "stripe.network",
+    "service": "Stripe",
+    "category": "Payment",
+    "hits": 2,
+    "original_domain": "m.stripe.network"
+  },
+  {
+    "domain_pattern": "3lift.com",
+    "service": "Twitter (X)",
+    "category": "Social",
+    "hits": 2,
+    "original_domain": "eb2.3lift.com"
+  }
+]
