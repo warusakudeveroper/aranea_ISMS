@@ -56,7 +56,7 @@ DEFAULT_WATCH_CONFIG = {
         "ports": [53, 80, 443],
         "include_quic_udp_443": True,
         "include_tcp_syn_any_port": True,
-        "syn_only": True,  # 軽量モード（デフォルトON）
+        "syn_only": False,  # TLS SNI取得のためフルパケット（軽量モードOFF）
     },
     "post": {
         "url": "",
@@ -699,6 +699,19 @@ class CaptureManager:
             False: フィルタで除外（ファイルログには記録済み）
         """
         filter_cfg = self.cfg.get("display_filter", {})
+
+        # Primary カテゴリは常に表示（マーケティング分析の主要データ）
+        # これらはフィルタをバイパスしてAPI表示対象にする
+        PRIMARY_CATEGORIES = [
+            "SNS", "Streaming", "Gaming", "Messenger", "VideoConf",
+            "Search", "EC", "Adult", "News", "Finance"
+        ]
+        category = event.get("domain_category", "")
+        if category in PRIMARY_CATEGORIES:
+            # exclude_categories で明示的に除外されている場合のみ除外
+            exclude_cats = filter_cfg.get("exclude_categories", [])
+            if category not in exclude_cats:
+                return True  # Primary系は他のフィルタをバイパス
 
         # ローカルIP宛除外 (192.168.x, 10.x, 172.16-31.x, 127.x)
         if filter_cfg.get("exclude_local_ip", True):

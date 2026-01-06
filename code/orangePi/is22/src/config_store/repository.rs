@@ -28,7 +28,7 @@ impl ConfigRepository {
         rtsp_main, rtsp_sub, rtsp_username, rtsp_password, snapshot_url,
         family, manufacturer, model, ip_address, mac_address, lacis_id, cic,
         enabled, polling_enabled, polling_interval_sec, suggest_policy_weight,
-        camera_context, rotation, fid, tid, sort_order,
+        camera_context, rotation, fit_mode, fid, tid, sort_order,
         preset_id, preset_version, ai_enabled, ai_interval_sec,
         serial_number, hardware_id, firmware_version, onvif_endpoint,
         rtsp_port, http_port, onvif_port,
@@ -37,7 +37,9 @@ impl ConfigRepository {
         ptz_supported, ptz_continuous, ptz_absolute, ptz_relative,
         ptz_pan_range, ptz_tilt_range, ptz_zoom_range, ptz_presets, ptz_home_supported,
         audio_input_supported, audio_output_supported, audio_codec,
-        onvif_profiles, discovery_method, last_verified_at, last_rescan_at, deleted_at,
+        onvif_profiles, onvif_scopes, onvif_network_interfaces, onvif_capabilities,
+        discovery_method, last_verified_at, last_rescan_at, deleted_at,
+        conf_override, nms_threshold, par_threshold,
         created_at, updated_at
     "#;
 
@@ -165,6 +167,7 @@ impl ConfigRepository {
         if req.tid.is_some() { set_clauses.push("tid = ?".to_string()); }
         if req.preset_id.is_some() { set_clauses.push("preset_id = ?".to_string()); }
         if req.preset_version.is_some() { set_clauses.push("preset_version = ?".to_string()); }
+        if req.fit_mode.is_some() { set_clauses.push("fit_mode = ?".to_string()); }
         if req.serial_number.is_some() { set_clauses.push("serial_number = ?".to_string()); }
         if req.hardware_id.is_some() { set_clauses.push("hardware_id = ?".to_string()); }
         if req.firmware_version.is_some() { set_clauses.push("firmware_version = ?".to_string()); }
@@ -202,6 +205,11 @@ impl ConfigRepository {
         if req.fps_sub.is_some() { set_clauses.push("fps_sub = ?".to_string()); }
         if req.bitrate_sub.is_some() { set_clauses.push("bitrate_sub = ?".to_string()); }
 
+        // Threshold override fields (f32)
+        if req.conf_override.is_some() { set_clauses.push("conf_override = ?".to_string()); }
+        if req.nms_threshold.is_some() { set_clauses.push("nms_threshold = ?".to_string()); }
+        if req.par_threshold.is_some() { set_clauses.push("par_threshold = ?".to_string()); }
+
         // JSON fields
         if req.camera_context.is_some() { set_clauses.push("camera_context = ?".to_string()); }
         if req.ptz_pan_range.is_some() { set_clauses.push("ptz_pan_range = ?".to_string()); }
@@ -209,6 +217,9 @@ impl ConfigRepository {
         if req.ptz_zoom_range.is_some() { set_clauses.push("ptz_zoom_range = ?".to_string()); }
         if req.ptz_presets.is_some() { set_clauses.push("ptz_presets = ?".to_string()); }
         if req.onvif_profiles.is_some() { set_clauses.push("onvif_profiles = ?".to_string()); }
+        if req.onvif_scopes.is_some() { set_clauses.push("onvif_scopes = ?".to_string()); }
+        if req.onvif_network_interfaces.is_some() { set_clauses.push("onvif_network_interfaces = ?".to_string()); }
+        if req.onvif_capabilities.is_some() { set_clauses.push("onvif_capabilities = ?".to_string()); }
 
         if set_clauses.len() <= 1 {
             // Only updated_at, no actual changes
@@ -248,6 +259,7 @@ impl ConfigRepository {
         if let Some(ref v) = req.tid { q = q.bind(v); }
         if let Some(ref v) = req.preset_id { q = q.bind(v); }
         if let Some(ref v) = req.preset_version { q = q.bind(v); }
+        if let Some(ref v) = req.fit_mode { q = q.bind(v); }
         if let Some(ref v) = req.serial_number { q = q.bind(v); }
         if let Some(ref v) = req.hardware_id { q = q.bind(v); }
         if let Some(ref v) = req.firmware_version { q = q.bind(v); }
@@ -285,6 +297,11 @@ impl ConfigRepository {
         if let Some(v) = req.fps_sub { q = q.bind(v); }
         if let Some(v) = req.bitrate_sub { q = q.bind(v); }
 
+        // Threshold override fields (f32) - double option: Some(inner) means update, inner can be Some(v) or None
+        if let Some(ref inner) = req.conf_override { q = q.bind(inner.as_ref()); }
+        if let Some(ref inner) = req.nms_threshold { q = q.bind(inner.as_ref()); }
+        if let Some(ref inner) = req.par_threshold { q = q.bind(inner.as_ref()); }
+
         // JSON fields
         if let Some(ref v) = req.camera_context { q = q.bind(v); }
         if let Some(ref v) = req.ptz_pan_range { q = q.bind(v); }
@@ -292,6 +309,9 @@ impl ConfigRepository {
         if let Some(ref v) = req.ptz_zoom_range { q = q.bind(v); }
         if let Some(ref v) = req.ptz_presets { q = q.bind(v); }
         if let Some(ref v) = req.onvif_profiles { q = q.bind(v); }
+        if let Some(ref v) = req.onvif_scopes { q = q.bind(v); }
+        if let Some(ref v) = req.onvif_network_interfaces { q = q.bind(v); }
+        if let Some(ref v) = req.onvif_capabilities { q = q.bind(v); }
 
         // Bind camera_id last
         q = q.bind(camera_id);

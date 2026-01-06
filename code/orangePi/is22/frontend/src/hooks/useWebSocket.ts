@@ -36,9 +36,20 @@ export interface CameraStatusMessage {
   last_frame_at: string | null
 }
 
+export interface CycleStatsMessage {
+  subnet: string
+  cycle_duration_sec: number
+  cycle_duration_formatted: string
+  cameras_polled: number
+  successful: number
+  failed: number
+  cycle_number: number
+  completed_at: string
+}
+
 export interface HubMessage {
-  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated"
-  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | unknown
+  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated" | "cycle_stats"
+  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | CycleStatsMessage | unknown
 }
 
 interface UseWebSocketOptions {
@@ -46,12 +57,13 @@ interface UseWebSocketOptions {
   onSystemStatus?: (msg: SystemStatusMessage) => void
   onCameraStatus?: (msg: CameraStatusMessage) => void
   onSnapshotUpdated?: (msg: SnapshotUpdatedMessage) => void
+  onCycleStats?: (msg: CycleStatsMessage) => void
   onMessage?: (msg: HubMessage) => void
   reconnectInterval?: number
 }
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
-  const { onEventLog, onSystemStatus, onCameraStatus, onSnapshotUpdated, onMessage, reconnectInterval = 3000 } = options
+  const { onEventLog, onSystemStatus, onCameraStatus, onSnapshotUpdated, onCycleStats, onMessage, reconnectInterval = 3000 } = options
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [connected, setConnected] = useState(false)
@@ -84,6 +96,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             onCameraStatus(msg.data as CameraStatusMessage)
           } else if (msg.type === "snapshot_updated" && onSnapshotUpdated) {
             onSnapshotUpdated(msg.data as SnapshotUpdatedMessage)
+          } else if (msg.type === "cycle_stats" && onCycleStats) {
+            onCycleStats(msg.data as CycleStatsMessage)
           }
 
           // Generic message handler
@@ -120,7 +134,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       // Retry after delay
       reconnectTimeoutRef.current = setTimeout(connect, reconnectInterval)
     }
-  }, [onEventLog, onSystemStatus, onCameraStatus, onSnapshotUpdated, onMessage, reconnectInterval])
+  }, [onEventLog, onSystemStatus, onCameraStatus, onSnapshotUpdated, onCycleStats, onMessage, reconnectInterval])
 
   useEffect(() => {
     connect()

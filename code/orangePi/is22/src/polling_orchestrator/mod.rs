@@ -21,8 +21,9 @@ use crate::prev_frame_cache::{FrameMeta, PrevFrameCache};
 use crate::preset_loader::PresetLoader;
 use crate::snapshot_service::SnapshotService;
 use crate::suggest_engine::SuggestEngine;
-use crate::realtime_hub::{EventLogMessage, HubMessage, RealtimeHub, SnapshotUpdatedMessage};
+use crate::realtime_hub::{CycleStatsMessage, EventLogMessage, HubMessage, RealtimeHub, SnapshotUpdatedMessage};
 use chrono::Utc;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -105,6 +106,7 @@ impl PollingOrchestrator {
 
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(5)); // Check interval
+            let mut cycle_counters: HashMap<String, u64> = HashMap::new(); // Per-subnet cycle numbers
 
             loop {
                 interval.tick().await;
@@ -124,33 +126,92 @@ impl PollingOrchestrator {
                     .filter(|c| c.enabled && c.polling_enabled)
                     .collect();
 
-                // Poll each camera sequentially
+                // Group cameras by subnet
+                let mut by_subnet: HashMap<String, Vec<_>> = HashMap::new();
                 for camera in enabled {
-                    if let Err(e) = Self::poll_camera_with_ai_log(
-                        &camera,
-                        &snapshot_service,
-                        &ai_client,
-                        &event_log,
-                        &detection_log,
-                        &prev_frame_cache,
-                        &preset_loader,
-                        &suggest_engine,
-                        &realtime_hub,
-                        &config_store,
-                        &default_tid,
-                        &default_fid,
-                    )
-                    .await
-                    {
-                        tracing::error!(
-                            camera_id = %camera.camera_id,
-                            error = %e,
-                            "Camera poll failed"
-                        );
+                    let subnet = if let Some(ref rtsp_main) = camera.rtsp_main {
+                        Self::extract_subnet_from_rtsp_url(rtsp_main)
+                    } else if let Some(ref ip) = camera.ip_address {
+                        Self::extract_subnet(ip)
+                    } else {
+                        "unknown".to_string()
+                    };
+                    by_subnet.entry(subnet).or_insert_with(Vec::new).push(camera);
+                }
+
+                // Poll each subnet independently
+                for (subnet, cameras) in by_subnet {
+                    let cycle_start = Instant::now();
+                    let mut successful = 0u32;
+                    let mut failed = 0u32;
+                    let camera_count = cameras.len() as u32;
+
+                    // Poll each camera in this subnet sequentially
+                    for camera in cameras {
+                        match Self::poll_camera_with_ai_log(
+                            &camera,
+                            &snapshot_service,
+                            &ai_client,
+                            &event_log,
+                            &detection_log,
+                            &prev_frame_cache,
+                            &preset_loader,
+                            &suggest_engine,
+                            &realtime_hub,
+                            &config_store,
+                            &default_tid,
+                            &default_fid,
+                        )
+                        .await
+                        {
+                            Ok(_) => successful += 1,
+                            Err(e) => {
+                                failed += 1;
+                                tracing::error!(
+                                    camera_id = %camera.camera_id,
+                                    error = %e,
+                                    "Camera poll failed"
+                                );
+                            }
+                        }
+
+                        // Small delay between cameras
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
 
-                    // Small delay between cameras
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    // Calculate cycle duration
+                    let cycle_duration = cycle_start.elapsed();
+                    let cycle_duration_sec = cycle_duration.as_secs();
+                    let mins = cycle_duration_sec / 60;
+                    let secs = cycle_duration_sec % 60;
+                    let cycle_duration_formatted = format!("{:02}:{:02}", mins, secs);
+
+                    // Increment cycle number for this subnet
+                    let cycle_number = cycle_counters.entry(subnet.clone()).or_insert(0);
+                    *cycle_number += 1;
+
+                    // Broadcast cycle statistics
+                    realtime_hub
+                        .broadcast(HubMessage::CycleStats(CycleStatsMessage {
+                            subnet: subnet.clone(),
+                            cycle_duration_sec,
+                            cycle_duration_formatted,
+                            cameras_polled: camera_count,
+                            successful,
+                            failed,
+                            cycle_number: *cycle_number,
+                            completed_at: Utc::now().to_rfc3339(),
+                        }))
+                        .await;
+
+                    tracing::debug!(
+                        subnet = %subnet,
+                        cycle_number = %cycle_number,
+                        duration = %cycle_duration_formatted,
+                        successful,
+                        failed,
+                        "Subnet cycle completed"
+                    );
                 }
             }
 
@@ -373,6 +434,29 @@ impl PollingOrchestrator {
             None
         } else {
             Some(serde_json::Value::Object(attrs))
+        }
+    }
+
+    /// Extract subnet identifier from RTSP URL (e.g., "192.168.125.0/24")
+    fn extract_subnet_from_rtsp_url(url: &str) -> String {
+        // Extract IP from rtsp://IP:port/path
+        if let Some(start) = url.find("://") {
+            let after_protocol = &url[start + 3..];
+            if let Some(end) = after_protocol.find(':').or_else(|| after_protocol.find('/')) {
+                let ip = &after_protocol[..end];
+                return Self::extract_subnet(ip);
+            }
+        }
+        "unknown".to_string()
+    }
+
+    /// Extract subnet from IP address (e.g., "192.168.125.101" -> "192.168.125.0/24")
+    fn extract_subnet(ip: &str) -> String {
+        let parts: Vec<&str> = ip.split('.').collect();
+        if parts.len() >= 3 {
+            format!("{}.{}.{}.0/24", parts[0], parts[1], parts[2])
+        } else {
+            "unknown".to_string()
         }
     }
 }

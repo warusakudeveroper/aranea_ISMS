@@ -2,7 +2,7 @@ import { useState, useEffect } from "react"
 import type { Camera } from "@/types/api"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Camera as CameraIcon, XCircle, Settings, Globe, Clock } from "lucide-react"
+import { Camera as CameraIcon, XCircle, Settings, Globe, Clock, WifiOff, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Format timestamp as MM/DD HH:mm:ss (compact, no year)
@@ -14,6 +14,40 @@ function formatTimestamp(timestamp: number): string {
   const minutes = String(date.getMinutes()).padStart(2, '0')
   const seconds = String(date.getSeconds()).padStart(2, '0')
   return `${month}/${day} ${hours}:${minutes}:${seconds}`
+}
+
+// Format relative time for error display (e.g., "5分前", "2時間前")
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now()
+  const diffMs = now - timestamp
+  const diffSec = Math.floor(diffMs / 1000)
+  const diffMin = Math.floor(diffSec / 60)
+  const diffHour = Math.floor(diffMin / 60)
+
+  if (diffSec < 60) return `${diffSec}秒前`
+  if (diffMin < 60) return `${diffMin}分前`
+  if (diffHour < 24) return `${diffHour}時間前`
+  return `${Math.floor(diffHour / 24)}日前`
+}
+
+// Format last update time for error display
+function formatLastUpdate(timestamp: number | undefined): string {
+  if (!timestamp) return "更新なし"
+  const date = new Date(timestamp)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${hours}:${minutes}:${seconds}`
+}
+
+// Shorten error message for display
+function shortenError(error: string | undefined): string {
+  if (!error) return ""
+  if (error === "timeout") return "応答なし"
+  if (error.includes("No route")) return "到達不能"
+  if (error.includes("Connection refused")) return "接続拒否"
+  if (error.includes("Connection reset")) return "接続切断"
+  return error.slice(0, 10)
 }
 
 // Animation styles
@@ -43,18 +77,23 @@ interface CameraTileProps {
   // Display settings
   imageMode?: ImageMode
   displayMode?: DisplayMode
+  /** @deprecated aspectRatio is no longer used - tiles fill container fully */
   aspectRatio?: AspectRatio
+  // Camera response status
+  /** Camera took >10 seconds to respond (slow network warning) */
+  isSlowCamera?: boolean
+  /** Camera has an error (timeout, no route, connection refused, etc.) */
+  isTimeout?: boolean
+  /** Error message to display (e.g., "timeout", "No route to host") */
+  errorMessage?: string
+  /** Maximum tile height in pixels (for no-scroll layout) */
+  maxHeight?: number
+  /** Camera is currently on-air in SuggestPane (yellow highlight) */
+  isOnAir?: boolean
 }
 
-// Get Tailwind aspect ratio class
-function getAspectClass(ratio: AspectRatio): string {
-  switch (ratio) {
-    case "square": return "aspect-square"
-    case "4/3": return "aspect-[4/3]"
-    case "video": return "aspect-video"
-    default: return "aspect-square"
-  }
-}
+// Note: getAspectClass removed - tiles now fill container fully
+// and rely on object-fit: cover for proper image display
 
 export function CameraTile({
   camera,
@@ -69,7 +108,12 @@ export function CameraTile({
   animationStyle = "slide-down",
   imageMode = "trim",
   displayMode = "overlay",
-  aspectRatio = "square",
+  // aspectRatio is deprecated and ignored
+  isSlowCamera = false,
+  isTimeout = false,
+  errorMessage,
+  maxHeight,
+  isOnAir = false,
 }: CameraTileProps) {
   // Track current and next snapshot URLs for animation
   const [currentUrl, setCurrentUrl] = useState(snapshotUrl)
@@ -131,33 +175,53 @@ export function CameraTile({
   // CSS class for image fit mode
   const imageObjectClass = imageMode === "fit" ? "object-contain" : "object-cover"
 
-  // CSS class for aspect ratio
-  const aspectClass = getAspectClass(aspectRatio)
+  // Note: aspectRatio prop is no longer used - container fills tile fully,
+  // and object-fit: cover handles image aspect ratio automatically
 
   // Overlay mode: image fills entire card, info overlaid with shadow
   if (displayMode === "overlay") {
     return (
       <Card
         className={cn(
-          "group cursor-pointer transition-all hover:shadow-lg overflow-hidden",
+          "group cursor-pointer transition-all hover:shadow-lg overflow-hidden bg-black h-full",
           isOffline && "opacity-60",
-          severity >= 2 && "ring-2 ring-yellow-500",
-          severity >= 3 && "ring-2 ring-red-500"
+          // On-air highlight takes priority (yellow border - solid, no glow)
+          isOnAir && "ring-4 ring-yellow-400",
+          !isOnAir && severity >= 2 && "ring-2 ring-yellow-500",
+          !isOnAir && severity >= 3 && "ring-2 ring-red-500",
+          !isOnAir && isTimeout && "ring-2 ring-orange-500"
         )}
+        style={{ maxHeight: maxHeight ? `${maxHeight}px` : undefined }}
         onClick={onClick}
       >
-        <div className={cn("relative bg-muted overflow-hidden", aspectClass)}>
-          {isOffline || imageError ? (
+        <div className="relative bg-muted overflow-hidden h-full w-full">
+          {/* Priority: 1. Backend error (isTimeout) → 2. Offline/image error → 3. Normal image */}
+          {isTimeout ? (
+            // Error placeholder - absolute fill + flex center
+            <div className="absolute inset-0 bg-orange-950/80 flex items-center justify-center">
+              <div className="flex flex-col items-center text-center">
+                <AlertCircle className="h-10 w-10 text-orange-400 mb-2" />
+                <span className="text-orange-300 text-sm font-medium">
+                  {shortenError(errorMessage) || "接続エラー"}
+                </span>
+                <span className="text-yellow-400 text-xs font-medium mt-1">
+                  最終: {formatLastUpdate(lastSnapshotAt)}
+                  {lastSnapshotAt && ` (${formatRelativeTime(lastSnapshotAt)})`}
+                </span>
+              </div>
+            </div>
+          ) : isOffline || imageError ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <XCircle className="h-12 w-12 text-muted-foreground" />
             </div>
           ) : (
             <>
-              {/* Current image */}
+              {/* Current image - fills container, object-cover handles aspect ratio */}
               <img
                 src={currentUrl}
                 alt={camera.name}
-                className={cn("h-full w-full", imageObjectClass)}
+                className={cn("absolute inset-0 w-full h-full", imageObjectClass)}
+                style={{ objectPosition: 'center center' }}
                 loading="lazy"
                 onError={() => setImageError(true)}
               />
@@ -167,30 +231,41 @@ export function CameraTile({
                   src={nextUrl}
                   alt={camera.name}
                   className={cn(
-                    "absolute inset-0 h-full w-full",
+                    "absolute inset-0 w-full h-full",
                     imageObjectClass,
                     animationClass
                   )}
+                  style={{ objectPosition: 'center center' }}
                   onError={() => setImageError(true)}
                 />
               )}
             </>
           )}
 
+          {/* Slow camera indicator - wifi icon (top left if no event badge) */}
+          {isSlowCamera && !isTimeout && (
+            <div
+              className="absolute top-1 left-1 p-1 rounded-full bg-orange-500/90 text-white"
+              title="通信が不安定 (10秒以上)"
+            >
+              <WifiOff className="h-4 w-4" />
+            </div>
+          )}
+
           {/* Settings icon - top right (always with shadow bg) */}
           <button
             onClick={handleSettingsClick}
-            className="absolute top-1 right-1 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute top-1 right-1 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
             title="カメラ設定"
           >
             <Settings className="h-4 w-4" />
           </button>
 
-          {/* Primary event badge */}
+          {/* Primary event badge (shifted right if slow camera) */}
           {primaryEvent && (
             <Badge
               variant={severityVariant}
-              className="absolute top-1 left-1"
+              className={cn("absolute top-1", isSlowCamera ? "left-8" : "left-1")}
             >
               {primaryEvent}
             </Badge>
@@ -229,25 +304,45 @@ export function CameraTile({
   return (
     <Card
       className={cn(
-        "group cursor-pointer transition-all hover:shadow-lg overflow-hidden",
+        "group cursor-pointer transition-all hover:shadow-lg overflow-hidden h-full",
         isOffline && "opacity-60",
-        severity >= 2 && "ring-2 ring-yellow-500",
-        severity >= 3 && "ring-2 ring-red-500"
+        // On-air highlight takes priority (yellow border - solid, no glow)
+        isOnAir && "ring-4 ring-yellow-400",
+        !isOnAir && severity >= 2 && "ring-2 ring-yellow-500",
+        !isOnAir && severity >= 3 && "ring-2 ring-red-500",
+        !isOnAir && isTimeout && "ring-2 ring-orange-500"
       )}
+      style={{ maxHeight: maxHeight ? `${maxHeight}px` : undefined }}
       onClick={onClick}
     >
-      <div className={cn("relative bg-muted overflow-hidden", aspectClass)}>
-        {isOffline || imageError ? (
+      <div className="relative bg-muted overflow-hidden h-full w-full">
+        {/* Priority: 1. Backend error (isTimeout) → 2. Offline/image error → 3. Normal image */}
+        {isTimeout ? (
+          // Error placeholder - absolute fill + flex center
+          <div className="absolute inset-0 bg-orange-950/80 flex items-center justify-center">
+            <div className="flex flex-col items-center text-center">
+              <AlertCircle className="h-10 w-10 text-orange-400 mb-2" />
+              <span className="text-orange-300 text-sm font-medium">
+                {shortenError(errorMessage) || "接続エラー"}
+              </span>
+              <span className="text-yellow-400 text-xs font-medium mt-1">
+                最終: {formatLastUpdate(lastSnapshotAt)}
+                {lastSnapshotAt && ` (${formatRelativeTime(lastSnapshotAt)})`}
+              </span>
+            </div>
+          </div>
+        ) : isOffline || imageError ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <XCircle className="h-12 w-12 text-muted-foreground" />
           </div>
         ) : (
           <>
-            {/* Current image */}
+            {/* Current image - fills container, object-cover handles aspect ratio */}
             <img
               src={currentUrl}
               alt={camera.name}
-              className={cn("h-full w-full", imageObjectClass)}
+              className={cn("absolute inset-0 w-full h-full", imageObjectClass)}
+              style={{ objectPosition: 'center center' }}
               loading="lazy"
               onError={() => setImageError(true)}
             />
@@ -257,19 +352,29 @@ export function CameraTile({
                 src={nextUrl}
                 alt={camera.name}
                 className={cn(
-                  "absolute inset-0 h-full w-full",
+                  "absolute inset-0 w-full h-full",
                   imageObjectClass,
                   animationClass
                 )}
+                style={{ objectPosition: 'center center' }}
                 onError={() => setImageError(true)}
               />
             )}
           </>
         )}
+        {/* Slow camera indicator - wifi icon (top left) */}
+        {isSlowCamera && !isTimeout && (
+          <div
+            className="absolute top-1 left-1 p-1 rounded-full bg-orange-500/90 text-white"
+            title="通信が不安定 (10秒以上)"
+          >
+            <WifiOff className="h-4 w-4" />
+          </div>
+        )}
         {/* Settings icon - top right */}
         <button
           onClick={handleSettingsClick}
-          className="absolute top-1 right-1 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+          className="absolute top-1 right-1 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
           title="カメラ設定"
         >
           <Settings className="h-4 w-4" />
@@ -277,7 +382,7 @@ export function CameraTile({
         {primaryEvent && (
           <Badge
             variant={severityVariant}
-            className="absolute bottom-2 left-2"
+            className={cn("absolute bottom-2", isSlowCamera ? "left-8" : "left-2")}
           >
             {primaryEvent}
           </Badge>

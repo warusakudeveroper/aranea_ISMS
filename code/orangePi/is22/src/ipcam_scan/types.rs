@@ -46,6 +46,92 @@ impl Default for CameraFamily {
     }
 }
 
+/// RTSP URL template per camera family
+/// Used to generate both main and sub stream URLs during device registration
+/// FIX-004: rtsp_sub自動登録対応
+#[derive(Debug, Clone)]
+pub struct RtspTemplate {
+    pub main_path: &'static str,
+    pub sub_path: &'static str,
+    pub default_port: u16,
+}
+
+impl RtspTemplate {
+    /// Get RTSP template for a camera family
+    /// Based on manufacturer documentation and verified device behavior
+    pub fn for_family(family: &CameraFamily) -> Self {
+        match family {
+            // TP-Link Tapo: /stream1 (main), /stream2 (sub)
+            CameraFamily::Tapo => Self {
+                main_path: "/stream1",
+                sub_path: "/stream2",
+                default_port: 554,
+            },
+            // TP-Link VIGI: Same as Tapo
+            CameraFamily::Vigi => Self {
+                main_path: "/stream1",
+                sub_path: "/stream2",
+                default_port: 554,
+            },
+            // Hikvision: /Streaming/Channels/101 (main), /102 (sub)
+            CameraFamily::Hikvision => Self {
+                main_path: "/Streaming/Channels/101",
+                sub_path: "/Streaming/Channels/102",
+                default_port: 554,
+            },
+            // Dahua: /cam/realmonitor?channel=1&subtype=0 (main), subtype=1 (sub)
+            CameraFamily::Dahua => Self {
+                main_path: "/cam/realmonitor?channel=1&subtype=0",
+                sub_path: "/cam/realmonitor?channel=1&subtype=1",
+                default_port: 554,
+            },
+            // Axis: /axis-media/media.amp (main), /axis-media/media.amp?videocodec=h264&resolution=640x480 (sub)
+            CameraFamily::Axis => Self {
+                main_path: "/axis-media/media.amp",
+                sub_path: "/axis-media/media.amp?videocodec=h264&resolution=640x480",
+                default_port: 554,
+            },
+            // Nest: Google cameras typically don't expose RTSP directly
+            CameraFamily::Nest => Self {
+                main_path: "/live",
+                sub_path: "/live",
+                default_port: 554,
+            },
+            // Other/Unknown: Use common /stream1, /stream2 pattern
+            CameraFamily::Other | CameraFamily::Unknown => Self {
+                main_path: "/stream1",
+                sub_path: "/stream2",
+                default_port: 554,
+            },
+        }
+    }
+
+    /// Generate RTSP URLs with credentials
+    /// Returns (rtsp_main, rtsp_sub)
+    pub fn generate_urls(
+        &self,
+        ip: &str,
+        port: Option<u16>,
+        username: &str,
+        password: &str,
+    ) -> (String, String) {
+        let port = port.unwrap_or(self.default_port);
+        // URL encode @ in password (common in generated passwords)
+        let encoded_pass = password.replace("@", "%40");
+
+        let main_url = format!(
+            "rtsp://{}:{}@{}:{}{}",
+            username, encoded_pass, ip, port, self.main_path
+        );
+        let sub_url = format!(
+            "rtsp://{}:{}@{}:{}{}",
+            username, encoded_pass, ip, port, self.sub_path
+        );
+
+        (main_url, sub_url)
+    }
+}
+
 /// Device status for registration flow
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type, Default)]
 #[serde(rename_all = "lowercase")]
@@ -139,102 +225,6 @@ pub struct TrialCredential {
     pub priority: u8,  // 1-10, 試行順序
 }
 
-/// Scan log event type
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ScanLogEventType {
-    ArpResponse,
-    PortOpen,
-    OuiMatch,
-    OnvifProbe,
-    RtspProbe,
-    DeviceClassified,
-    CredentialTrial,
-    Info,
-    Warning,  // ネットワーク到達性などの警告
-    Error,
-}
-
-/// Scan log entry - ESP32シリアルプリントレベルの詳細ログ
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanLogEntry {
-    pub timestamp: DateTime<Utc>,
-    pub ip_address: String,
-    pub event_type: ScanLogEventType,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub port: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub oui_vendor: Option<String>,
-}
-
-impl ScanLogEntry {
-    pub fn new(ip: &str, event_type: ScanLogEventType, message: &str) -> Self {
-        Self {
-            timestamp: chrono::Utc::now(),
-            ip_address: ip.to_string(),
-            event_type,
-            message: message.to_string(),
-            port: None,
-            oui_vendor: None,
-        }
-    }
-
-    pub fn with_port(mut self, port: u16) -> Self {
-        self.port = Some(port);
-        self
-    }
-
-    pub fn with_oui(mut self, vendor: &str) -> Self {
-        self.oui_vendor = Some(vendor.to_string());
-        self
-    }
-}
-
-/// Scan job
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanJob {
-    pub job_id: Uuid,
-    pub targets: Vec<String>,
-    pub mode: ScanMode,
-    pub ports: Vec<u16>,
-    pub timeout_ms: u32,
-    pub concurrency: u8,
-    pub status: JobStatus,
-    pub started_at: Option<DateTime<Utc>>,
-    pub ended_at: Option<DateTime<Utc>>,
-    pub summary: Option<JobSummary>,
-    pub created_at: DateTime<Utc>,
-    /// リアルタイムスキャンログ
-    #[serde(default)]
-    pub logs: Vec<ScanLogEntry>,
-    /// 現在のスキャンフェーズ
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_phase: Option<String>,
-    /// 進捗パーセント (0-100)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub progress_percent: Option<u8>,
-}
-
-/// Job summary
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JobSummary {
-    pub total_ips: u32,
-    pub hosts_alive: u32,
-    pub cameras_found: u32,
-    pub cameras_verified: u32,
-}
-
-/// Scan job request
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScanJobRequest {
-    pub targets: Vec<String>,
-    pub mode: Option<ScanMode>,
-    pub ports: Option<Vec<u16>>,
-    pub timeout_ms: Option<u32>,
-    pub concurrency: Option<u8>,
-}
-
 /// Scanned device
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScannedDevice {
@@ -316,8 +306,10 @@ pub struct ApproveDeviceResponse {
     pub camera_id: String,
     pub lacis_id: String,
     pub ip_address: String,
-    /// RTSP URL with credentials for go2rtc registration
-    pub rtsp_url: Option<String>,
+    /// RTSP main stream URL with credentials (FIX-004)
+    pub rtsp_main: Option<String>,
+    /// RTSP sub stream URL with credentials (FIX-004)
+    pub rtsp_sub: Option<String>,
 }
 
 /// Batch verify request

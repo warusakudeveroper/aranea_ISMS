@@ -6,6 +6,65 @@ export interface ApiResponse<T> {
 
 export type CameraFamily = 'tapo' | 'vigi' | 'nest' | 'axis' | 'hikvision' | 'dahua' | 'other' | 'unknown';
 
+// =============================================================================
+// ONVIF Extended Data Types
+// =============================================================================
+
+// GetScopes response data
+export interface OnvifScopes {
+  name?: string;           // e.g., "Tapo C100"
+  hardware?: string;       // e.g., "C100"
+  profile?: string;        // e.g., "Streaming"
+  location?: string;       // e.g., "Hong Kong"
+  type?: string;           // e.g., "NetworkVideoTransmitter"
+  raw_scopes?: string[];   // 生のスコープURI配列
+}
+
+// GetNetworkInterfaces response data
+export interface OnvifNetworkInterface {
+  name: string;            // e.g., "eth0"
+  mac_address: string;     // e.g., "3C:84:6A:73:18:3A"
+  enabled?: boolean;
+  ipv4?: {
+    address: string;
+    prefix_length: number;
+    dhcp: boolean;
+  };
+}
+
+// GetCapabilities response data
+export interface OnvifCapabilities {
+  analytics?: {
+    supported: boolean;
+    rule_support: boolean;
+    analytics_module_support: boolean;
+    xaddr?: string;
+  };
+  device?: {
+    xaddr?: string;
+    io_support?: boolean;
+    io_input_connectors?: number;
+    io_output_connectors?: number;
+  };
+  events?: {
+    xaddr?: string;
+    ws_subscription_support: boolean;
+    ws_pull_point_support: boolean;
+  };
+  imaging?: {
+    xaddr?: string;
+  };
+  media?: {
+    xaddr?: string;
+    rtp_multicast: boolean;
+    rtp_tcp: boolean;
+    rtp_rtsp_tcp: boolean;
+  };
+  ptz?: {
+    xaddr?: string;
+  };
+}
+
 export interface Camera {
   camera_id: string;
   name: string;
@@ -31,9 +90,19 @@ export interface Camera {
   suggest_policy_weight: number;
   camera_context: Record<string, unknown> | null;
   rotation: number;             // 表示回転角度 (0/90/180/270)
+  fit_mode: 'fit' | 'trim';     // fit=画像全体収める, trim=カード埋める(デフォルト)
   fid: string | null;           // ファシリティID
   tid: string | null;           // テナントID
   sort_order: number;           // ドラッグ並べ替え用順序
+  // === AI分析設定 ===
+  preset_id: string | null;     // 利用するプリセットID
+  preset_version: string | null; // プリセットバージョン
+  ai_enabled: boolean;          // AI分析有効フラグ
+  ai_interval_sec: number;      // AI分析間隔（秒）
+  // === 閾値オーバーライド (migration 014) ===
+  conf_override: number | null;  // confidence閾値 (0.20-0.80) - カメラ個別設定
+  nms_threshold: number | null;  // NMS閾値 (0.30-0.60) - カメラ個別設定
+  par_threshold: number | null;  // PAR閾値 (0.30-0.80) - カメラ個別設定
   // === ONVIF デバイス情報 ===
   serial_number: string | null;
   hardware_id: string | null;
@@ -69,6 +138,10 @@ export interface Camera {
   audio_codec: string | null;
   // === ONVIFプロファイル ===
   onvif_profiles: Record<string, unknown>[] | null;
+  // === ONVIF拡張データ ===
+  onvif_scopes: OnvifScopes | null;
+  onvif_network_interfaces: OnvifNetworkInterface[] | null;
+  onvif_capabilities: OnvifCapabilities | null;
   // === 検出メタ情報 ===
   discovery_method: string | null;
   last_verified_at: string | null;
@@ -108,10 +181,20 @@ export interface UpdateCameraRequest {
   // === カメラコンテキスト・表示 ===
   camera_context?: Record<string, unknown>;
   rotation?: number;
+  fit_mode?: 'fit' | 'trim';
   sort_order?: number;
   // === 所属情報 ===
   fid?: string;
   tid?: string;
+  // === AI分析設定 ===
+  preset_id?: string;
+  preset_version?: string;
+  ai_enabled?: boolean;
+  ai_interval_sec?: number;
+  // === 閾値オーバーライド (migration 014) ===
+  conf_override?: number | null;  // confidence閾値 (0.20-0.80) - null=プリセット値使用
+  nms_threshold?: number | null;  // NMS閾値 (0.30-0.60) - null=プリセット値使用
+  par_threshold?: number | null;  // PAR閾値 (0.30-0.80) - null=プリセット値使用
   // === ONVIF デバイス情報 ===
   serial_number?: string;
   hardware_id?: string;
@@ -147,6 +230,10 @@ export interface UpdateCameraRequest {
   audio_codec?: string;
   // === ONVIFプロファイル ===
   onvif_profiles?: Record<string, unknown>[];
+  // === ONVIF拡張データ ===
+  onvif_scopes?: OnvifScopes;
+  onvif_network_interfaces?: OnvifNetworkInterface[];
+  onvif_capabilities?: OnvifCapabilities;
   // === 検出メタ情報 ===
   discovery_method?: string;
 }
@@ -409,10 +496,11 @@ export interface DetectionLog {
   log_id: number;
   tid: string;
   fid: string;
+  camera_id: string;
   lacis_id: string | null;
   captured_at: string;
+  analyzed_at: string;
   primary_event: string;
-  detected: boolean;
   severity: number;
   confidence: number;
   count_hint: number;
@@ -422,14 +510,33 @@ export interface DetectionLog {
   person_details: PersonDetail[] | null;
   suspicious: SuspiciousInfo | null;
   frame_diff: FrameDiff | null;
+  loitering_detected: boolean;
   preset_id: string | null;
   preset_version: string | null;
+  output_schema: string | null;
+  context_applied: boolean;
   camera_context: CameraContext | null;
-  image_path: string | null;
-  image_size_bytes: number | null;
+  is21_log: Record<string, unknown>;  // Raw IS21 response JSON
+  image_path_local: string;           // Local filesystem path
+  image_path_cloud: string | null;    // Cloud storage path (if uploaded)
   processing_ms: number | null;
+  polling_cycle_id: string | null;
+  schema_version: string;
+  timings: ProcessingTimings | null;
   synced_to_bq: boolean;
+  synced_at: string | null;
   created_at: string;
+}
+
+// Processing timing breakdown for bottleneck analysis
+export interface ProcessingTimings {
+  total_ms: number | null;
+  snapshot_ms: number | null;
+  is21_roundtrip_ms: number | null;
+  is21_inference_ms: number | null;
+  is21_yolo_ms: number | null;
+  is21_par_ms: number | null;
+  save_ms: number | null;
 }
 
 // Bounding box from AI analysis

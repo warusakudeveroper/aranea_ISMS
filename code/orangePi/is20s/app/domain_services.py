@@ -261,8 +261,10 @@ class DomainServiceManager:
 
             self._cache_misses += 1
 
-            # ドット区切りを考慮したマッチング
+            # 2パスマッチング: 具体的なパターン（dotted）を優先
             result: Tuple[Optional[str], Optional[str], Optional[str]] = (None, None, None)
+
+            # Pass 1: dotted patterns（より具体的）を先にチェック
             for pattern, info in self._data.items():
                 if "." in pattern:
                     # パターンにドットがある場合は厳密マッチ
@@ -275,11 +277,14 @@ class DomainServiceManager:
                     ):
                         result = (info.get("service"), info.get("category"), info.get("role"))
                         break
-                else:
-                    # パターンにドットがない場合は部分マッチ
-                    if pattern in domain_lower:
-                        result = (info.get("service"), info.get("category"), info.get("role"))
-                        break
+
+            # Pass 2: dotted patternでマッチしなかった場合のみ substring patterns をチェック
+            if result == (None, None, None):
+                for pattern, info in self._data.items():
+                    if "." not in pattern:
+                        # パターンにドットがない場合は部分マッチ
+                        if pattern in domain_lower:
+                            result = (info.get("service"), info.get("category"), info.get("role"))
 
             # キャッシュに保存
             self._cache[domain_lower] = result

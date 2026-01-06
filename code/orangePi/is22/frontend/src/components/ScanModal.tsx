@@ -11,66 +11,13 @@ import type {
   CategorizedDevice,
 } from "@/types/api"
 import { DEVICE_CATEGORIES } from "@/types/api"
-
-// ===== LocalStorage cache for scan results (is22_14_UI改善設計_v1.1.md Section 1) =====
-const SCAN_CACHE_KEY = "is22_lastScanResult"
-const CACHE_EXPIRY_HOURS = 24
-
-interface CachedScanResult {
-  timestamp: string
-  expiry: string
-  subnets: string[]
-  devices: ScannedDevice[]
-  summary: {
-    total_ips: number
-    hosts_alive: number
-    cameras_found: number
-    cameras_verified: number
-  } | null
-}
-
-function saveScanResultToCache(
-  devices: ScannedDevice[],
-  subnets: string[],
-  summary: CachedScanResult["summary"]
-): void {
-  const now = new Date()
-  const expiry = new Date(now.getTime() + CACHE_EXPIRY_HOURS * 60 * 60 * 1000)
-  const cache: CachedScanResult = {
-    timestamp: now.toISOString(),
-    expiry: expiry.toISOString(),
-    subnets,
-    devices,
-    summary,
-  }
-  localStorage.setItem(SCAN_CACHE_KEY, JSON.stringify(cache))
-}
-
-function loadScanResultFromCache(): CachedScanResult | null {
-  try {
-    const cached = localStorage.getItem(SCAN_CACHE_KEY)
-    if (!cached) return null
-
-    const data: CachedScanResult = JSON.parse(cached)
-    const now = new Date()
-    const expiry = new Date(data.expiry)
-
-    // 期限切れチェック
-    if (now > expiry) {
-      localStorage.removeItem(SCAN_CACHE_KEY)
-      return null
-    }
-
-    return data
-  } catch {
-    localStorage.removeItem(SCAN_CACHE_KEY)
-    return null
-  }
-}
-
-function clearScanResultCache(): void {
-  localStorage.removeItem(SCAN_CACHE_KEY)
-}
+import {
+  clearScanResultCache,
+  loadScanResultFromCache,
+  saveScanResultToCache,
+  type CachedScanResult,
+} from "@/utils/scanCache"
+import { categorizeAndSortDevices } from "@/utils/deviceCategorization"
 import {
   Dialog,
   DialogContent,
@@ -645,7 +592,13 @@ function DeviceCard({
               <span className="font-mono">{device.mac}</span>
             )}
             {device.oui_vendor && (
-              <Badge variant="outline" className="text-xs px-1 py-0">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs px-1 py-0",
+                  device.oui_vendor === "TP-LINK" && "text-red-600 font-bold border-red-400"
+                )}
+              >
                 {device.oui_vendor}
               </Badge>
             )}
@@ -710,90 +663,6 @@ function DeviceCard({
       </div>
     </Card>
   )
-}
-
-// Helper function: デバイスのカテゴリを判定
-// credential_status ベースのカテゴリ判定（is22_ScanModal_Credential_Trial_Spec.md Section 4）
-function categorizeDevice(
-  device: ScannedDevice,
-  registeredIPs: Set<string>
-): DeviceCategory {
-  // a: 登録済み - camerasテーブルに存在
-  if (registeredIPs.has(device.ip)) {
-    return 'a'
-  }
-
-  const detection = device.detection
-  if (!detection) {
-    return 'e' // 検出情報なし → 非カメラ
-  }
-
-  const { device_type, onvif_status, rtsp_status } = detection
-  const credentialStatus = device.credential_status
-
-  // カメラ確認済み（ONVIF/RTSP応答あり）の場合
-  if (device_type === 'camera_confirmed') {
-    // credential_status='success' → b: 登録可能（モデル名取得済み）
-    if (credentialStatus === 'success') {
-      return 'b'
-    }
-    // credential_status='failed' → c: 認証情報確認必要（全クレデンシャル不一致）
-    if (credentialStatus === 'failed') {
-      return 'c'
-    }
-    // credential_status='not_tried' の場合、プロトコル応答で判定
-    if (onvif_status === 'success' || rtsp_status === 'success') {
-      return 'b'
-    }
-    if (
-      onvif_status === 'auth_required' ||
-      onvif_status === 'auth_failed' ||
-      rtsp_status === 'auth_required' ||
-      rtsp_status === 'auth_failed'
-    ) {
-      return 'c'
-    }
-    // クレデンシャル試行なし＋認証問題なし → 登録可能とみなす
-    return 'b'
-  }
-
-  // カメラ可能性あり（Tapo系以外も含む）→ d: その他カメラ/汎用RTSP
-  if (device_type === 'camera_likely' || device_type === 'camera_possible' || device_type === 'nvr_likely') {
-    return 'd'
-  }
-
-  // それ以外 → e: 非カメラ
-  return 'e'
-}
-
-// Helper function: デバイスをカテゴリ化してソート
-function categorizeAndSortDevices(
-  devices: ScannedDevice[],
-  registeredIPs: Set<string>
-): CategorizedDevice[] {
-  const categorized = devices.map((device) => ({
-    ...device,
-    category: categorizeDevice(device, registeredIPs),
-    isRegistered: registeredIPs.has(device.ip),
-  }))
-
-  // ソート: カテゴリ順 → サブネット順 → IP順
-  const categoryOrder: Record<DeviceCategory, number> = { a: 0, b: 1, c: 2, d: 3, e: 4 }
-
-  return categorized.sort((a, b) => {
-    // カテゴリ順
-    const catDiff = categoryOrder[a.category] - categoryOrder[b.category]
-    if (catDiff !== 0) return catDiff
-
-    // サブネット順
-    const subnetDiff = (a.subnet || '').localeCompare(b.subnet || '')
-    if (subnetDiff !== 0) return subnetDiff
-
-    // IP順
-    const ipToNum = (ip: string) =>
-      ip.split('.').reduce((acc, oct) => acc * 256 + parseInt(oct, 10), 0)
-    return ipToNum(a.ip) - ipToNum(b.ip)
-  })
 }
 
 // Category section component with collapsible

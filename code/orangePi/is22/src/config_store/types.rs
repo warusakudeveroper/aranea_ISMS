@@ -3,9 +3,21 @@
 //! SSoT data structures for cameras, policies, and settings
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
+
+/// Deserializer for Option<Option<T>> to distinguish between:
+/// - Field not present in JSON → None (don't update)
+/// - Field is null in JSON → Some(None) (update to NULL)
+/// - Field has a value → Some(Some(value)) (update to value)
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
 
 /// Camera entity (SSoT)
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -35,6 +47,7 @@ pub struct Camera {
     pub suggest_policy_weight: i32,
     pub camera_context: Option<serde_json::Value>,
     pub rotation: i32,
+    pub fit_mode: String,  // 'fit' or 'trim'
     pub fid: Option<String>,
     pub tid: Option<String>,
     pub sort_order: i32,
@@ -78,11 +91,22 @@ pub struct Camera {
     pub audio_codec: Option<String>,
     // === ONVIFプロファイル ===
     pub onvif_profiles: Option<serde_json::Value>,
+    // === ONVIF拡張データ ===
+    pub onvif_scopes: Option<serde_json::Value>,
+    pub onvif_network_interfaces: Option<serde_json::Value>,
+    pub onvif_capabilities: Option<serde_json::Value>,
     // === 検出メタ情報 ===
     pub discovery_method: Option<String>,
     pub last_verified_at: Option<DateTime<Utc>>,
     pub last_rescan_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,
+    // === 閾値オーバーライド (migration 014) ===
+    /// YOLO confidence threshold override (0.20-0.80), None = use preset default
+    pub conf_override: Option<f32>,
+    /// NMS threshold override (0.30-0.60), None = use preset default
+    pub nms_threshold: Option<f32>,
+    /// PAR attribute threshold override (0.30-0.80), None = use preset default
+    pub par_threshold: Option<f32>,
     // === タイムスタンプ ===
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -192,6 +216,7 @@ pub struct UpdateCameraRequest {
     // === カメラコンテキスト・表示 ===
     pub camera_context: Option<serde_json::Value>,
     pub rotation: Option<i32>,
+    pub fit_mode: Option<String>,
     pub sort_order: Option<i32>,
     // === 所属情報 ===
     pub fid: Option<String>,
@@ -236,8 +261,23 @@ pub struct UpdateCameraRequest {
     pub audio_codec: Option<String>,
     // === ONVIFプロファイル ===
     pub onvif_profiles: Option<serde_json::Value>,
+    // === ONVIF拡張データ ===
+    pub onvif_scopes: Option<serde_json::Value>,
+    pub onvif_network_interfaces: Option<serde_json::Value>,
+    pub onvif_capabilities: Option<serde_json::Value>,
     // === 検出メタ情報 ===
     pub discovery_method: Option<String>,
+    // === 閾値オーバーライド (migration 014) ===
+    /// YOLO confidence threshold override (0.20-0.80)
+    /// Uses double option to distinguish: None=don't update, Some(None)=set to NULL, Some(Some(v))=set to v
+    #[serde(default, deserialize_with = "double_option")]
+    pub conf_override: Option<Option<f32>>,
+    /// NMS threshold override (0.30-0.60)
+    #[serde(default, deserialize_with = "double_option")]
+    pub nms_threshold: Option<Option<f32>>,
+    /// PAR attribute threshold override (0.30-0.80)
+    #[serde(default, deserialize_with = "double_option")]
+    pub par_threshold: Option<Option<f32>>,
 }
 
 /// Schema version entity

@@ -38,6 +38,13 @@
 | is22_11 | Suggest設計 | サジェストエンジン・スコアリング |
 | is22_12 | 長時間運用設計 | リングバッファ・クリーンアップ |
 
+#### Google/Nest (SDM) 追加設計
+| 文書番号 | 文書名 | 概要 |
+|---------|--------|------|
+| GD-01 | GoogleDevices_introduction_BasicDesign | Nest Doorbell を SDM で統合する基本設計 |
+| GD-02 | GoogleDevices_introduction_Environment | SDM 設定の事前準備・認可取得手順（コード外） |
+| GD-03 | GoogleDevices_introduction_DetailedDesign | SDM 連携の詳細設計（バックエンド/フロント/運用/テスト） |
+
 ### 共通
 | 文書番号 | 文書名 | 概要 |
 |---------|--------|------|

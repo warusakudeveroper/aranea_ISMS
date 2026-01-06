@@ -60,6 +60,14 @@ pub struct Preset {
     /// Output schema name
     pub output_schema: Option<String>,
 
+    // v1.9 Threshold overrides (hints_json経由でis21に渡す)
+    /// YOLO confidence threshold override (0.2-0.8)
+    pub conf_override: Option<f32>,
+    /// NMS threshold override (0.3-0.6)
+    pub nms_threshold: Option<f32>,
+    /// PAR threshold override (0.3-0.8)
+    pub par_threshold: Option<f32>,
+
     // Polling settings (suggested)
     /// Suggested polling interval in seconds
     pub suggested_interval_sec: u32,
@@ -86,6 +94,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: None,
+            conf_override: None,
+            nms_threshold: None,
+            par_threshold: None,
             suggested_interval_sec: 15,
         }
     }
@@ -104,6 +115,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: Some("person_detailed".to_string()),
+            conf_override: Some(0.3),  // 低めに設定して人物を逃さない
+            nms_threshold: None,
+            par_threshold: Some(0.4),  // 詳細属性を多く取得
             suggested_interval_sec: 10,
         }
     }
@@ -122,6 +136,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: Some("parking".to_string()),
+            conf_override: Some(0.45),  // 遠距離で誤検知を抑制
+            nms_threshold: None,
+            par_threshold: None,
             suggested_interval_sec: 20,
         }
     }
@@ -140,6 +157,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: Some("person_detailed".to_string()),
+            conf_override: Some(0.35),  // 近距離で確実に検出
+            nms_threshold: None,
+            par_threshold: Some(0.4),  // 詳細属性を取得
             suggested_interval_sec: 10,
         }
     }
@@ -158,6 +178,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: None,
+            conf_override: None,
+            nms_threshold: None,
+            par_threshold: None,
             suggested_interval_sec: 15,
         }
     }
@@ -176,6 +199,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: None,
+            conf_override: Some(0.5),  // 遠距離・屋外で誤検知抑制
+            nms_threshold: None,
+            par_threshold: None,
             suggested_interval_sec: 20,
         }
     }
@@ -194,6 +220,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: None,
+            conf_override: Some(0.3),  // 低照度で検出漏れを防ぐ
+            nms_threshold: None,
+            par_threshold: Some(0.5),  // 低照度では属性認識精度が落ちる
             suggested_interval_sec: 15,
         }
     }
@@ -212,6 +241,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: false, // Too many boxes
             output_schema: Some("crowd".to_string()),
+            conf_override: Some(0.25),  // 多人数検出のため低閾値
+            nms_threshold: Some(0.4),   // 重複排除を弱めに
+            par_threshold: None,        // 群衆では属性不要
             suggested_interval_sec: 30,
         }
     }
@@ -230,6 +262,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: Some("person_detailed".to_string()),
+            conf_override: Some(0.35),  // 近距離で確実に検出
+            nms_threshold: None,
+            par_threshold: Some(0.4),  // 顧客属性を詳細に取得
             suggested_interval_sec: 10,
         }
     }
@@ -248,6 +283,9 @@ impl Preset {
             enable_frame_diff: false, // Less motion expected
             return_bboxes: true,
             output_schema: None,
+            conf_override: None,
+            nms_threshold: None,
+            par_threshold: None,
             suggested_interval_sec: 30,
         }
     }
@@ -266,6 +304,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: None,
+            conf_override: Some(0.5),  // 遠距離で誤検知抑制
+            nms_threshold: None,
+            par_threshold: None,
             suggested_interval_sec: 20,
         }
     }
@@ -284,6 +325,9 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: None,
+            conf_override: None,
+            nms_threshold: None,
+            par_threshold: None,
             suggested_interval_sec: 15,
         }
     }
@@ -295,6 +339,9 @@ impl Preset {
             && self.distance.is_none()
             && self.expected_objects.is_empty()
             && self.excluded_objects.is_empty()
+            && self.conf_override.is_none()
+            && self.nms_threshold.is_none()
+            && self.par_threshold.is_none()
         {
             return None;
         }
@@ -315,6 +362,9 @@ impl Preset {
             busy_hours: None,
             quiet_hours: None,
             previous_frame: None,
+            conf_override: self.conf_override,
+            nms_threshold: self.nms_threshold,
+            par_threshold: self.par_threshold,
         })
     }
 

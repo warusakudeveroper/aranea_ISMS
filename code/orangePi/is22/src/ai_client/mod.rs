@@ -82,6 +82,19 @@ pub struct CameraContext {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_frame: Option<PreviousFrameInfo>,
+
+    // v1.9 Threshold overrides (hints_json経由でis21に渡す)
+    /// YOLO confidence threshold override (0.2-0.8)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conf_override: Option<f32>,
+
+    /// NMS threshold override (0.3-0.6)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nms_threshold: Option<f32>,
+
+    /// PAR threshold override (0.3-0.8)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub par_threshold: Option<f32>,
 }
 
 /// Previous frame metadata for context
@@ -167,6 +180,8 @@ pub struct SuspiciousInfo {
 /// Frame diff analysis result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrameDiff {
+    /// Whether frame diff was performed (may be absent if no previous frame)
+    #[serde(default)]
     pub enabled: bool,
 
     #[serde(default)]
@@ -224,11 +239,66 @@ pub struct SceneChangeInfo {
 }
 
 /// Camera status from frame analysis
+/// Can be a structured object or a string like "no_reference"
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CameraStatus {
-    pub obscured: bool,
-    pub moved: bool,
-    pub stable: bool,
+#[serde(untagged)]
+pub enum CameraStatus {
+    /// Full camera status from frame diff analysis
+    Status {
+        obscured: bool,
+        moved: bool,
+        stable: bool,
+    },
+    /// Simple string status (e.g., "no_reference" when no previous frame)
+    Simple(String),
+}
+
+impl CameraStatus {
+    /// Check if this is "no_reference" status
+    pub fn is_no_reference(&self) -> bool {
+        matches!(self, CameraStatus::Simple(s) if s == "no_reference")
+    }
+
+    /// Get as structured status if available
+    pub fn as_status(&self) -> Option<(bool, bool, bool)> {
+        match self {
+            CameraStatus::Status { obscured, moved, stable } => Some((*obscured, *moved, *stable)),
+            CameraStatus::Simple(_) => None,
+        }
+    }
+}
+
+/// Performance metrics from IS21 (Phase 4)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceInfo {
+    /// Total inference time in milliseconds
+    pub inference_ms: i64,
+
+    /// YOLO detection time in milliseconds
+    #[serde(default)]
+    pub yolo_ms: i64,
+
+    /// PAR (Person Attribute Recognition) time in milliseconds
+    #[serde(default)]
+    pub par_ms: i64,
+}
+
+/// Preset applied info from IS21 (Phase 4)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetAppliedInfo {
+    /// LacisID used for preset lookup
+    #[serde(default)]
+    pub lacis_id: Option<String>,
+
+    /// Preset ID that was applied
+    pub preset_id: String,
+
+    /// Preset version that was applied
+    pub preset_version: String,
+
+    /// Whether preset was loaded from cache
+    #[serde(default)]
+    pub from_cache: bool,
 }
 
 /// Inference response (matches IS21 /v1/analyze response - full schema)
@@ -279,6 +349,14 @@ pub struct AnalyzeResponse {
 
     #[serde(default)]
     pub frame_diff: Option<FrameDiff>,
+
+    // Phase 4: Performance metrics from IS21
+    #[serde(default)]
+    pub performance: Option<PerformanceInfo>,
+
+    // Phase 4: Preset applied info from IS21
+    #[serde(default)]
+    pub preset_applied: Option<PresetAppliedInfo>,
 }
 
 impl AiClient {
@@ -543,10 +621,15 @@ mod tests {
             busy_hours: None,
             quiet_hours: None,
             previous_frame: None,
+            conf_override: Some(0.45),
+            nms_threshold: None,
+            par_threshold: None,
         };
 
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(json.contains("parking"));
         assert!(json.contains("human"));
+        assert!(json.contains("conf_override"));
+        assert!(json.contains("0.45"));
     }
 }

@@ -14,6 +14,7 @@
 
 use crate::ai_client::{AnalyzeResponse, CameraContext};
 use crate::error::{Error, Result};
+use crate::models::ProcessingTimings;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlPool;
@@ -73,7 +74,11 @@ pub struct DetectionLog {
 
     // Processing info
     pub processing_ms: Option<i32>,
+    pub polling_cycle_id: Option<String>,
     pub schema_version: String,
+
+    // Timing breakdown (ボトルネック分析用)
+    pub timings: Option<ProcessingTimings>,
 
     // Metadata
     pub created_at: DateTime<Utc>,
@@ -164,6 +169,8 @@ impl DetectionLogService {
         image_data: &[u8],
         camera_context: Option<&CameraContext>,
         processing_ms: Option<i32>,
+        timings: Option<&ProcessingTimings>,
+        polling_cycle_id: Option<&str>,
     ) -> Result<u64> {
         let now = Utc::now();
 
@@ -181,6 +188,8 @@ impl DetectionLogService {
             camera_context,
             &image_path,
             processing_ms,
+            timings,
+            polling_cycle_id,
             now,
         )?;
 
@@ -219,6 +228,8 @@ impl DetectionLogService {
         camera_context: Option<&CameraContext>,
         image_path: &str,
         processing_ms: Option<i32>,
+        timings: Option<&ProcessingTimings>,
+        polling_cycle_id: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<DetectionLog> {
         // Extract loitering_detected from frame_diff
@@ -229,8 +240,25 @@ impl DetectionLogService {
             .map(|l| l.detected)
             .unwrap_or(false);
 
-        // Serialize response as is21_log
-        let is21_log = serde_json::to_value(response)?;
+        // Serialize response as is21_log with IS22-side timings injected
+        let mut is21_log = serde_json::to_value(response)?;
+
+        // Inject IS22-side timings for bottleneck analysis
+        if let Some(ref t) = timings {
+            if let Some(obj) = is21_log.as_object_mut() {
+                obj.insert("is22_timings".to_string(), serde_json::json!({
+                    "total_ms": t.total_ms,
+                    "snapshot_ms": t.snapshot_ms,
+                    "is21_roundtrip_ms": t.is21_roundtrip_ms,
+                    "is21_inference_ms": t.is21_inference_ms,
+                    "is21_yolo_ms": t.is21_yolo_ms,
+                    "is21_par_ms": t.is21_par_ms,
+                    "save_ms": t.save_ms,
+                    "network_overhead_ms": t.network_overhead_ms(),
+                    "snapshot_source": t.snapshot_source.as_deref(),
+                }));
+            }
+        }
 
         // Serialize optional fields
         let person_details = response
@@ -294,7 +322,9 @@ impl DetectionLogService {
             image_path_local: image_path.to_string(),
             image_path_cloud: None,
             processing_ms,
+            polling_cycle_id: polling_cycle_id.map(String::from),
             schema_version: response.schema_version.clone(),
+            timings: timings.cloned(),
             created_at: now,
             synced_to_bq: false,
             synced_at: None,
@@ -347,7 +377,7 @@ impl DetectionLogService {
                 context_applied, camera_context,
                 is21_log,
                 image_path_local, image_path_cloud,
-                processing_ms, schema_version,
+                processing_ms, polling_cycle_id, schema_version,
                 synced_to_bq
             ) VALUES (
                 ?, ?, ?, ?,
@@ -359,7 +389,7 @@ impl DetectionLogService {
                 ?, ?,
                 ?,
                 ?, ?,
-                ?, ?,
+                ?, ?, ?,
                 FALSE
             )
             "#,
@@ -390,6 +420,7 @@ impl DetectionLogService {
         .bind(&log.image_path_local)
         .bind(&log.image_path_cloud)
         .bind(log.processing_ms)
+        .bind(&log.polling_cycle_id)
         .bind(&log.schema_version)
         .execute(&self.pool)
         .await?;
@@ -456,7 +487,7 @@ impl DetectionLogService {
                 context_applied, camera_context,
                 is21_log,
                 image_path_local, image_path_cloud,
-                processing_ms, schema_version,
+                processing_ms, polling_cycle_id, schema_version,
                 created_at, synced_to_bq, synced_at
             FROM detection_logs
             ORDER BY captured_at DESC
@@ -484,7 +515,7 @@ impl DetectionLogService {
                 context_applied, camera_context,
                 is21_log,
                 image_path_local, image_path_cloud,
-                processing_ms, schema_version,
+                processing_ms, polling_cycle_id, schema_version,
                 created_at, synced_to_bq, synced_at
             FROM detection_logs
             WHERE camera_id = ?
@@ -519,7 +550,7 @@ impl DetectionLogService {
                 context_applied, camera_context,
                 is21_log,
                 image_path_local, image_path_cloud,
-                processing_ms, schema_version,
+                processing_ms, polling_cycle_id, schema_version,
                 created_at, synced_to_bq, synced_at
             FROM detection_logs
             WHERE captured_at BETWEEN ? AND ?
@@ -550,7 +581,7 @@ impl DetectionLogService {
                 context_applied, camera_context,
                 is21_log,
                 image_path_local, image_path_cloud,
-                processing_ms, schema_version,
+                processing_ms, polling_cycle_id, schema_version,
                 created_at, synced_to_bq, synced_at
             FROM detection_logs
             WHERE severity >= ?
@@ -637,7 +668,10 @@ impl DetectionLogService {
             image_path_local: row.try_get("image_path_local")?,
             image_path_cloud: row.try_get("image_path_cloud")?,
             processing_ms: row.try_get("processing_ms")?,
+            polling_cycle_id: row.try_get("polling_cycle_id")?,
             schema_version: row.try_get("schema_version")?,
+            // Timings are stored in is21_log, extract if needed
+            timings: None, // TODO: Parse from is21_log if needed
             created_at: DateTime::from_naive_utc_and_offset(created_at, Utc),
             synced_to_bq: row.try_get("synced_to_bq")?,
             synced_at: synced_at.map(|dt| DateTime::from_naive_utc_and_offset(dt, Utc)),
@@ -728,6 +762,91 @@ impl DetectionLogService {
         .await?;
 
         Ok(())
+    }
+
+    // ========================================
+    // Camera Status Events
+    // ========================================
+
+    /// Save camera status event (lost/recovered) without image
+    ///
+    /// These events are recorded for user visibility in AI Event Log.
+    /// They use a minimal record format since there's no actual detection.
+    pub async fn save_camera_event(
+        &self,
+        tid: &str,
+        fid: &str,
+        camera_id: &str,
+        lacis_id: Option<&str>,
+        event_type: &str,  // "camera_lost" or "camera_recovered"
+        severity: i32,
+        error_message: Option<&str>,
+    ) -> Result<u64> {
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // Build minimal is21_log for camera events
+        let is21_log = serde_json::json!({
+            "analyzed": false,
+            "detected": false,
+            "primary_event": event_type,
+            "severity": severity,
+            "camera_id": camera_id,
+            "captured_at": now_str,
+            "schema_version": "2025-12-29.1",
+            "event_type": "camera_status",
+            "message": if event_type == "camera_lost" {
+                error_message.unwrap_or("カメラ接続ロスト")
+            } else {
+                "カメラ接続復帰"
+            },
+            "confidence": 1.0,
+            "count_hint": 0,
+            "unknown_flag": false,
+            "tags": [],
+            "bboxes": [],
+        });
+
+        let result = sqlx::query(
+            r#"
+            INSERT INTO detection_logs (
+                tid, fid, camera_id, lacis_id,
+                captured_at, analyzed_at,
+                primary_event, severity, confidence, count_hint, unknown_flag,
+                tags, preset_id, schema_version,
+                is21_log, image_path_local, synced_to_bq
+            ) VALUES (
+                ?, ?, ?, ?,
+                ?, ?,
+                ?, ?, 1.0, 0, FALSE,
+                '[]', 'system', '2025-12-29.1',
+                ?, '', FALSE
+            )
+            "#,
+        )
+        .bind(tid)
+        .bind(fid)
+        .bind(camera_id)
+        .bind(lacis_id)
+        .bind(now)
+        .bind(now)
+        .bind(event_type)
+        .bind(severity)
+        .bind(is21_log.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        let log_id = result.last_insert_id();
+
+        tracing::info!(
+            log_id = log_id,
+            camera_id = %camera_id,
+            event_type = %event_type,
+            severity = severity,
+            "Camera status event saved"
+        );
+
+        Ok(log_id)
     }
 }
 

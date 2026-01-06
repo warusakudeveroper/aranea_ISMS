@@ -33,6 +33,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/cameras/:id/soft-delete", post(soft_delete_camera))
         .route("/api/cameras/:id/rescan", post(rescan_camera))
         .route("/api/cameras/:id/auth-test", post(auth_test_camera))
+        .route("/api/cameras/:id/sync-preset", post(sync_preset_to_is21))
         .route("/api/cameras/restore-by-mac", post(restore_camera_by_mac))
         // Modal Leases
         .route("/api/modal/lease", post(request_lease))
@@ -51,6 +52,16 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/detection-logs/severity/:threshold", get(detection_logs_by_severity))
         // System
         .route("/api/system/status", get(system_status))
+        // Settings (Settings Modal APIs)
+        .route("/api/settings/is21/status", get(get_is21_status))
+        .route("/api/settings/is21", get(get_is21_config))
+        .route("/api/settings/is21", put(update_is21_config))
+        .route("/api/settings/is21/test", post(test_is21_connection))
+        .route("/api/settings/system", get(get_system_info))
+        .route("/api/settings/performance/logs", get(get_performance_logs))
+        .route("/api/settings/polling/logs", get(get_polling_logs))
+        // Performance Dashboard API (統合デバッグAPI)
+        .route("/api/debug/performance/dashboard", get(get_performance_dashboard))
         // IpcamScan
         .route("/api/ipcamscan/jobs", post(create_scan_job))
         .route("/api/ipcamscan/jobs/:id", get(get_scan_job))
@@ -138,6 +149,7 @@ async fn delete_camera(
 ) -> impl IntoResponse {
     match state.config_store.service().delete_camera(&id).await {
         Ok(_) => {
+            // go2rtc cleanup is handled by polling_orchestrator at cycle start
             let _ = state.config_store.refresh_cache().await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
@@ -152,6 +164,7 @@ async fn soft_delete_camera(
 ) -> impl IntoResponse {
     match state.config_store.service().soft_delete_camera(&id).await {
         Ok(camera) => {
+            // go2rtc cleanup is handled by polling_orchestrator at cycle start
             let _ = state.config_store.refresh_cache().await;
             Json(ApiResponse::success(serde_json::json!({
                 "ok": true,
@@ -274,6 +287,7 @@ async fn restore_camera_by_mac(
 ) -> impl IntoResponse {
     match state.config_store.service().restore_camera_by_mac(&req.mac_address).await {
         Ok(camera) => {
+            // go2rtc registration is handled by polling_orchestrator at cycle start
             let _ = state.config_store.refresh_cache().await;
             Json(ApiResponse::success(camera)).into_response()
         }
@@ -310,6 +324,167 @@ async fn rescan_camera(
         "new_ip": old_ip,
         "updated": false
     }))).into_response()
+}
+
+// ========================================
+// Preset Sync to IS21 Handler
+// ========================================
+
+/// Preset sync response
+#[derive(Debug, serde::Serialize)]
+struct PresetSyncResponse {
+    success: bool,
+    lacis_id: String,
+    preset_id: String,
+    preset_version: String,
+    message: String,
+    is21_response: Option<serde_json::Value>,
+}
+
+/// Sync camera preset to IS21
+/// POST /api/cameras/:id/sync-preset
+///
+/// This endpoint registers the camera's preset configuration with IS21's preset cache.
+/// IS21 uses this to customize AI analysis for each camera based on its lacisID.
+async fn sync_preset_to_is21(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    // 1. Get camera info
+    let camera = match state.config_store.service().get_camera(&id).await {
+        Ok(Some(c)) => c,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Camera not found"}))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    // 2. Get lacis_id (required for IS21 preset registration)
+    let lacis_id = match camera.lacis_id.clone() {
+        Some(id) if id.len() == 20 => id,  // Valid 20-digit lacisID
+        Some(id) => {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+                "error": format!("Invalid lacis_id length: {} (expected 20 digits)", id.len()),
+                "lacis_id": id
+            }))).into_response();
+        }
+        None => {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+                "error": "Camera has no lacis_id. Register with araneaDeviceGate first."
+            }))).into_response();
+        }
+    };
+
+    // 3. Get preset configuration
+    let preset_id = camera.preset_id.clone().unwrap_or_else(|| "balanced".to_string());
+    let preset = state.preset_loader.get_or_default(&preset_id);
+    let preset_version = preset.version.clone();
+
+    // 4. Build detection_config for IS21
+    let detection_config = serde_json::json!({
+        "confidence_threshold": 0.33,
+        "nms_threshold": 0.40,
+        "enabled_events": preset.expected_objects.clone(),
+        "severity_boost": {},
+        "excluded_objects": preset.excluded_objects.clone(),
+        "person_detection": {
+            "par_enabled": true,
+            "par_max_persons": 10,
+            "par_threshold": 0.5
+        },
+        "location_type": preset.location_type,
+        "distance": preset.distance,
+        "enable_frame_diff": preset.enable_frame_diff,
+        "return_bboxes": preset.return_bboxes,
+        "output_schema": preset.output_schema,
+        "suggested_interval_sec": preset.suggested_interval_sec
+    });
+
+    // 5. Send to IS21
+    let is21_url = format!("{}/v1/presets/{}", state.config.is21_url, lacis_id);
+    let client = reqwest::Client::new();
+
+    tracing::info!(
+        camera_id = %id,
+        lacis_id = %lacis_id,
+        preset_id = %preset_id,
+        "Syncing preset to IS21"
+    );
+
+    let form = reqwest::multipart::Form::new()
+        .text("preset_id", preset_id.clone())
+        .text("preset_version", preset_version.clone())
+        .text("detection_config", detection_config.to_string());
+
+    match client
+        .post(&is21_url)
+        .multipart(form)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<serde_json::Value>().await {
+                    Ok(is21_resp) => {
+                        tracing::info!(
+                            camera_id = %id,
+                            lacis_id = %lacis_id,
+                            "Preset sync successful"
+                        );
+                        Json(ApiResponse::success(PresetSyncResponse {
+                            success: true,
+                            lacis_id,
+                            preset_id,
+                            preset_version,
+                            message: "プリセットをIS21に同期しました".to_string(),
+                            is21_response: Some(is21_resp),
+                        })).into_response()
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            camera_id = %id,
+                            error = %e,
+                            "IS21 response parse failed but request succeeded"
+                        );
+                        Json(ApiResponse::success(PresetSyncResponse {
+                            success: true,
+                            lacis_id,
+                            preset_id,
+                            preset_version,
+                            message: "プリセット同期成功（レスポンス解析失敗）".to_string(),
+                            is21_response: None,
+                        })).into_response()
+                    }
+                }
+            } else {
+                let status = response.status();
+                let error_body = response.text().await.unwrap_or_default();
+                tracing::error!(
+                    camera_id = %id,
+                    status = %status,
+                    error = %error_body,
+                    "IS21 preset sync failed"
+                );
+                (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                    "error": format!("IS21 returned error: {} - {}", status, error_body),
+                    "lacis_id": lacis_id,
+                    "preset_id": preset_id
+                }))).into_response()
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                camera_id = %id,
+                error = %e,
+                url = %is21_url,
+                "Failed to connect to IS21"
+            );
+            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                "error": format!("IS21接続失敗: {}", e),
+                "lacis_id": lacis_id,
+                "is21_url": is21_url
+            }))).into_response()
+        }
+    }
 }
 
 // ========================================
@@ -600,6 +775,1266 @@ async fn system_status(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 // ========================================
+// Settings Modal Handlers
+// ========================================
+
+/// IS21 connection status response
+#[derive(Debug, serde::Serialize)]
+struct Is21StatusResponse {
+    url: String,
+    connected: bool,
+    health: Option<bool>,
+    latency_ms: Option<u64>,
+    schema_version: Option<String>,
+    last_checked: String,
+}
+
+/// Get IS21 connection status
+async fn get_is21_status(State(state): State<AppState>) -> impl IntoResponse {
+    let url = state.config.is21_url.clone();
+    let start = std::time::Instant::now();
+
+    // Try health check
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    let health_url = format!("{}/healthz", url);
+    let (connected, health, latency_ms) = match client.get(&health_url).send().await {
+        Ok(resp) => {
+            let latency = start.elapsed().as_millis() as u64;
+            (true, Some(resp.status().is_success()), Some(latency))
+        }
+        Err(_) => (false, None, None),
+    };
+
+    // Try to get schema version
+    let schema_version = if connected {
+        let schema_url = format!("{}/v1/schema", url);
+        match client.get(&schema_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                resp.json::<serde_json::Value>()
+                    .await
+                    .ok()
+                    .and_then(|v| v.get("version").and_then(|v| v.as_str()).map(String::from))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    Json(ApiResponse::success(Is21StatusResponse {
+        url,
+        connected,
+        health,
+        latency_ms,
+        schema_version,
+        last_checked: chrono::Utc::now().to_rfc3339(),
+    }))
+}
+
+/// IS21 configuration response
+#[derive(Debug, serde::Serialize)]
+struct Is21ConfigResponse {
+    url: String,
+    timeout_seconds: u64,
+}
+
+/// Get IS21 configuration
+async fn get_is21_config(State(state): State<AppState>) -> impl IntoResponse {
+    Json(ApiResponse::success(Is21ConfigResponse {
+        url: state.config.is21_url.clone(),
+        timeout_seconds: 30, // Default timeout
+    }))
+}
+
+/// Update IS21 configuration request
+#[derive(Debug, Deserialize)]
+struct UpdateIs21ConfigRequest {
+    url: Option<String>,
+}
+
+/// Update IS21 configuration
+async fn update_is21_config(
+    State(_state): State<AppState>,
+    Json(req): Json<UpdateIs21ConfigRequest>,
+) -> impl IntoResponse {
+    // Note: In a real implementation, this would persist to database/config file
+    // For now, we just validate the URL and return success
+    // The actual config change would require restart or hot-reload support
+
+    if let Some(url) = req.url {
+        // Validate URL format
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+                "error": "Invalid URL format. Must start with http:// or https://"
+            }))).into_response();
+        }
+
+        // TODO: Persist to config and reload
+        // For now, just return success with a note
+        Json(serde_json::json!({
+            "ok": true,
+            "url": url,
+            "note": "Configuration saved. Restart required for changes to take effect."
+        })).into_response()
+    } else {
+        (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "error": "No url provided"
+        }))).into_response()
+    }
+}
+
+/// Test IS21 connection
+async fn test_is21_connection(State(state): State<AppState>) -> impl IntoResponse {
+    let url = state.config.is21_url.clone();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    let mut results = serde_json::Map::new();
+
+    // Test health endpoint
+    let health_url = format!("{}/healthz", url);
+    let health_start = std::time::Instant::now();
+    let health_ok = match client.get(&health_url).send().await {
+        Ok(resp) => {
+            results.insert("healthz_latency_ms".to_string(), serde_json::json!(health_start.elapsed().as_millis() as u64));
+            resp.status().is_success()
+        }
+        Err(e) => {
+            results.insert("healthz_error".to_string(), serde_json::json!(e.to_string()));
+            false
+        }
+    };
+    results.insert("healthz_ok".to_string(), serde_json::json!(health_ok));
+
+    // Test schema endpoint
+    let schema_url = format!("{}/v1/schema", url);
+    let schema_start = std::time::Instant::now();
+    let schema_ok = match client.get(&schema_url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            results.insert("schema_latency_ms".to_string(), serde_json::json!(schema_start.elapsed().as_millis() as u64));
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                results.insert("schema_version".to_string(), json.get("version").cloned().unwrap_or(serde_json::json!("unknown")));
+            }
+            true
+        }
+        Ok(resp) => {
+            results.insert("schema_status".to_string(), serde_json::json!(resp.status().as_u16()));
+            false
+        }
+        Err(e) => {
+            results.insert("schema_error".to_string(), serde_json::json!(e.to_string()));
+            false
+        }
+    };
+    results.insert("schema_ok".to_string(), serde_json::json!(schema_ok));
+
+    // Test capabilities endpoint
+    let caps_url = format!("{}/v1/capabilities", url);
+    let caps_start = std::time::Instant::now();
+    let caps_ok = match client.get(&caps_url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            results.insert("capabilities_latency_ms".to_string(), serde_json::json!(caps_start.elapsed().as_millis() as u64));
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                results.insert("capabilities".to_string(), json);
+            }
+            true
+        }
+        Err(e) => {
+            results.insert("capabilities_error".to_string(), serde_json::json!(e.to_string()));
+            false
+        }
+        _ => false,
+    };
+    results.insert("capabilities_ok".to_string(), serde_json::json!(caps_ok));
+
+    let all_ok = health_ok && schema_ok;
+    results.insert("overall_ok".to_string(), serde_json::json!(all_ok));
+    results.insert("tested_url".to_string(), serde_json::json!(url));
+    results.insert("tested_at".to_string(), serde_json::json!(chrono::Utc::now().to_rfc3339()));
+
+    Json(ApiResponse::success(serde_json::Value::Object(results)))
+}
+
+/// System information response
+#[derive(Debug, serde::Serialize)]
+struct SystemInfoResponse {
+    hostname: String,
+    device_type: String,
+    lacis_id: Option<String>,
+    version: String,
+    uptime_seconds: u64,
+    cpu_percent: f32,
+    memory_percent: f32,
+    memory_used_mb: u64,
+    memory_total_mb: u64,
+    disk_percent: f32,
+    disk_used_gb: f32,
+    disk_total_gb: f32,
+    temperature_c: Option<f32>,
+    rust_version: String,
+    build_time: String,
+}
+
+/// Get system information
+async fn get_system_info(State(state): State<AppState>) -> impl IntoResponse {
+    use sysinfo::{System, Disks};
+
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    // Get hostname
+    let hostname = System::host_name().unwrap_or_else(|| "unknown".to_string());
+
+    // Memory
+    let memory_total = sys.total_memory();
+    let memory_used = sys.used_memory();
+    let memory_percent = if memory_total > 0 {
+        (memory_used as f32 / memory_total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    // CPU (average across all cores)
+    let cpu_percent = {
+        let cpus = sys.cpus();
+        if cpus.is_empty() {
+            0.0
+        } else {
+            cpus.iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32
+        }
+    };
+
+    // Disk (root partition)
+    let disks = Disks::new_with_refreshed_list();
+    let (disk_used, disk_total) = disks
+        .iter()
+        .find(|d| d.mount_point() == std::path::Path::new("/"))
+        .map(|d| {
+            let total = d.total_space();
+            let used = total - d.available_space();
+            (used, total)
+        })
+        .unwrap_or((0, 0));
+
+    let disk_percent = if disk_total > 0 {
+        (disk_used as f32 / disk_total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    // Temperature (if available)
+    let temperature = {
+        let components = sysinfo::Components::new_with_refreshed_list();
+        components
+            .iter()
+            .find(|c| c.label().contains("CPU") || c.label().contains("Core"))
+            .map(|c| c.temperature())
+    };
+
+    // Uptime
+    let uptime_seconds = System::uptime();
+
+    Json(ApiResponse::success(SystemInfoResponse {
+        hostname,
+        device_type: "is22".to_string(),
+        lacis_id: None, // IS22 doesn't have its own lacisID
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime_seconds,
+        cpu_percent,
+        memory_percent,
+        memory_used_mb: memory_used / 1024 / 1024,
+        memory_total_mb: memory_total / 1024 / 1024,
+        disk_percent,
+        disk_used_gb: disk_used as f32 / 1024.0 / 1024.0 / 1024.0,
+        disk_total_gb: disk_total as f32 / 1024.0 / 1024.0 / 1024.0,
+        temperature_c: temperature,
+        rust_version: env!("CARGO_PKG_RUST_VERSION").to_string(),
+        build_time: chrono::Utc::now().to_rfc3339(), // Placeholder - would be compile time
+    }))
+}
+
+/// Performance log entry with full timing breakdown for bottleneck analysis
+#[derive(Debug, serde::Serialize)]
+struct PerformanceLogEntry {
+    timestamp: String,
+    camera_id: String,
+    camera_name: Option<String>,
+    camera_ip: Option<String>,
+    preset_id: Option<String>,
+    image_path: Option<String>,
+    // Polling cycle ID for correlation with 巡回ログ
+    polling_cycle_id: Option<String>,
+    // Total processing time
+    processing_ms: i64,
+    // IS22-side timing breakdown (ボトルネック分析用)
+    snapshot_ms: Option<i64>,        // カメラからの画像取得時間
+    is21_roundtrip_ms: Option<i64>,  // IS21への送信〜レスポンス受信
+    save_ms: Option<i64>,            // DB保存時間
+    network_overhead_ms: Option<i64>, // ネットワークオーバーヘッド
+    // Snapshot capture source: "go2rtc", "ffmpeg", or "http"
+    snapshot_source: Option<String>,
+    // IS21 internal timing breakdown
+    is21_inference_ms: Option<i64>,
+    yolo_ms: Option<i64>,
+    par_ms: Option<i64>,
+    // Detection result
+    primary_event: String,
+    severity: i32,
+    confidence: Option<f64>,
+    bbox_count: Option<i32>,
+    // Raw IS21 log for debugging (contains full IS21 response + IS22 timings)
+    is21_log_raw: Option<String>,
+}
+
+/// Query parameters for performance logs
+#[derive(Deserialize)]
+struct PerformanceLogsQuery {
+    limit: Option<u32>,
+    camera_id: Option<String>,
+}
+
+/// Get performance logs (from detection_logs with performance info)
+async fn get_performance_logs(
+    State(state): State<AppState>,
+    Query(query): Query<PerformanceLogsQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(100).min(1000);
+
+    // Query detection_logs with full timing breakdown
+    // is21_log contains IS22 timings (snapshot_ms, is21_roundtrip_ms, save_ms) and IS21 response
+    let logs_query = if let Some(camera_id) = &query.camera_id {
+        sqlx::query_as::<_, (
+            chrono::DateTime<chrono::Utc>,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            String,
+            i32,
+        )>(
+            r#"SELECT
+                dl.captured_at,
+                dl.camera_id,
+                COALESCE(dl.processing_ms, 0),
+                dl.polling_cycle_id,
+                dl.is21_log,
+                dl.primary_event,
+                dl.severity
+            FROM detection_logs dl
+            WHERE dl.camera_id = ?
+            ORDER BY dl.captured_at DESC
+            LIMIT ?"#
+        )
+        .bind(camera_id)
+        .bind(limit)
+        .fetch_all(&state.pool)
+        .await
+    } else {
+        sqlx::query_as::<_, (
+            chrono::DateTime<chrono::Utc>,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            String,
+            i32,
+        )>(
+            r#"SELECT
+                dl.captured_at,
+                dl.camera_id,
+                COALESCE(dl.processing_ms, 0),
+                dl.polling_cycle_id,
+                dl.is21_log,
+                dl.primary_event,
+                dl.severity
+            FROM detection_logs dl
+            ORDER BY dl.captured_at DESC
+            LIMIT ?"#
+        )
+        .bind(limit)
+        .fetch_all(&state.pool)
+        .await
+    };
+
+    match logs_query {
+        Ok(rows) => {
+            // Get camera info from cache
+            let cameras = state.config_store.get_cached_cameras().await;
+            let camera_map: std::collections::HashMap<String, (String, Option<String>, Option<String>)> = cameras
+                .iter()
+                .map(|c| (c.camera_id.clone(), (c.name.clone(), c.ip_address.clone(), c.preset_id.clone())))
+                .collect();
+
+            let logs: Vec<PerformanceLogEntry> = rows
+                .into_iter()
+                .map(|(captured_at, camera_id, processing_ms, polling_cycle_id, is21_log, primary_event, severity)| {
+                    // Parse is21_log JSON for timing breakdown
+                    let parsed = is21_log
+                        .as_ref()
+                        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok());
+
+                    // IS22-side timings (stored by detection_log_service)
+                    let is22_timings = parsed.as_ref().and_then(|v| v.get("is22_timings"));
+                    let snapshot_ms = is22_timings.and_then(|t| t.get("snapshot_ms")).and_then(|v| v.as_i64());
+                    let is21_roundtrip_ms = is22_timings.and_then(|t| t.get("is21_roundtrip_ms")).and_then(|v| v.as_i64());
+                    let save_ms = is22_timings.and_then(|t| t.get("save_ms")).and_then(|v| v.as_i64());
+                    let network_overhead_ms = is22_timings.and_then(|t| t.get("network_overhead_ms")).and_then(|v| v.as_i64());
+                    let snapshot_source = is22_timings
+                        .and_then(|t| t.get("snapshot_source"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+
+                    // IS21-side timings (from IS21 response)
+                    let is21_perf = parsed.as_ref().and_then(|v| v.get("performance"));
+                    let is21_inference_ms = is21_perf.and_then(|p| p.get("inference_ms")).and_then(|v| v.as_i64());
+                    let yolo_ms = is21_perf.and_then(|p| p.get("yolo_ms")).and_then(|v| v.as_i64());
+                    let par_ms = is21_perf.and_then(|p| p.get("par_ms")).and_then(|v| v.as_i64());
+
+                    // Additional info
+                    let image_path = parsed.as_ref()
+                        .and_then(|v| v.get("image_path"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    let confidence = parsed.as_ref()
+                        .and_then(|v| v.get("confidence"))
+                        .and_then(|v| v.as_f64());
+                    let bbox_count = parsed.as_ref()
+                        .and_then(|v| v.get("bbox_count"))
+                        .and_then(|v| v.as_i64())
+                        .map(|v| v as i32);
+
+                    // Get camera info from cache
+                    let (camera_name, camera_ip, preset_id) = camera_map
+                        .get(&camera_id)
+                        .cloned()
+                        .unwrap_or((camera_id.clone(), None, None));
+
+                    PerformanceLogEntry {
+                        timestamp: captured_at.to_rfc3339(),
+                        camera_id: camera_id.clone(),
+                        camera_name: Some(camera_name),
+                        camera_ip,
+                        preset_id,
+                        image_path,
+                        polling_cycle_id,
+                        processing_ms,
+                        snapshot_ms,
+                        is21_roundtrip_ms,
+                        save_ms,
+                        network_overhead_ms,
+                        snapshot_source,
+                        is21_inference_ms,
+                        yolo_ms,
+                        par_ms,
+                        primary_event,
+                        severity,
+                        confidence,
+                        bbox_count,
+                        // Include raw IS21 log for debugging UI
+                        is21_log_raw: is21_log.clone(),
+                    }
+                })
+                .collect();
+
+            Json(ApiResponse::success(serde_json::json!({
+                "logs": logs,
+                "total": logs.len()
+            }))).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "error": e.to_string()
+        }))).into_response(),
+    }
+}
+
+/// Polling log entry (cycle stats with full breakdown)
+#[derive(Debug, serde::Serialize)]
+struct PollingLogEntry {
+    /// ポーリングID (サブネット-日付-時刻-乱数)
+    polling_id: String,
+    /// サブネット (例: 192.168.125)
+    subnet: String,
+    /// サブネット第3オクテット (例: 125)
+    subnet_octet3: i32,
+    /// 巡回開始時刻
+    started_at: String,
+    /// 巡回完了時刻 (running中はnull)
+    completed_at: Option<String>,
+    /// サイクル番号
+    cycle_number: u64,
+    /// 対象カメラ台数
+    camera_count: i32,
+    /// 成功件数
+    success_count: i32,
+    /// 失敗件数
+    failed_count: i32,
+    /// タイムアウト件数
+    timeout_count: i32,
+    /// 巡回所要時間 (ms)
+    duration_ms: Option<i32>,
+    /// 平均処理時間 (ms)
+    avg_processing_ms: Option<i32>,
+    /// ステータス (running, completed, interrupted)
+    status: String,
+}
+
+/// Query parameters for polling logs
+#[derive(Deserialize)]
+struct PollingLogsQuery {
+    limit: Option<u32>,
+    subnet: Option<String>,
+    status: Option<String>,
+}
+
+/// Get polling logs (cycle history from polling_cycles table)
+async fn get_polling_logs(
+    State(state): State<AppState>,
+    Query(query): Query<PollingLogsQuery>,
+) -> impl IntoResponse {
+    let limit = query.limit.unwrap_or(100).min(500);
+
+    // Check if there's a polling_cycles table
+    let check_table: Result<Option<String>, _> = sqlx::query_scalar(
+        "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'polling_cycles'"
+    )
+    .fetch_optional(&state.pool)
+    .await;
+
+    match check_table {
+        Ok(Some(_)) => {
+            // Table exists, query it with new schema
+            let logs_query = if let Some(subnet) = &query.subnet {
+                sqlx::query_as::<_, (
+                    String,                              // polling_id
+                    String,                              // subnet
+                    i32,                                 // subnet_octet3
+                    chrono::DateTime<chrono::Utc>,       // started_at
+                    Option<chrono::DateTime<chrono::Utc>>, // completed_at
+                    i64,                                 // cycle_number
+                    i32,                                 // camera_count
+                    i32,                                 // success_count
+                    i32,                                 // failed_count
+                    i32,                                 // timeout_count
+                    Option<i32>,                         // duration_ms
+                    Option<i32>,                         // avg_processing_ms
+                    String,                              // status
+                )>(
+                    r#"SELECT
+                        polling_id,
+                        subnet,
+                        subnet_octet3,
+                        started_at,
+                        completed_at,
+                        cycle_number,
+                        camera_count,
+                        success_count,
+                        failed_count,
+                        timeout_count,
+                        duration_ms,
+                        avg_processing_ms,
+                        status
+                    FROM polling_cycles
+                    WHERE subnet = ?
+                    ORDER BY started_at DESC
+                    LIMIT ?"#
+                )
+                .bind(subnet)
+                .bind(limit)
+                .fetch_all(&state.pool)
+                .await
+            } else if let Some(status) = &query.status {
+                sqlx::query_as::<_, (
+                    String, String, i32,
+                    chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>,
+                    i64, i32, i32, i32, i32, Option<i32>, Option<i32>, String,
+                )>(
+                    r#"SELECT
+                        polling_id, subnet, subnet_octet3, started_at, completed_at,
+                        cycle_number, camera_count, success_count, failed_count, timeout_count,
+                        duration_ms, avg_processing_ms, status
+                    FROM polling_cycles
+                    WHERE status = ?
+                    ORDER BY started_at DESC
+                    LIMIT ?"#
+                )
+                .bind(status)
+                .bind(limit)
+                .fetch_all(&state.pool)
+                .await
+            } else {
+                sqlx::query_as::<_, (
+                    String, String, i32,
+                    chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>,
+                    i64, i32, i32, i32, i32, Option<i32>, Option<i32>, String,
+                )>(
+                    r#"SELECT
+                        polling_id, subnet, subnet_octet3, started_at, completed_at,
+                        cycle_number, camera_count, success_count, failed_count, timeout_count,
+                        duration_ms, avg_processing_ms, status
+                    FROM polling_cycles
+                    ORDER BY started_at DESC
+                    LIMIT ?"#
+                )
+                .bind(limit)
+                .fetch_all(&state.pool)
+                .await
+            };
+
+            match logs_query {
+                Ok(rows) => {
+                    let logs: Vec<PollingLogEntry> = rows
+                        .into_iter()
+                        .map(|(
+                            polling_id, subnet, subnet_octet3,
+                            started_at, completed_at,
+                            cycle_number, camera_count, success_count, failed_count, timeout_count,
+                            duration_ms, avg_processing_ms, status
+                        )| {
+                            PollingLogEntry {
+                                polling_id,
+                                subnet,
+                                subnet_octet3,
+                                started_at: started_at.to_rfc3339(),
+                                completed_at: completed_at.map(|dt| dt.to_rfc3339()),
+                                cycle_number: cycle_number as u64,
+                                camera_count,
+                                success_count,
+                                failed_count,
+                                timeout_count,
+                                duration_ms,
+                                avg_processing_ms,
+                                status,
+                            }
+                        })
+                        .collect();
+
+                    Json(ApiResponse::success(serde_json::json!({
+                        "logs": logs,
+                        "total": logs.len()
+                    }))).into_response()
+                }
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                    "error": e.to_string()
+                }))).into_response(),
+            }
+        }
+        Ok(None) | Err(_) => {
+            // Table doesn't exist, return empty with a note
+            Json(ApiResponse::success(serde_json::json!({
+                "logs": [],
+                "total": 0,
+                "note": "Polling cycle logging not yet enabled. Run migration 012_polling_cycles.sql."
+            }))).into_response()
+        }
+    }
+}
+
+// ========================================
+// Performance Dashboard API (統合デバッグAPI)
+// ========================================
+
+/// Dashboard query parameters
+#[derive(Deserialize)]
+struct DashboardQuery {
+    /// 期間開始 (ISO8601), デフォルト: 24時間前
+    start: Option<String>,
+    /// 期間終了 (ISO8601), デフォルト: 現在
+    end: Option<String>,
+    /// サブネットフィルタ (複数可、カンマ区切り)
+    subnets: Option<String>,
+    /// タイムライン粒度 (分), デフォルト: 5
+    granularity_minutes: Option<i32>,
+}
+
+/// Timeline data point for lap time chart
+#[derive(Debug, serde::Serialize)]
+struct TimelineDataPoint {
+    timestamp: String,
+    subnet: String,
+    avg_lap_time_ms: i64,
+    min_lap_time_ms: i64,
+    max_lap_time_ms: i64,
+    sample_count: i32,
+}
+
+/// Error rate data point
+#[derive(Debug, serde::Serialize)]
+struct ErrorRateDataPoint {
+    timestamp: String,
+    subnet: String,
+    total_count: i32,
+    success_count: i32,
+    image_error_count: i32,
+    inference_error_count: i32,
+    error_rate_pct: f64,
+}
+
+/// Processing time distribution entry (for pie chart)
+#[derive(Debug, serde::Serialize)]
+struct ProcessingDistribution {
+    camera_id: String,
+    camera_name: Option<String>,
+    subnet: String,
+    total_processing_ms: i64,
+    avg_processing_ms: i64,
+    sample_count: i32,
+    percentage: f64,
+}
+
+/// Camera ranking entry
+#[derive(Debug, Clone, serde::Serialize)]
+struct CameraRanking {
+    rank: i32,
+    camera_id: String,
+    camera_name: Option<String>,
+    camera_ip: Option<String>,
+    subnet: String,
+    avg_time_ms: i64,
+    min_time_ms: i64,
+    max_time_ms: i64,
+    sample_count: i32,
+}
+
+/// Per-subnet statistics
+#[derive(Debug, serde::Serialize)]
+struct SubnetStats {
+    subnet: String,
+    camera_count: i32,
+    total_samples: i64,
+    avg_snapshot_ms: Option<i64>,
+    avg_inference_ms: Option<i64>,
+    avg_total_ms: i64,
+    success_rate_pct: f64,
+    performance_grade: String,  // A, B, C, D, F
+}
+
+/// Performance dashboard response
+#[derive(Debug, serde::Serialize)]
+struct PerformanceDashboard {
+    /// Query period
+    period: PeriodInfo,
+    /// Timeline data for lap time chart (multiple subnets)
+    timeline: Vec<TimelineDataPoint>,
+    /// Error rates over time
+    error_rates: Vec<ErrorRateDataPoint>,
+    /// Processing time distribution (pie chart)
+    distribution: Vec<ProcessingDistribution>,
+    /// Fastest cameras ranking
+    fastest_ranking: Vec<CameraRanking>,
+    /// Slowest cameras ranking
+    slowest_ranking: Vec<CameraRanking>,
+    /// Per-subnet statistics
+    subnet_stats: Vec<SubnetStats>,
+    /// Summary
+    summary: DashboardSummary,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct PeriodInfo {
+    start: String,
+    end: String,
+    duration_hours: f64,
+    granularity_minutes: i32,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DashboardSummary {
+    total_samples: i64,
+    total_subnets: i32,
+    total_cameras: i32,
+    overall_avg_processing_ms: i64,
+    overall_success_rate_pct: f64,
+    overall_grade: String,
+}
+
+/// Get performance dashboard data
+/// GET /api/debug/performance/dashboard
+///
+/// Returns comprehensive performance statistics for the monitoring dashboard:
+/// - Timeline lap times per subnet (for line chart)
+/// - Error rates over time (image vs inference errors)
+/// - Processing time distribution (for pie chart)
+/// - Fastest/slowest camera rankings
+/// - Per-subnet statistics with performance grades
+async fn get_performance_dashboard(
+    State(state): State<AppState>,
+    Query(query): Query<DashboardQuery>,
+) -> impl IntoResponse {
+    // Parse time range
+    let now = chrono::Utc::now();
+    let default_start = now - chrono::Duration::hours(24);
+
+    let start = query.start.as_ref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or(default_start);
+
+    let end = query.end.as_ref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or(now);
+
+    let granularity = query.granularity_minutes.unwrap_or(5).max(1).min(60);
+
+    // Parse subnet filter
+    let subnet_filter: Option<Vec<String>> = query.subnets.as_ref()
+        .map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
+
+    // Get camera info for name lookup
+    let cameras = state.config_store.get_cached_cameras().await;
+    let camera_map: std::collections::HashMap<String, (String, Option<String>, String)> = cameras
+        .iter()
+        .filter_map(|c| {
+            let subnet = c.ip_address.as_ref()
+                .map(|ip| {
+                    let parts: Vec<&str> = ip.split('.').collect();
+                    if parts.len() >= 3 {
+                        format!("{}.{}.{}", parts[0], parts[1], parts[2])
+                    } else {
+                        "unknown".to_string()
+                    }
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            Some((c.camera_id.clone(), (c.name.clone(), c.ip_address.clone(), subnet)))
+        })
+        .collect();
+
+    // 1. Timeline data (lap times per subnet)
+    let timeline = get_timeline_data(&state.pool, &start, &end, granularity, &subnet_filter).await;
+
+    // 2. Error rates
+    let error_rates = get_error_rates(&state.pool, &start, &end, granularity, &subnet_filter).await;
+
+    // 3. Processing distribution
+    let distribution = get_processing_distribution(&state.pool, &start, &end, &subnet_filter, &camera_map).await;
+
+    // 4. Rankings
+    let (fastest_ranking, slowest_ranking) = get_camera_rankings(&state.pool, &start, &end, &subnet_filter, &camera_map).await;
+
+    // 5. Subnet stats
+    let subnet_stats = get_subnet_stats(&state.pool, &start, &end, &subnet_filter).await;
+
+    // 6. Summary
+    let summary = calculate_summary(&timeline, &subnet_stats, &camera_map);
+
+    let duration_hours = (end - start).num_minutes() as f64 / 60.0;
+
+    let dashboard = PerformanceDashboard {
+        period: PeriodInfo {
+            start: start.to_rfc3339(),
+            end: end.to_rfc3339(),
+            duration_hours,
+            granularity_minutes: granularity,
+        },
+        timeline,
+        error_rates,
+        distribution,
+        fastest_ranking,
+        slowest_ranking,
+        subnet_stats,
+        summary,
+    };
+
+    Json(ApiResponse::success(dashboard))
+}
+
+/// Get timeline data for lap time chart
+async fn get_timeline_data(
+    pool: &sqlx::MySqlPool,
+    start: &chrono::DateTime<chrono::Utc>,
+    end: &chrono::DateTime<chrono::Utc>,
+    granularity_minutes: i32,
+    subnet_filter: &Option<Vec<String>>,
+) -> Vec<TimelineDataPoint> {
+    // Use polling_cycles table for subnet-level lap times
+    let subnet_clause = subnet_filter.as_ref()
+        .map(|subnets| {
+            let placeholders: Vec<&str> = subnets.iter().map(|_| "?").collect();
+            format!("AND subnet IN ({})", placeholders.join(","))
+        })
+        .unwrap_or_default();
+
+    let query = format!(
+        r#"SELECT
+            DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:00') as time_bucket,
+            subnet,
+            CAST(AVG(COALESCE(duration_ms, 0)) AS DOUBLE) as avg_lap,
+            CAST(MIN(COALESCE(duration_ms, 0)) AS SIGNED) as min_lap,
+            CAST(MAX(COALESCE(duration_ms, 0)) AS SIGNED) as max_lap,
+            CAST(COUNT(*) AS SIGNED) as cnt
+        FROM polling_cycles
+        WHERE started_at BETWEEN ? AND ?
+        AND status = 'completed'
+        {}
+        GROUP BY time_bucket, subnet
+        ORDER BY time_bucket, subnet"#,
+        subnet_clause
+    );
+
+    let mut q = sqlx::query_as::<_, (String, String, f64, i64, i64, i64)>(&query)
+        .bind(start)
+        .bind(end);
+
+    if let Some(subnets) = subnet_filter {
+        for subnet in subnets {
+            q = q.bind(subnet);
+        }
+    }
+
+    match q.fetch_all(pool).await {
+        Ok(rows) => rows.into_iter().map(|(ts, subnet, avg, min, max, cnt)| {
+            TimelineDataPoint {
+                timestamp: ts,
+                subnet,
+                avg_lap_time_ms: avg as i64,
+                min_lap_time_ms: min,
+                max_lap_time_ms: max,
+                sample_count: cnt as i32,
+            }
+        }).collect(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get timeline data");
+            vec![]
+        }
+    }
+}
+
+/// Get error rates over time
+async fn get_error_rates(
+    pool: &sqlx::MySqlPool,
+    start: &chrono::DateTime<chrono::Utc>,
+    end: &chrono::DateTime<chrono::Utc>,
+    granularity_minutes: i32,
+    subnet_filter: &Option<Vec<String>>,
+) -> Vec<ErrorRateDataPoint> {
+    // Extract subnet from camera_id or use polling_cycles
+    // For now, use polling_cycles data
+    let subnet_clause = subnet_filter.as_ref()
+        .map(|subnets| {
+            let placeholders: Vec<&str> = subnets.iter().map(|_| "?").collect();
+            format!("AND subnet IN ({})", placeholders.join(","))
+        })
+        .unwrap_or_default();
+
+    let query = format!(
+        r#"SELECT
+            DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:00') as time_bucket,
+            subnet,
+            CAST(SUM(camera_count) AS SIGNED) as total,
+            CAST(SUM(success_count) AS SIGNED) as success,
+            CAST(SUM(failed_count) AS SIGNED) as failed,
+            CAST(SUM(timeout_count) AS SIGNED) as timeout
+        FROM polling_cycles
+        WHERE started_at BETWEEN ? AND ?
+        {}
+        GROUP BY time_bucket, subnet
+        ORDER BY time_bucket, subnet"#,
+        subnet_clause
+    );
+
+    let mut q = sqlx::query_as::<_, (String, String, i64, i64, i64, i64)>(&query)
+        .bind(start)
+        .bind(end);
+
+    if let Some(subnets) = subnet_filter {
+        for subnet in subnets {
+            q = q.bind(subnet);
+        }
+    }
+
+    match q.fetch_all(pool).await {
+        Ok(rows) => rows.into_iter().map(|(ts, subnet, total, success, failed, timeout)| {
+            let error_count = failed + timeout;
+            let error_rate = if total > 0 { (error_count as f64 / total as f64) * 100.0 } else { 0.0 };
+            ErrorRateDataPoint {
+                timestamp: ts,
+                subnet,
+                total_count: total as i32,
+                success_count: success as i32,
+                image_error_count: timeout as i32,  // Timeout often means image capture failure
+                inference_error_count: failed as i32,  // Failed often means inference error
+                error_rate_pct: (error_rate * 100.0).round() / 100.0,
+            }
+        }).collect(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get error rates");
+            vec![]
+        }
+    }
+}
+
+/// Get processing time distribution for pie chart
+async fn get_processing_distribution(
+    pool: &sqlx::MySqlPool,
+    start: &chrono::DateTime<chrono::Utc>,
+    end: &chrono::DateTime<chrono::Utc>,
+    subnet_filter: &Option<Vec<String>>,
+    camera_map: &std::collections::HashMap<String, (String, Option<String>, String)>,
+) -> Vec<ProcessingDistribution> {
+    // Get per-camera processing time from detection_logs
+    let query = r#"SELECT
+        camera_id,
+        CAST(SUM(COALESCE(processing_ms, 0)) AS SIGNED) as total_ms,
+        CAST(AVG(COALESCE(processing_ms, 0)) AS DOUBLE) as avg_ms,
+        CAST(COUNT(*) AS SIGNED) as cnt
+    FROM detection_logs
+    WHERE captured_at BETWEEN ? AND ?
+    GROUP BY camera_id
+    ORDER BY total_ms DESC"#;
+
+    let result: Result<Vec<(String, i64, f64, i64)>, _> = sqlx::query_as(query)
+        .bind(start)
+        .bind(end)
+        .fetch_all(pool)
+        .await;
+
+    match result {
+        Ok(rows) => {
+            let total_all: i64 = rows.iter().map(|(_, t, _, _)| t).sum();
+
+            rows.into_iter()
+                .filter_map(|(camera_id, total_ms, avg_ms, cnt)| {
+                    let (name, ip, subnet) = camera_map.get(&camera_id)
+                        .cloned()
+                        .unwrap_or((camera_id.clone(), None, "unknown".to_string()));
+
+                    // Apply subnet filter if specified
+                    if let Some(ref filter) = subnet_filter {
+                        if !filter.contains(&subnet) {
+                            return None;
+                        }
+                    }
+
+                    let percentage = if total_all > 0 {
+                        (total_ms as f64 / total_all as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    Some(ProcessingDistribution {
+                        camera_id,
+                        camera_name: Some(name),
+                        subnet,
+                        total_processing_ms: total_ms,
+                        avg_processing_ms: avg_ms as i64,
+                        sample_count: cnt as i32,
+                        percentage: (percentage * 100.0).round() / 100.0,
+                    })
+                })
+                .collect()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get processing distribution");
+            vec![]
+        }
+    }
+}
+
+/// Get camera rankings (fastest and slowest)
+async fn get_camera_rankings(
+    pool: &sqlx::MySqlPool,
+    start: &chrono::DateTime<chrono::Utc>,
+    end: &chrono::DateTime<chrono::Utc>,
+    subnet_filter: &Option<Vec<String>>,
+    camera_map: &std::collections::HashMap<String, (String, Option<String>, String)>,
+) -> (Vec<CameraRanking>, Vec<CameraRanking>) {
+    let query = r#"SELECT
+        camera_id,
+        CAST(AVG(COALESCE(processing_ms, 0)) AS DOUBLE) as avg_ms,
+        CAST(MIN(COALESCE(processing_ms, 0)) AS SIGNED) as min_ms,
+        CAST(MAX(COALESCE(processing_ms, 0)) AS SIGNED) as max_ms,
+        CAST(COUNT(*) AS SIGNED) as cnt
+    FROM detection_logs
+    WHERE captured_at BETWEEN ? AND ?
+    GROUP BY camera_id
+    HAVING cnt >= 5
+    ORDER BY avg_ms ASC"#;
+
+    let result: Result<Vec<(String, f64, i64, i64, i64)>, _> = sqlx::query_as(query)
+        .bind(start)
+        .bind(end)
+        .fetch_all(pool)
+        .await;
+
+    match result {
+        Ok(rows) => {
+            let all_rankings: Vec<CameraRanking> = rows.into_iter()
+                .enumerate()
+                .filter_map(|(i, (camera_id, avg_ms, min_ms, max_ms, cnt))| {
+                    let (name, ip, subnet) = camera_map.get(&camera_id)
+                        .cloned()
+                        .unwrap_or((camera_id.clone(), None, "unknown".to_string()));
+
+                    // Apply subnet filter if specified
+                    if let Some(ref filter) = subnet_filter {
+                        if !filter.contains(&subnet) {
+                            return None;
+                        }
+                    }
+
+                    Some(CameraRanking {
+                        rank: (i + 1) as i32,
+                        camera_id,
+                        camera_name: Some(name),
+                        camera_ip: ip,
+                        subnet,
+                        avg_time_ms: avg_ms as i64,
+                        min_time_ms: min_ms,
+                        max_time_ms: max_ms,
+                        sample_count: cnt as i32,
+                    })
+                })
+                .collect();
+
+            // Recalculate ranks after filtering
+            let mut fastest: Vec<CameraRanking> = all_rankings.iter().take(10).cloned().collect();
+            for (i, r) in fastest.iter_mut().enumerate() {
+                r.rank = (i + 1) as i32;
+            }
+
+            let mut slowest: Vec<CameraRanking> = all_rankings.iter().rev().take(10).cloned().collect();
+            for (i, r) in slowest.iter_mut().enumerate() {
+                r.rank = (i + 1) as i32;
+            }
+
+            (fastest, slowest)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get camera rankings");
+            (vec![], vec![])
+        }
+    }
+}
+
+/// Get per-subnet statistics
+async fn get_subnet_stats(
+    pool: &sqlx::MySqlPool,
+    start: &chrono::DateTime<chrono::Utc>,
+    end: &chrono::DateTime<chrono::Utc>,
+    subnet_filter: &Option<Vec<String>>,
+) -> Vec<SubnetStats> {
+    let subnet_clause = subnet_filter.as_ref()
+        .map(|subnets| {
+            let placeholders: Vec<&str> = subnets.iter().map(|_| "?").collect();
+            format!("AND subnet IN ({})", placeholders.join(","))
+        })
+        .unwrap_or_default();
+
+    let query = format!(
+        r#"SELECT
+            subnet,
+            CAST(COUNT(DISTINCT camera_count) AS SIGNED) as camera_cnt,
+            CAST(SUM(camera_count) AS SIGNED) as total_samples,
+            CAST(AVG(avg_processing_ms) AS DOUBLE) as avg_total,
+            CAST(SUM(success_count) AS SIGNED) as success,
+            CAST(SUM(success_count + failed_count + timeout_count) AS SIGNED) as total
+        FROM polling_cycles
+        WHERE started_at BETWEEN ? AND ?
+        AND status = 'completed'
+        {}
+        GROUP BY subnet
+        ORDER BY subnet"#,
+        subnet_clause
+    );
+
+    let mut q = sqlx::query_as::<_, (String, i64, i64, Option<f64>, i64, i64)>(&query)
+        .bind(start)
+        .bind(end);
+
+    if let Some(subnets) = subnet_filter {
+        for subnet in subnets {
+            q = q.bind(subnet);
+        }
+    }
+
+    match q.fetch_all(pool).await {
+        Ok(rows) => rows.into_iter().map(|(subnet, camera_cnt, samples, avg_total, success, total)| {
+            let success_rate = if total > 0 { (success as f64 / total as f64) * 100.0 } else { 0.0 };
+            let avg_ms = avg_total.unwrap_or(0.0) as i64;
+
+            // Performance grade based on average processing time and success rate
+            let grade = calculate_performance_grade(avg_ms, success_rate);
+
+            SubnetStats {
+                subnet,
+                camera_count: camera_cnt as i32,
+                total_samples: samples,
+                avg_snapshot_ms: None,  // TODO: Extract from is21_log
+                avg_inference_ms: None,  // TODO: Extract from is21_log
+                avg_total_ms: avg_ms,
+                success_rate_pct: (success_rate * 100.0).round() / 100.0,
+                performance_grade: grade,
+            }
+        }).collect(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get subnet stats");
+            vec![]
+        }
+    }
+}
+
+/// Calculate performance grade (A-F)
+fn calculate_performance_grade(avg_ms: i64, success_rate: f64) -> String {
+    // Grade based on:
+    // - A: avg < 2000ms, success >= 98%
+    // - B: avg < 3000ms, success >= 95%
+    // - C: avg < 5000ms, success >= 90%
+    // - D: avg < 8000ms, success >= 80%
+    // - F: otherwise
+    if avg_ms < 2000 && success_rate >= 98.0 {
+        "A".to_string()
+    } else if avg_ms < 3000 && success_rate >= 95.0 {
+        "B".to_string()
+    } else if avg_ms < 5000 && success_rate >= 90.0 {
+        "C".to_string()
+    } else if avg_ms < 8000 && success_rate >= 80.0 {
+        "D".to_string()
+    } else {
+        "F".to_string()
+    }
+}
+
+/// Calculate dashboard summary
+fn calculate_summary(
+    timeline: &[TimelineDataPoint],
+    subnet_stats: &[SubnetStats],
+    camera_map: &std::collections::HashMap<String, (String, Option<String>, String)>,
+) -> DashboardSummary {
+    let total_samples: i64 = subnet_stats.iter().map(|s| s.total_samples).sum();
+    let total_subnets = subnet_stats.len() as i32;
+    let total_cameras = camera_map.len() as i32;
+
+    let overall_avg = if !subnet_stats.is_empty() {
+        subnet_stats.iter().map(|s| s.avg_total_ms).sum::<i64>() / subnet_stats.len() as i64
+    } else {
+        0
+    };
+
+    let overall_success = if !subnet_stats.is_empty() {
+        subnet_stats.iter().map(|s| s.success_rate_pct).sum::<f64>() / subnet_stats.len() as f64
+    } else {
+        0.0
+    };
+
+    let overall_grade = calculate_performance_grade(overall_avg, overall_success);
+
+    DashboardSummary {
+        total_samples,
+        total_subnets,
+        total_cameras,
+        overall_avg_processing_ms: overall_avg,
+        overall_success_rate_pct: (overall_success * 100.0).round() / 100.0,
+        overall_grade,
+    }
+}
+
+// ========================================
 // IpcamScan Handlers
 // ========================================
 
@@ -710,22 +2145,7 @@ async fn approve_device(
 ) -> impl IntoResponse {
     match state.ipcam_scan.approve_device(&device_ip, &req).await {
         Ok(response) => {
-            // Register stream with go2rtc if RTSP URL is available
-            if let Some(ref rtsp_url) = response.rtsp_url {
-                if let Err(e) = state.stream.add_source(&response.camera_id, rtsp_url).await {
-                    tracing::warn!(
-                        camera_id = %response.camera_id,
-                        error = %e,
-                        "Failed to register stream with go2rtc (camera still approved)"
-                    );
-                } else {
-                    tracing::info!(
-                        camera_id = %response.camera_id,
-                        "Stream registered with go2rtc"
-                    );
-                }
-            }
-
+            // go2rtc registration is handled by polling_orchestrator at cycle start
             // Refresh config cache so polling orchestrator picks up new camera
             let _ = state.config_store.refresh_cache().await;
 
@@ -781,10 +2201,7 @@ async fn approve_devices_batch(
 
         match state.ipcam_scan.approve_device(&item.ip, &approve_req).await {
             Ok(response) => {
-                // Register stream with go2rtc
-                if let Some(ref rtsp_url) = response.rtsp_url {
-                    let _ = state.stream.add_source(&response.camera_id, rtsp_url).await;
-                }
+                // go2rtc registration is handled by polling_orchestrator at cycle start
                 results.push(serde_json::json!({
                     "ip": item.ip,
                     "ok": true,

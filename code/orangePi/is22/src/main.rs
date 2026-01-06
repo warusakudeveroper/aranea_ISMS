@@ -5,6 +5,7 @@
 use is22_camserver::{
     admission_controller::AdmissionController,
     ai_client::AIClient,
+    camera_status_tracker::CameraStatusTracker,
     config_store::ConfigStore,
     detection_log_service::DetectionLogService,
     event_log_service::EventLogService,
@@ -13,6 +14,7 @@ use is22_camserver::{
     prev_frame_cache::PrevFrameCache,
     preset_loader::PresetLoader,
     realtime_hub::RealtimeHub,
+    rtsp_manager::RtspManager,
     snapshot_service::SnapshotService,
     stream_gateway::StreamGateway,
     suggest_engine::SuggestEngine,
@@ -91,17 +93,22 @@ async fn main() -> anyhow::Result<()> {
     let suggest_policy = config_store.service().get_suggest_policy().await?;
     let suggest = Arc::new(SuggestEngine::new(suggest_policy));
 
+    // RTSPアクセス制御マネージャ（カメラごとの多重接続防止）
+    let rtsp_manager = Arc::new(RtspManager::new());
+    tracing::info!("RtspManager initialized (RTSP access control)");
+
     let snapshot_service = Arc::new(
         SnapshotService::new(
             config.snapshot_dir.clone(),
             config.temp_dir.clone(),
+            rtsp_manager.clone(),
         )
         .await?
     );
     tracing::info!(
         snapshot_dir = %config.snapshot_dir.display(),
         temp_dir = %config.temp_dir.display(),
-        "SnapshotService initialized (ffmpeg direct RTSP)"
+        "SnapshotService initialized (ffmpeg direct RTSP with access control)"
     );
 
     let ipcam_scan = Arc::new(IpcamScan::new(pool.clone()));
@@ -113,8 +120,13 @@ async fn main() -> anyhow::Result<()> {
     let default_fid = std::env::var("DEFAULT_FID")
         .unwrap_or_else(|_| "0000".to_string());
 
-    // Create polling orchestrator with AI Event Log pipeline
+    // Camera status tracker for lost/recovered events
+    let camera_status_tracker = Arc::new(CameraStatusTracker::new());
+    tracing::info!("CameraStatusTracker initialized");
+
+    // Create polling orchestrator with AI Event Log pipeline + go2rtc integration
     let polling = Arc::new(PollingOrchestrator::new(
+        pool.clone(),
         config_store.clone(),
         snapshot_service.clone(),
         ai_client.clone(),
@@ -124,10 +136,12 @@ async fn main() -> anyhow::Result<()> {
         preset_loader.clone(),
         suggest.clone(),
         realtime.clone(),
+        camera_status_tracker,
+        stream.clone(), // go2rtc StreamGateway for cycle-based registration
         default_tid,
         default_fid,
     ));
-    tracing::info!("PollingOrchestrator initialized with AI Event Log pipeline");
+    tracing::info!("PollingOrchestrator initialized with AI Event Log pipeline + go2rtc cycle registration");
 
     // Create application state
     let state = AppState {

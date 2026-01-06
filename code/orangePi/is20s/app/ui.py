@@ -258,6 +258,7 @@ def create_router(allowed_sources: list[str]) -> APIRouter:
 <label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-ad" onchange="updateBackendFilter()" style="width:auto" checked>広告/計測</label>
 <label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-dns" onchange="updateBackendFilter()" style="width:auto" checked>DNS</label>
 <label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-background" onchange="updateBackendFilter()" style="width:auto" checked>バックグラウンド</label>
+<label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-search" onchange="updateBackendFilter()" style="width:auto">Search除外</label>
 <hr style="margin:6px 0;border:0;border-top:1px solid var(--border)">
 <label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-streaming" onchange="refreshCaptureEvents()" style="width:auto">Streaming</label>
 <label style="display:flex;align-items:center;gap:4px;margin:4px 0"><input type="checkbox" id="cap-filter-sns" onchange="refreshCaptureEvents()" style="width:auto">SNS</label>
@@ -808,6 +809,7 @@ async function loadCaptureConfig(){{
     document.getElementById('cap-filter-ad').checked=df.exclude_ad_tracker!==false;
     document.getElementById('cap-filter-dns').checked=df.exclude_dns!==false;
     document.getElementById('cap-filter-background').checked=df.exclude_background!==false;
+    document.getElementById('cap-filter-search').checked=(df.exclude_categories||[]).includes('Search');
   }}catch(e){{console.error('capture config error',e);}}
 }}
 
@@ -957,6 +959,7 @@ async function updateBackendFilter(){{
     exclude_ad_tracker:document.getElementById('cap-filter-ad').checked,
     exclude_dns:document.getElementById('cap-filter-dns').checked,
     exclude_background:document.getElementById('cap-filter-background').checked,
+    exclude_categories:document.getElementById('cap-filter-search').checked?['Search']:[],
   }};
   try{{
     const r=await fetch('/api/capture/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{display_filter:displayFilter}})}});
@@ -970,7 +973,7 @@ async function updateBackendFilter(){{
 
 async function refreshCaptureEvents(){{
   try{{
-    const r=await fetch('/api/capture/events?limit=1000');
+    const r=await fetch('/api/capture/events?limit=3000');
     const d=await r.json();
     if(!d.ok)return;
     captureEventsCache=d.events||[];
@@ -1644,6 +1647,9 @@ function updateStatsFromCache(){{
 }}
 function updateRoomChart(){{
   const container=document.getElementById('stats-room-chart');
+  // ローディングスピナーを削除
+  const loading=container.querySelector('.stats-loading');
+  if(loading)loading.remove();
   // 設定順でソート（order属性使用、未設定roomは最後）
   const rooms=Object.entries(statsData.rooms).sort((a,b)=>{{
     const orderA=a[1].order??9999;
@@ -1746,6 +1752,9 @@ function updateRoomDetail(room){{
 }}
 function updateOverallChart(){{
   const container=document.getElementById('stats-overall-chart');
+  // ローディングスピナーを削除
+  const loading=container.querySelector('.stats-loading');
+  if(loading)loading.remove();
   const cats=Object.entries(statsData.categories).sort((a,b)=>b[1].total-a[1].total).slice(0,10);
   if(cats.length===0){{container.innerHTML='<p style="color:var(--text-muted)">カテゴリ分布データがありません（フィルタ条件を確認）</p>';return;}}
   const maxVal=Math.max(...cats.map(c=>c[1].total));

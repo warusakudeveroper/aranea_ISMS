@@ -53,6 +53,10 @@ def match_domain(
     """
     ドメインをマッチング（デバイスと同一ロジック）
 
+    2パスマッチング:
+    - Pass 1: dotted patterns（より具体的）を全てチェック
+    - Pass 2: dotted patternでマッチしなかった場合のみ substring patterns をチェック
+
     Returns:
         (service, category, role, matched_pattern) or (None, None, None, None)
     """
@@ -61,6 +65,7 @@ def match_domain(
 
     domain_lower = domain.lower()
 
+    # Pass 1: dotted patterns（より具体的）を先にチェック
     for pattern, info in services.items():
         if "." in pattern:
             # パターンにドットがある場合は厳密マッチ
@@ -73,18 +78,21 @@ def match_domain(
             ):
                 if verbose:
                     match_type = "exact" if domain_lower == pattern else "dotted"
-                    print(f"  [MATCH] pattern='{pattern}' type={match_type}")
+                    print(f"  [MATCH] pattern='{pattern}' type={match_type} (pass 1)")
                 return (
                     info.get("service"),
                     info.get("category"),
                     info.get("role"),
                     pattern,
                 )
-        else:
+
+    # Pass 2: dotted patternでマッチしなかった場合のみ substring patterns をチェック
+    for pattern, info in services.items():
+        if "." not in pattern:
             # パターンにドットがない場合は部分マッチ
             if pattern in domain_lower:
                 if verbose:
-                    print(f"  [MATCH] pattern='{pattern}' type=substring")
+                    print(f"  [MATCH] pattern='{pattern}' type=substring (pass 2)")
                 return (
                     info.get("service"),
                     info.get("category"),

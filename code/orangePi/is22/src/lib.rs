@@ -25,6 +25,7 @@
 pub mod config_store;
 pub mod admission_controller;
 pub mod ai_client;
+pub mod camera_status_tracker;
 pub mod detection_log_service;
 pub mod event_log_service;
 pub mod suggest_engine;
@@ -36,6 +37,7 @@ pub mod snapshot_service;
 pub mod prev_frame_cache;
 pub mod preset_loader;
 pub mod polling_orchestrator;
+pub mod rtsp_manager;
 pub mod models;
 pub mod error;
 pub mod state;

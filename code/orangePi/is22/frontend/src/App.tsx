@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from "react"
 import type { Camera, SystemStatus, DetectionLog } from "@/types/api"
 import { CameraGrid } from "@/components/CameraGrid"
-import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage } from "@/hooks/useWebSocket"
+import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage, type CycleStatsMessage } from "@/hooks/useWebSocket"
 import { SuggestPane } from "@/components/SuggestPane"
 import { EventLogPane } from "@/components/EventLogPane"
 import { ScanModal } from "@/components/ScanModal"
@@ -54,6 +54,9 @@ function App() {
   // Per-camera snapshot timestamps (from WebSocket notifications)
   // Key: camera_id, Value: Unix timestamp (ms)
   const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>({})
+  // Per-subnet cycle statistics (from WebSocket notifications)
+  // Key: subnet (e.g., "192.168.125.0/24"), Value: CycleStatsMessage
+  const [cycleStats, setCycleStats] = useState<Record<string, CycleStatsMessage>>({})
 
   // Event log store for patrol feedback
   const { addPatrolFeedback, logs: detectionLogs } = useEventLogStore()
@@ -85,10 +88,20 @@ function App() {
     }
   }, [cameras, addPatrolFeedback])
 
+  // Handle cycle statistics updates from WebSocket
+  // Each subnet broadcasts independently with its own cycle timing
+  const handleCycleStats = useCallback((msg: CycleStatsMessage) => {
+    setCycleStats((prev) => ({
+      ...prev,
+      [msg.subnet]: msg,
+    }))
+  }, [])
+
   // WebSocket connection for real-time notifications
   const { connected: wsConnected } = useWebSocket({
     onEventLog: handleEventLog,
     onSnapshotUpdated: handleSnapshotUpdated,
+    onCycleStats: handleCycleStats,
   })
 
   const { data: systemStatus } = useApi<SystemStatus>(
@@ -159,12 +172,29 @@ function App() {
           <Badge variant="outline" className="text-xs">mAcT</Badge>
         </div>
         <div className="flex items-center gap-4">
-          {/* WebSocket connection status */}
-          <div className="flex items-center gap-1 text-sm">
+          {/* WebSocket connection status & Subnet cycle times */}
+          <div className="flex items-center gap-2 text-sm">
             {wsConnected ? (
               <>
                 <Wifi className="h-4 w-4 text-green-500" />
                 <span className="text-green-500 text-xs">LIVE</span>
+                {Object.entries(cycleStats).length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground text-xs">巡回</span>
+                    {Object.entries(cycleStats)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([subnet, stats], idx) => {
+                        // Format "192.168.125.0/24" -> "125.0/24"
+                        const shortSubnet = subnet.split('.').slice(2).join('.')
+                        return (
+                          <span key={subnet} className="text-xs">
+                            {idx > 0 && <span className="text-muted-foreground mx-1">|</span>}
+                            {shortSubnet}: {stats.cycle_duration_formatted}
+                          </span>
+                        )
+                      })}
+                  </div>
+                )}
               </>
             ) : (
               <>

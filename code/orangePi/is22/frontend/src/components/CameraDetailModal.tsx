@@ -26,6 +26,7 @@ import {
   Trash2,
   RefreshCw,
   ChevronDown,
+  ChevronRight,
   Check,
   X,
   Loader2,
@@ -35,6 +36,11 @@ import {
   Mic,
   Move3d,
   Info,
+  Activity,
+  Database,
+  Network,
+  Settings2,
+  CloudUpload,
 } from "lucide-react"
 
 interface CameraDetailModalProps {
@@ -69,10 +75,22 @@ export function CameraDetailModal({
   const [authTestResult, setAuthTestResult] = useState<AuthTestResult | null>(null)
   const [rescanResult, setRescanResult] = useState<RescanResult | null>(null)
 
+  // Preset sync
+  const [isPresetSyncing, setIsPresetSyncing] = useState(false)
+  const [presetSyncResult, setPresetSyncResult] = useState<{
+    success: boolean
+    message: string
+    preset_id?: string
+    preset_version?: string
+  } | null>(null)
+
   // Delete confirmation
   const [deleteType, setDeleteType] = useState<DeleteType>(null)
   const [hardDeleteInput, setHardDeleteInput] = useState("")
   const [showDeleteDropdown, setShowDeleteDropdown] = useState(false)
+
+  // Image loading state
+  const [imageLoaded, setImageLoaded] = useState(false)
 
   // Initialize form when camera changes
   useEffect(() => {
@@ -80,8 +98,10 @@ export function CameraDetailModal({
       setEditedFields({})
       setAuthTestResult(null)
       setRescanResult(null)
+      setPresetSyncResult(null)
       setShowPassword(false)
       setHardDeleteInput("")
+      setImageLoaded(false)
     }
   }, [camera])
 
@@ -193,6 +213,42 @@ export function CameraDetailModal({
     }
   }
 
+  // Handle preset sync to IS21
+  const handlePresetSync = async () => {
+    if (!camera) return
+
+    setIsPresetSyncing(true)
+    setPresetSyncResult(null)
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/cameras/${camera.camera_id}/sync-preset`,
+        { method: "POST" }
+      )
+      const result = await response.json()
+      if (result.success) {
+        setPresetSyncResult({
+          success: true,
+          message: result.message,
+          preset_id: result.preset_id,
+          preset_version: result.preset_version,
+        })
+      } else {
+        setPresetSyncResult({
+          success: false,
+          message: result.message || "プリセット同期に失敗しました",
+        })
+      }
+    } catch (error) {
+      console.error("Preset sync failed:", error)
+      setPresetSyncResult({
+        success: false,
+        message: "プリセット同期に失敗しました",
+      })
+    } finally {
+      setIsPresetSyncing(false)
+    }
+  }
+
   // Handle soft delete
   const handleSoftDelete = async () => {
     if (!camera) return
@@ -241,6 +297,7 @@ export function CameraDetailModal({
   if (!camera) return null
 
   const currentRotation = getValue("rotation") ?? 0
+  const currentFitMode = getValue("fit_mode") ?? "trim"
 
   return (
     <>
@@ -255,37 +312,61 @@ export function CameraDetailModal({
 
           {/* Snapshot Preview with Rotation */}
           <div className="relative">
-            <div
-              className="aspect-video bg-muted rounded-lg overflow-hidden flex items-center justify-center"
-              style={{
-                transform: `rotate(${currentRotation}deg)`,
-                transition: "transform 0.3s ease",
-              }}
-            >
+            <div className="aspect-video bg-muted rounded-lg overflow-hidden flex items-center justify-center">
               <img
                 src={`${API_BASE_URL}/api/snapshots/${camera.camera_id}/latest.jpg?t=${Date.now()}`}
                 alt={camera.name}
-                className="h-full w-full object-cover"
+                className={cn(
+                  "max-h-full max-w-full transition-transform duration-300",
+                  currentFitMode === 'trim' ? "h-full w-full object-cover" : "object-contain"
+                )}
+                style={{
+                  transform: `rotate(${currentRotation}deg)`,
+                }}
+                onLoad={() => setImageLoaded(true)}
                 onError={(e) => {
-                  // Hide broken image, show placeholder
                   e.currentTarget.style.display = 'none'
+                  setImageLoaded(false)
                 }}
               />
-              {/* Fallback icon shown when image fails to load */}
-              <CameraIcon className="absolute h-16 w-16 text-muted-foreground pointer-events-none" />
+              {/* Fallback icon - only shown when image fails to load */}
+              {!imageLoaded && (
+                <CameraIcon className="absolute h-16 w-16 text-muted-foreground pointer-events-none" />
+              )}
             </div>
-            <div className="mt-2 flex items-center justify-center gap-2">
-              <span className="text-sm text-muted-foreground">回転:</span>
-              {ROTATION_OPTIONS.map((deg) => (
+            <div className="mt-2 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">回転:</span>
+                {ROTATION_OPTIONS.map((deg) => (
+                  <Button
+                    key={deg}
+                    variant={currentRotation === deg ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => updateField("rotation", deg)}
+                  >
+                    {deg}°
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">表示:</span>
                 <Button
-                  key={deg}
-                  variant={currentRotation === deg ? "default" : "outline"}
+                  variant={currentFitMode === 'trim' ? "default" : "outline"}
                   size="sm"
-                  onClick={() => updateField("rotation", deg)}
+                  onClick={() => updateField("fit_mode", "trim")}
+                  title="カードを画像で埋める（見切れあり）"
                 >
-                  {deg}°
+                  Trim
                 </Button>
-              ))}
+                <Button
+                  variant={currentFitMode === 'fit' ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => updateField("fit_mode", "fit")}
+                  title="画像全体を収める"
+                >
+                  Fit
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -392,6 +473,152 @@ export function CameraDetailModal({
             </div>
           </Section>
 
+          {/* AI Analysis Settings Section */}
+          <Section title="AI分析設定" icon={<Activity className="h-4 w-4" />}>
+            <FormField label="AI分析" editable>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={getValue("ai_enabled") ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => updateField("ai_enabled", true)}
+                >
+                  有効
+                </Button>
+                <Button
+                  variant={!getValue("ai_enabled") ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => updateField("ai_enabled", false)}
+                >
+                  無効
+                </Button>
+              </div>
+            </FormField>
+            <FormField label="プリセット" editable>
+              <select
+                className="w-full p-2 border rounded-md text-sm"
+                value={getValue("preset_id") ?? "balanced"}
+                onChange={(e) => updateField("preset_id", e.target.value)}
+              >
+                <option value="balanced">バランス - 汎用的なバランス設定</option>
+                <option value="person_priority">人物優先 - 人物検知を最優先</option>
+                <option value="entrance">エントランス - 建物入口向け</option>
+                <option value="corridor">廊下 - 廊下・通路向け</option>
+                <option value="parking">駐車場 - 人物+車両検知</option>
+                <option value="outdoor">屋外 - 屋外・外周向け</option>
+                <option value="night_vision">夜間 - 低照度環境向け</option>
+                <option value="crowd">群衆 - 混雑検知向け</option>
+                <option value="retail">小売店 - 店舗向け</option>
+                <option value="office">オフィス - オフィス・会議室向け</option>
+                <option value="warehouse">倉庫 - 倉庫・物流施設向け</option>
+                <option value="custom">カスタム - 個別設定</option>
+              </select>
+            </FormField>
+            <FormField label="分析間隔" editable>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="5"
+                  max="300"
+                  className="w-20 p-2 border rounded-md text-sm"
+                  value={getValue("ai_interval_sec") ?? 15}
+                  onChange={(e) => updateField("ai_interval_sec", parseInt(e.target.value) || 15)}
+                />
+                <span className="text-sm text-muted-foreground">秒</span>
+              </div>
+            </FormField>
+            <p className="text-xs text-muted-foreground mt-2">
+              プリセットは検知対象や検知感度のデフォルト設定です。カメラの設置場所に合わせて選択してください。
+            </p>
+
+            {/* Preset Sync to IS21 */}
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePresetSync}
+                disabled={isPresetSyncing || !camera.lacis_id}
+                title={!camera.lacis_id ? "lacisIDが未設定のためIS21への同期はできません" : ""}
+              >
+                {isPresetSyncing ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                ) : (
+                  <CloudUpload className="h-4 w-4 mr-1" />
+                )}
+                IS21へ同期
+              </Button>
+              {!camera.lacis_id && (
+                <span className="text-xs text-muted-foreground">
+                  lacisID未設定
+                </span>
+              )}
+              {presetSyncResult && (
+                <div className="flex items-center gap-1 text-sm">
+                  {presetSyncResult.success ? (
+                    <span className="text-green-600 flex items-center gap-1">
+                      <Check className="h-4 w-4" />
+                      {presetSyncResult.preset_id} v{presetSyncResult.preset_version}
+                    </span>
+                  ) : (
+                    <span className="text-red-600 flex items-center gap-1">
+                      <X className="h-4 w-4" />
+                      {presetSyncResult.message}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              プリセット設定をIS21（AI推論サーバー）に同期します。同期後、AI分析でこのプリセットが適用されます。
+            </p>
+
+            {/* Threshold Overrides Section */}
+            <div className="mt-4 pt-4 border-t">
+              <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                <Settings2 className="h-4 w-4" />
+                閾値カスタマイズ（上級者向け）
+              </h4>
+              <p className="text-xs text-muted-foreground mb-3">
+                プリセットのデフォルト値を上書きします。チェックを外すとプリセットのデフォルト値が使用されます。
+              </p>
+
+              {/* Confidence Threshold Override */}
+              <ThresholdSlider
+                label="検知信頼度（conf）"
+                description="物体検出の信頼度しきい値。低いと誤検知が増え、高いと検出漏れが増えます"
+                value={getValue("conf_override") ?? null}
+                onChange={(v) => updateField("conf_override", v)}
+                min={0.20}
+                max={0.80}
+                step={0.05}
+                defaultHint="0.40（バランス）"
+              />
+
+              {/* NMS Threshold Override */}
+              <ThresholdSlider
+                label="重複除去（NMS）"
+                description="Non-Maximum Suppression。同一物体の重複検出を除去する感度"
+                value={getValue("nms_threshold") ?? null}
+                onChange={(v) => updateField("nms_threshold", v)}
+                min={0.30}
+                max={0.60}
+                step={0.05}
+                defaultHint="0.45（バランス）"
+              />
+
+              {/* PAR Threshold Override */}
+              <ThresholdSlider
+                label="人物属性（PAR）"
+                description="人物属性認識（服装・性別・年齢等）の信頼度しきい値"
+                value={getValue("par_threshold") ?? null}
+                onChange={(v) => updateField("par_threshold", v)}
+                min={0.30}
+                max={0.80}
+                step={0.05}
+                defaultHint="0.50（バランス）"
+              />
+            </div>
+          </Section>
+
           {/* Camera Context Section */}
           <Section title="カメラコンテキスト" icon={<Info className="h-4 w-4" />}>
             <textarea
@@ -440,10 +667,16 @@ export function CameraDetailModal({
             </FormField>
           </Section>
 
-          {/* ONVIF Device Info */}
-          {(camera.serial_number || camera.hardware_id || camera.firmware_version) && (
+          {/* ONVIF Device Info (通常表示) */}
+          {(camera.serial_number || camera.hardware_id || camera.firmware_version || camera.manufacturer || camera.model) && (
             <Section title="ONVIFデバイス情報" icon={<Info className="h-4 w-4" />}>
               <div className="grid grid-cols-2 gap-2 text-sm">
+                <FormField label="メーカー">
+                  <span>{camera.manufacturer ?? "-"}</span>
+                </FormField>
+                <FormField label="モデル">
+                  <span>{camera.model ?? "-"}</span>
+                </FormField>
                 <FormField label="シリアル番号">
                   <span className="font-mono">{camera.serial_number ?? "-"}</span>
                 </FormField>
@@ -458,6 +691,110 @@ export function CameraDetailModal({
                 </FormField>
               </div>
             </Section>
+          )}
+
+          {/* ONVIF Scopes (折りたたみ) */}
+          {camera.onvif_scopes && (
+            <CollapsibleSection title="ONVIFスコープ" icon={<Database className="h-4 w-4" />}>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <FormField label="デバイス名">
+                  <span>{camera.onvif_scopes.name ?? "-"}</span>
+                </FormField>
+                <FormField label="ハードウェア">
+                  <span>{camera.onvif_scopes.hardware ?? "-"}</span>
+                </FormField>
+                <FormField label="プロファイル">
+                  <span>{camera.onvif_scopes.profile ?? "-"}</span>
+                </FormField>
+                <FormField label="ロケーション">
+                  <span>{camera.onvif_scopes.location ?? "-"}</span>
+                </FormField>
+                <FormField label="タイプ">
+                  <span>{camera.onvif_scopes.type ?? "-"}</span>
+                </FormField>
+              </div>
+              {camera.onvif_scopes.raw_scopes && camera.onvif_scopes.raw_scopes.length > 0 && (
+                <div className="mt-2">
+                  <span className="text-xs text-muted-foreground">Raw Scopes:</span>
+                  <div className="mt-1 text-xs font-mono bg-muted/50 p-2 rounded max-h-20 overflow-y-auto">
+                    {camera.onvif_scopes.raw_scopes.map((scope, i) => (
+                      <div key={i} className="break-all">{scope}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CollapsibleSection>
+          )}
+
+          {/* ONVIF Network Interfaces (折りたたみ) */}
+          {camera.onvif_network_interfaces && camera.onvif_network_interfaces.length > 0 && (
+            <CollapsibleSection title="ネットワークインターフェース" icon={<Network className="h-4 w-4" />}>
+              <div className="space-y-2">
+                {camera.onvif_network_interfaces.map((iface, i) => (
+                  <div key={i} className="bg-muted/50 p-2 rounded text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{iface.name}</span>
+                      {iface.enabled !== undefined && (
+                        <Badge variant={iface.enabled ? "default" : "secondary"} className="text-xs">
+                          {iface.enabled ? "有効" : "無効"}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
+                      <span>MAC: <span className="font-mono">{iface.mac_address}</span></span>
+                      {iface.ipv4 && (
+                        <span>IPv4: <span className="font-mono">{iface.ipv4.address}/{iface.ipv4.prefix_length}</span></span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CollapsibleSection>
+          )}
+
+          {/* ONVIF Capabilities (折りたたみ) */}
+          {camera.onvif_capabilities && (
+            <CollapsibleSection title="ONVIF機能" icon={<Settings2 className="h-4 w-4" />}>
+              <div className="flex flex-wrap gap-2">
+                {camera.onvif_capabilities.analytics?.supported && (
+                  <Badge variant="secondary">Analytics</Badge>
+                )}
+                {camera.onvif_capabilities.device && (
+                  <Badge variant="secondary">Device</Badge>
+                )}
+                {camera.onvif_capabilities.events && (
+                  <Badge variant="secondary">Events</Badge>
+                )}
+                {camera.onvif_capabilities.imaging && (
+                  <Badge variant="secondary">Imaging</Badge>
+                )}
+                {camera.onvif_capabilities.media && (
+                  <Badge variant="secondary">Media</Badge>
+                )}
+                {camera.onvif_capabilities.ptz && (
+                  <Badge variant="secondary">PTZ</Badge>
+                )}
+              </div>
+              {camera.onvif_capabilities.media && (
+                <div className="mt-2 text-xs">
+                  <span className="text-muted-foreground">メディア転送:</span>
+                  <div className="flex gap-2 mt-1">
+                    {camera.onvif_capabilities.media.rtp_tcp && <Badge variant="outline" className="text-xs">RTP/TCP</Badge>}
+                    {camera.onvif_capabilities.media.rtp_rtsp_tcp && <Badge variant="outline" className="text-xs">RTSP/TCP</Badge>}
+                    {camera.onvif_capabilities.media.rtp_multicast && <Badge variant="outline" className="text-xs">Multicast</Badge>}
+                  </div>
+                </div>
+              )}
+              {camera.onvif_capabilities.analytics && (
+                <div className="mt-2 text-xs">
+                  <span className="text-muted-foreground">分析機能:</span>
+                  <div className="flex gap-2 mt-1">
+                    {camera.onvif_capabilities.analytics.rule_support && <Badge variant="outline" className="text-xs">ルール</Badge>}
+                    {camera.onvif_capabilities.analytics.analytics_module_support && <Badge variant="outline" className="text-xs">分析モジュール</Badge>}
+                  </div>
+                </div>
+              )}
+            </CollapsibleSection>
           )}
 
           {/* Video Capabilities */}
@@ -708,6 +1045,40 @@ function Section({
   )
 }
 
+// Collapsible section component (default collapsed)
+function CollapsibleSection({
+  title,
+  icon,
+  children,
+  defaultOpen = false,
+}: {
+  title: string
+  icon?: React.ReactNode
+  children: React.ReactNode
+  defaultOpen?: boolean
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen)
+
+  return (
+    <div className="border-t pt-4 mt-4">
+      <button
+        type="button"
+        className="flex items-center gap-2 text-sm font-medium mb-3 w-full text-left hover:text-primary transition-colors"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        {isOpen ? (
+          <ChevronDown className="h-4 w-4" />
+        ) : (
+          <ChevronRight className="h-4 w-4" />
+        )}
+        {icon}
+        {title}
+      </button>
+      {isOpen && <div className="space-y-2 pl-6">{children}</div>}
+    </div>
+  )
+}
+
 // Form field component
 function FormField({
   label,
@@ -729,6 +1100,79 @@ function FormField({
         {label}:
       </span>
       <div className="flex-1">{children}</div>
+    </div>
+  )
+}
+
+// Threshold slider component for AI settings
+function ThresholdSlider({
+  label,
+  description,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  defaultHint,
+}: {
+  label: string
+  description: string
+  value: number | null
+  onChange: (value: number | null) => void
+  min: number
+  max: number
+  step: number
+  defaultHint: string
+}) {
+  const isEnabled = value !== null
+  const displayValue = value ?? ((min + max) / 2)
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-2 mb-1">
+        <input
+          type="checkbox"
+          id={`threshold-${label}`}
+          checked={isEnabled}
+          onChange={(e) => {
+            if (e.target.checked) {
+              onChange((min + max) / 2)
+            } else {
+              onChange(null)
+            }
+          }}
+          className="h-4 w-4"
+        />
+        <label htmlFor={`threshold-${label}`} className="text-sm font-medium">
+          {label}
+        </label>
+        {isEnabled && (
+          <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+            {displayValue.toFixed(2)}
+          </span>
+        )}
+        {!isEnabled && (
+          <span className="text-xs text-muted-foreground">
+            デフォルト: {defaultHint}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground ml-6 mb-2">{description}</p>
+      {isEnabled && (
+        <div className="ml-6 flex items-center gap-2">
+          <span className="text-xs text-muted-foreground w-8">{min.toFixed(2)}</span>
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={displayValue}
+            onChange={(e) => onChange(parseFloat(e.target.value))}
+            className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+          />
+          <span className="text-xs text-muted-foreground w-8">{max.toFixed(2)}</span>
+        </div>
+      )}
     </div>
   )
 }

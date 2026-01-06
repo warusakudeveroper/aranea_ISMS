@@ -1091,7 +1091,20 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
 
 
-def postprocess_yolov5(outputs, img_shape):
+def postprocess_yolov5(outputs, img_shape, conf_threshold: float = None, nms_threshold: float = None):
+    """
+    YOLOv5出力の後処理
+
+    Args:
+        outputs: RKNN推論出力
+        img_shape: 元画像サイズ (h, w)
+        conf_threshold: 信頼度閾値 (None=デフォルトCONF_THRESHOLD使用)
+        nms_threshold: NMS閾値 (None=デフォルトNMS_THRESHOLD使用)
+    """
+    # デフォルト値の適用
+    effective_conf = conf_threshold if conf_threshold is not None else CONF_THRESHOLD
+    effective_nms = nms_threshold if nms_threshold is not None else NMS_THRESHOLD
+
     all_boxes = []
     all_scores = []
     all_classes = []
@@ -1128,7 +1141,7 @@ def postprocess_yolov5(outputs, img_shape):
             class_scores = sigmoid(pred[:, :, 5:])
             scores = obj_conf[:, :, np.newaxis] * class_scores
 
-            mask = scores.max(axis=2) > CONF_THRESHOLD
+            mask = scores.max(axis=2) > effective_conf
 
             if mask.sum() == 0:
                 continue
@@ -1168,8 +1181,8 @@ def postprocess_yolov5(outputs, img_shape):
     indices = cv2.dnn.NMSBoxes(
         boxes_xywh.tolist(),
         all_scores.tolist(),
-        CONF_THRESHOLD,
-        NMS_THRESHOLD
+        effective_conf,
+        effective_nms
     )
 
     if len(indices) == 0:
@@ -1251,9 +1264,153 @@ def remove_contained_boxes(bboxes: List[Dict], containment_threshold: float = 0.
     return result
 
 
+# ===== フレーム差分計算 (Issue #66) =====
+
+def calculate_iou(box1: Dict, box2: Dict) -> float:
+    """
+    2つのbbox間のIoU (Intersection over Union) を計算
+
+    Args:
+        box1, box2: {"x1", "y1", "x2", "y2"} を含むdict
+
+    Returns:
+        IoU値 (0.0-1.0)
+    """
+    x1 = max(box1["x1"], box2["x1"])
+    y1 = max(box1["y1"], box2["y1"])
+    x2 = min(box1["x2"], box2["x2"])
+    y2 = min(box1["y2"], box2["y2"])
+
+    inter_width = max(0, x2 - x1)
+    inter_height = max(0, y2 - y1)
+    inter_area = inter_width * inter_height
+
+    area1 = (box1["x2"] - box1["x1"]) * (box1["y2"] - box1["y1"])
+    area2 = (box2["x2"] - box2["x1"]) * (box2["y2"] - box2["y1"])
+    union_area = area1 + area2 - inter_area
+
+    if union_area <= 0:
+        return 0.0
+    return inter_area / union_area
+
+
+def calculate_frame_diff(
+    current_persons: List[Dict],
+    prev_persons: List[Dict],
+    iou_threshold: float = 0.3,
+    movement_threshold: float = 0.1
+) -> Dict:
+    """
+    2フレーム間の人物変化を計算
+
+    Args:
+        current_persons: 現フレームの人物bbox一覧
+        prev_persons: 前フレームの人物bbox一覧
+        iou_threshold: 同一人物判定のIoU閾値
+        movement_threshold: 移動判定の相対距離閾値
+
+    Returns:
+        {
+            "enabled": True,
+            "person_changes": {
+                "appeared": int,    # 新規出現
+                "disappeared": int, # 消失
+                "moved": int,       # 移動
+                "stationary": int   # 静止
+            },
+            "camera_status": "stable" | "scene_change"
+        }
+    """
+    if not prev_persons:
+        return {
+            "enabled": True,
+            "person_changes": {
+                "appeared": len(current_persons),
+                "disappeared": 0,
+                "moved": 0,
+                "stationary": 0
+            },
+            "camera_status": "stable"
+        }
+
+    # マッチング: 現在の各人物に対して前フレームで最もIoUが高い人物を探す
+    matched_prev = set()
+    matched_current = set()
+    moved_count = 0
+    stationary_count = 0
+
+    for i, curr in enumerate(current_persons):
+        best_iou = 0
+        best_j = -1
+        for j, prev in enumerate(prev_persons):
+            if j in matched_prev:
+                continue
+            iou = calculate_iou(curr, prev)
+            if iou > best_iou:
+                best_iou = iou
+                best_j = j
+
+        if best_iou >= iou_threshold and best_j >= 0:
+            matched_prev.add(best_j)
+            matched_current.add(i)
+
+            # 移動判定: bboxの中心点の相対移動量
+            prev_box = prev_persons[best_j]
+            curr_cx = (curr["x1"] + curr["x2"]) / 2
+            curr_cy = (curr["y1"] + curr["y2"]) / 2
+            prev_cx = (prev_box["x1"] + prev_box["x2"]) / 2
+            prev_cy = (prev_box["y1"] + prev_box["y2"]) / 2
+
+            # 画像サイズを基準にした相対移動量
+            box_size = max(curr["x2"] - curr["x1"], curr["y2"] - curr["y1"], 1)
+            movement = ((curr_cx - prev_cx) ** 2 + (curr_cy - prev_cy) ** 2) ** 0.5 / box_size
+
+            if movement > movement_threshold:
+                moved_count += 1
+            else:
+                stationary_count += 1
+
+    appeared = len(current_persons) - len(matched_current)
+    disappeared = len(prev_persons) - len(matched_prev)
+
+    # シーン変化判定: 大幅な人数変動
+    total_prev = len(prev_persons)
+    total_curr = len(current_persons)
+    if total_prev > 0 and abs(total_curr - total_prev) / total_prev > 0.5:
+        camera_status = "scene_change"
+    else:
+        camera_status = "stable"
+
+    return {
+        "enabled": True,
+        "person_changes": {
+            "appeared": appeared,
+            "disappeared": disappeared,
+            "moved": moved_count,
+            "stationary": stationary_count
+        },
+        "camera_status": camera_status
+    }
+
+
 # ===== 推論実行 =====
 
-def run_yolo_inference(image: np.ndarray) -> tuple:
+def run_yolo_inference(
+    image: np.ndarray,
+    conf_threshold: float = None,
+    nms_threshold: float = None
+) -> tuple:
+    """
+    YOLO推論実行
+
+    Args:
+        image: 入力画像
+        conf_threshold: 信頼度閾値 (None=デフォルト使用)
+        nms_threshold: NMS閾値 (None=デフォルト使用)
+
+    Returns:
+        (bboxes, elapsed_ms)
+    """
     global rknn_yolo, inference_stats
 
     if rknn_yolo is None:
@@ -1278,7 +1435,7 @@ def run_yolo_inference(image: np.ndarray) -> tuple:
     inference_stats["yolo"]["total_ms"] += elapsed_ms
     hardware_info.update_inference_stats(elapsed_ms, "yolov5s-640-640.rknn")
 
-    boxes, scores, classes = postprocess_yolov5(outputs, (h, w))
+    boxes, scores, classes = postprocess_yolov5(outputs, (h, w), conf_threshold, nms_threshold)
 
     bboxes = []
     for box, score, cls_id in zip(boxes, scores, classes):
@@ -1298,11 +1455,29 @@ def run_yolo_inference(image: np.ndarray) -> tuple:
     return bboxes, int(elapsed_ms)
 
 
-def run_par_inference(image: np.ndarray, person_bboxes: List[Dict]) -> tuple:
+def run_par_inference(
+    image: np.ndarray,
+    person_bboxes: List[Dict],
+    par_threshold: float = None
+) -> tuple:
+    """
+    PAR推論実行
+
+    Args:
+        image: 入力画像
+        person_bboxes: 人物bboxリスト
+        par_threshold: 属性閾値 (None=デフォルトPAR_THRESHOLD使用)
+
+    Returns:
+        (par_results, total_ms)
+    """
     global par_inference, inference_stats
 
     if par_inference is None or not person_bboxes:
         return [], 0
+
+    # デフォルト値の適用
+    effective_par_threshold = par_threshold if par_threshold is not None else PAR_THRESHOLD
 
     sorted_persons = sorted(person_bboxes, key=lambda x: x['conf'], reverse=True)
     target_persons = sorted_persons[:PAR_MAX_PERSONS]
@@ -1311,7 +1486,7 @@ def run_par_inference(image: np.ndarray, person_bboxes: List[Dict]) -> tuple:
     total_ms = 0
 
     for bbox in target_persons:
-        result = par_inference.infer_person(image, bbox, PAR_THRESHOLD)
+        result = par_inference.infer_person(image, bbox, effective_par_threshold)
         par_results.append(result)
         total_ms += result.get('inference_ms', 0)
 
@@ -1689,7 +1864,9 @@ async def analyze(
     infer_image: UploadFile = File(...),
     profile: str = Form("standard"),
     return_bboxes: bool = Form(True),
-    hints_json: Optional[str] = Form(None)
+    hints_json: Optional[str] = Form(None),
+    # === v1.9 prev_image追加 (Issue #62) ===
+    prev_image: Optional[UploadFile] = File(None),
 ):
     if schema_version and schema_version_req != schema_version:
         raise HTTPException(
@@ -1706,6 +1883,20 @@ async def analyze(
     if image is None:
         raise HTTPException(status_code=400, detail="Invalid image format")
 
+    # === v1.9 prev_image処理 (Issue #62) ===
+    prev_frame = None
+    if prev_image:
+        try:
+            prev_contents = await prev_image.read()
+            if len(prev_contents) > 0:
+                prev_nparr = np.frombuffer(prev_contents, np.uint8)
+                prev_frame = cv2.imdecode(prev_nparr, cv2.IMREAD_COLOR)
+                if prev_frame is not None:
+                    logger.debug(f"prev_image loaded: {prev_frame.shape}")
+        except Exception as e:
+            logger.warning(f"Failed to load prev_image: {e}")
+            prev_frame = None
+
     total_start = time.time()
 
     # === v1.8 camera_context処理 ===
@@ -1713,9 +1904,24 @@ async def analyze(
     context_applied = bool(camera_context)
     filtered_reasons = []
 
-    # Stage 1: YOLO推論
+    # === v1.9 hints_jsonパラメータ抽出 (Issue #63) ===
+    effective_conf = None
+    effective_nms = None
+    effective_par = None
+    if camera_context:
+        # conf_override: 0.2-0.8の範囲にクリップ
+        if "conf_override" in camera_context:
+            effective_conf = max(0.2, min(0.8, float(camera_context["conf_override"])))
+        # nms_threshold: 0.3-0.6の範囲にクリップ
+        if "nms_threshold" in camera_context:
+            effective_nms = max(0.3, min(0.6, float(camera_context["nms_threshold"])))
+        # par_threshold: 0.3-0.8の範囲にクリップ
+        if "par_threshold" in camera_context:
+            effective_par = max(0.3, min(0.8, float(camera_context["par_threshold"])))
+
+    # Stage 1: YOLO推論 (conf_override, nms_threshold適用)
     try:
-        bboxes, yolo_ms = run_yolo_inference(image)
+        bboxes, yolo_ms = run_yolo_inference(image, effective_conf, effective_nms)
     except Exception as e:
         inference_stats["yolo"]["error_count"] += 1
         logger.error(f"YOLO inference error: {e}")
@@ -1725,9 +1931,9 @@ async def analyze(
     if camera_context:
         bboxes, filtered_reasons = apply_context_filters(bboxes, camera_context)
 
-    # Stage 2: PAR推論（人物検出時のみ）
+    # Stage 2: PAR推論（人物検出時のみ） - v1.9 par_threshold適用
     person_bboxes = [b for b in bboxes if b["label"] == "person"]
-    par_results, par_ms = run_par_inference(image, person_bboxes)
+    par_results, par_ms = run_par_inference(image, person_bboxes, effective_par)
 
     # Stage 3: タグ集約 (v1.7.0 人物特徴強化版)
     tags, person_details = aggregate_tags(bboxes, par_results, image)
@@ -1747,7 +1953,26 @@ async def analyze(
         confidence = 0.0
 
     person_count = len(person_bboxes)
-    severity = 1 if detected else 0
+
+    # === v1.9 severity計算の正常化 (Issue #61) ===
+    def calculate_severity(primary_event: str) -> int:
+        """
+        severity計算:
+        - 3: human (person) - 最高優先度
+        - 2: vehicle - 中優先度
+        - 1: animal, motion, unknown - 低優先度
+        - 0: none - 検出なし
+        """
+        severity_map = {
+            "human": 3,
+            "vehicle": 2,
+            "animal": 1,
+            "motion": 1,
+            "unknown": 1,
+        }
+        return severity_map.get(primary_event, 0)
+
+    severity = calculate_severity(primary_event) if detected else 0
 
     # PAR詳細をbboxに付与
     if return_bboxes and par_results:
@@ -1783,6 +2008,27 @@ async def analyze(
         }
         suspicious_result = calculate_suspicious_score(tags, context)
 
+    # === v1.9 frame_diff結果 (Issue #62, #66) ===
+    if prev_frame is not None:
+        try:
+            # prev_frameでYOLO推論
+            prev_bboxes, _ = run_yolo_inference(prev_frame)
+            prev_person_bboxes = [b for b in prev_bboxes if b["label"] == "person"]
+            # フレーム差分計算
+            frame_diff_result = calculate_frame_diff(person_bboxes, prev_person_bboxes)
+        except Exception as e:
+            logger.warning(f"Frame diff calculation failed: {e}")
+            frame_diff_result = {
+                "enabled": False,
+                "camera_status": "error",
+                "error": str(e)
+            }
+    else:
+        frame_diff_result = {
+            "enabled": False,
+            "camera_status": "no_reference"
+        }
+
     return {
         "schema_version": schema_version or "unset",
         "camera_id": camera_id,
@@ -1798,13 +2044,16 @@ async def analyze(
         "bboxes": bboxes if return_bboxes else [],
         "person_details": person_details,
         "suspicious": suspicious_result,
+        # === v1.9 frame_diff結果 (Issue #62) ===
+        "frame_diff": frame_diff_result,
         # === v1.8 camera_context結果 ===
         "context_applied": context_applied,
         "filtered_by_context": filtered_reasons if filtered_reasons else None,
-        "processing_ms": {
-            "total": total_ms,
-            "yolo": yolo_ms,
-            "par": par_ms
+        # v1.9 フィールド名をis22の期待に合わせる
+        "performance": {
+            "inference_ms": total_ms,
+            "yolo_ms": yolo_ms,
+            "par_ms": par_ms
         },
         "model_info": {
             "yolo": {"name": "yolov5s-640", "version": "2025.12.29"},

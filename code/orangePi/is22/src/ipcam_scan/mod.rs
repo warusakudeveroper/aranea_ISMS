@@ -10,22 +10,32 @@
 //! - DB persistence for discovered devices
 
 mod scanner;
+mod job;
 mod types;
+mod utils;
 
+pub use job::*;
 pub use types::*;
 
 use crate::error::{Error, Result};
 use scanner::{
     arp_scan_subnet, calculate_score, discover_host, get_local_ip, is_local_subnet, lookup_oui,
-    parse_cidr, probe_onvif_detailed, probe_onvif_with_auth, probe_rtsp_detailed, scan_ports,
-    ArpScanResult, DeviceEvidence, OnvifDeviceInfo, ProbeResult,
+    parse_cidr, probe_onvif_detailed, probe_onvif_extended, probe_onvif_with_auth,
+    probe_rtsp_detailed, scan_port, scan_ports, ArpScanResult, DeviceEvidence,
+    OnvifCapabilities, OnvifDeviceInfo, OnvifExtendedInfo, OnvifNetworkInterface, OnvifScopes,
+    ProbeResult,
 };
+use futures::future::select_all;
 use sqlx::MySqlPool;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use utils::{
+    calculate_confidence, default_ports, determine_camera_family, extract_subnet,
+    generate_detection_reason, generate_password_variations, ip_in_cidr,
+};
 
 /// IpcamScan service
 pub struct IpcamScan {
@@ -72,15 +82,24 @@ impl IpcamScan {
     }
 
     /// Add a log entry to a job
-    async fn add_log(&self, job_id: &Uuid, entry: ScanLogEntry) {
+    pub(crate) async fn add_log(&self, job_id: &Uuid, entry: ScanLogEntry) {
         let mut jobs = self.jobs.write().await;
         if let Some(job) = jobs.get_mut(job_id) {
             job.logs.push(entry);
         }
     }
 
-    /// Update job phase and progress
-    async fn update_phase(&self, job_id: &Uuid, phase: &str, progress: u8) {
+    /// Update job phase and progress (with ScanProgress)
+    pub(crate) async fn update_progress(&self, job_id: &Uuid, phase: &str, progress: &ScanProgress) {
+        let mut jobs = self.jobs.write().await;
+        if let Some(job) = jobs.get_mut(job_id) {
+            job.current_phase = Some(phase.to_string());
+            job.progress_percent = Some(progress.percent());
+        }
+    }
+
+    /// Update job phase with explicit progress value (legacy)
+    pub(crate) async fn update_phase(&self, job_id: &Uuid, phase: &str, progress: u8) {
         let mut jobs = self.jobs.write().await;
         if let Some(job) = jobs.get_mut(job_id) {
             job.current_phase = Some(phase.to_string());
@@ -193,7 +212,7 @@ impl IpcamScan {
             job.status = JobStatus::Running;
             job.started_at = Some(chrono::Utc::now());
             job.current_phase = Some("Stage 0: 準備".to_string());
-            job.progress_percent = Some(5);
+            job.progress_percent = Some(0);
             job.logs.push(ScanLogEntry::new("*", ScanLogEventType::Info, &format!("スキャン開始: targets={:?}", job.targets)));
             (
                 job.targets.clone(),
@@ -249,6 +268,9 @@ impl IpcamScan {
         all_ips.dedup();
 
         let total_ips = all_ips.len() as u32;
+
+        // Initialize progress tracker: subnets × 253 × 5 phases = 100%
+        let mut progress = ScanProgress::new(targets.len());
         tracing::info!(
             job_id = %job_id,
             total_ips = total_ips,
@@ -258,20 +280,53 @@ impl IpcamScan {
         );
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 0完了: 計{}ホスト (L2:{}, L3:{})", total_ips, l2_targets.len(), l3_targets.len()))).await;
 
-        // Stage 1 & 2: Host Discovery + MAC/OUI
+        // Stage 1 & 2: Host Discovery + MAC/OUI (Phase 1/5)
         // For L2 subnets: Use ARP scan (gets MAC addresses)
         // For L3 subnets: Use TCP port scan
-        self.update_phase(&job_id, "Stage 1-2: ホスト検出", 10).await;
+        self.update_progress(&job_id, "Stage 1-2: ホスト検出開始", &progress).await;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency as usize));
+
+        // Each subnet contributes IPS_PER_SUBNET (253) units to Phase 1
+        // After all L2 + L3 subnets complete, Phase 1 is done
+        // This allows per-subnet progress updates instead of waiting for entire phase
 
         // MAC address map from ARP scan (IP -> (MAC, Vendor))
         let mut arp_results: HashMap<IpAddr, (String, Option<String>)> = HashMap::new();
         let mut alive_hosts: Vec<IpAddr> = Vec::new();
 
-        // L2 subnets: ARP scan
-        for target in &l2_targets {
+        // P0: Force include registered cameras (bypass ARP dependency)
+        // This ensures cameras with unstable ARP responses are still scanned
+        let registered_cameras: Vec<(String,)> = sqlx::query_as(
+            "SELECT ip_address FROM cameras WHERE ip_address IS NOT NULL AND enabled = 1"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        for (ip_str,) in &registered_cameras {
+            if let Ok(ip) = ip_str.parse::<IpAddr>() {
+                // Check if this IP is in our target subnets
+                let in_target = targets.iter().any(|t| ip_in_cidr(ip_str, t));
+                if in_target && !alive_hosts.contains(&ip) {
+                    alive_hosts.push(ip);
+                    tracing::info!(ip = %ip_str, "Force-included registered camera (ARP bypass)");
+                    self.add_log(&job_id, ScanLogEntry::new(ip_str, ScanLogEventType::Info,
+                        "登録済みカメラ: ARPバイパスで強制スキャン対象")).await;
+                }
+            }
+        }
+
+        if !registered_cameras.is_empty() {
+            self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info,
+                &format!("P0: {}台の登録済みカメラをARPバイパスで追加", alive_hosts.len()))).await;
+        }
+
+        // L2 subnets: ARP scan (with per-subnet progress updates)
+        for (subnet_idx, target) in l2_targets.iter().enumerate() {
             tracing::info!(job_id = %job_id, target = %target, "Stage 1/2: ARP scan for L2 subnet");
-            self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("ARPスキャン開始: {}", target))).await;
+            self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("[L2 {}/{}] ARPスキャン開始: {}", subnet_idx + 1, l2_targets.len(), target))).await;
+            self.update_progress(&job_id, &format!("Stage 1: ARP {} ({}/{})", target, subnet_idx + 1, l2_targets.len()), &progress).await;
+
             let results = arp_scan_subnet(target, None).await;
             let result_count = results.len();
             for result in results {
@@ -294,6 +349,73 @@ impl IpcamScan {
             } else {
                 self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("ARPスキャン完了: {} - {}ホスト発見", target, result_count))).await;
             }
+
+            // Update progress after each L2 subnet ARP scan (253 units per subnet)
+            progress.complete_units(ScanProgress::IPS_PER_SUBNET);
+            self.update_progress(&job_id, &format!("Stage 1: ARP完了 {}", target), &progress).await;
+        }
+
+        // P1: Camera port direct scan (bypass ARP dependency)
+        // Scan RTSP (554) and ONVIF (2020) ports for all IPs in L2 subnets
+        // This catches cameras with unstable ARP responses
+        if !l2_targets.is_empty() {
+            self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info,
+                "P1: カメラポート直接スキャン開始 (ARPバイパス)")).await;
+
+            let camera_ports: &[u16] = &[554, 2020];
+            let mut p1_discovered = 0u32;
+
+            for target in &l2_targets {
+                let subnet_ips = match parse_cidr(target) {
+                    Ok(ips) => ips,
+                    Err(_) => continue,
+                };
+
+                // Scan camera ports for all IPs in parallel
+                let mut port_scan_handles = Vec::new();
+                for ip in &subnet_ips {
+                    // Skip if already discovered via ARP
+                    if alive_hosts.contains(ip) {
+                        continue;
+                    }
+
+                    let ip = *ip;
+                    let permit = semaphore.clone().acquire_owned().await.unwrap();
+                    let handle = tokio::spawn(async move {
+                        // Quick scan of camera-specific ports only
+                        let port_554 = scan_port(ip, 554, timeout_ms).await;
+                        let port_2020 = scan_port(ip, 2020, timeout_ms).await;
+                        drop(permit);
+
+                        if port_554.open || port_2020.open {
+                            Some(ip)
+                        } else {
+                            None
+                        }
+                    });
+                    port_scan_handles.push(handle);
+                }
+
+                for handle in port_scan_handles {
+                    if let Ok(Some(ip)) = handle.await {
+                        if !alive_hosts.contains(&ip) {
+                            alive_hosts.push(ip);
+                            p1_discovered += 1;
+                            self.add_log(&job_id, ScanLogEntry::new(&ip.to_string(), ScanLogEventType::Info,
+                                "P1: カメラポート検出 (ARPバイパス)")).await;
+                            tracing::info!(ip = %ip, "P1: Camera port found (ARP bypass)");
+                        }
+                    }
+                }
+            }
+
+            if p1_discovered > 0 {
+                self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info,
+                    &format!("P1完了: {}台をARPバイパスで発見", p1_discovered))).await;
+            } else {
+                self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info,
+                    "P1完了: 追加デバイスなし")).await;
+            }
         }
 
         // L3 subnets: TCP discovery (per-subnet tracking for better UX)
@@ -301,8 +423,9 @@ impl IpcamScan {
             tracing::info!(job_id = %job_id, "Stage 1: TCP discovery for L3 subnets");
 
             // Process each L3 subnet separately for better feedback
-            for target in &l3_targets {
-                self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("[L3] TCPスキャン開始: {}", target))).await;
+            for (subnet_idx, target) in l3_targets.iter().enumerate() {
+                self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("[L3 {}/{}] TCPスキャン開始: {}", subnet_idx + 1, l3_targets.len(), target))).await;
+                self.update_progress(&job_id, &format!("Stage 1: TCP {} ({}/{})", target, subnet_idx + 1, l3_targets.len()), &progress).await;
 
                 // Extract IPs belonging to this subnet
                 let subnet_prefix = target.split('/').next().unwrap_or("");
@@ -325,8 +448,9 @@ impl IpcamScan {
                 let mut discovery_handles = Vec::new();
                 for ip in &subnet_ips {
                     let ip = *ip;
-                    let permit = semaphore.clone().acquire_owned().await.unwrap();
+                    let sem = semaphore.clone();
                     let handle = tokio::spawn(async move {
+                        let permit = sem.acquire_owned().await.unwrap();
                         let result = discover_host(ip, timeout_ms).await;
                         drop(permit);
                         result
@@ -335,14 +459,32 @@ impl IpcamScan {
                 }
 
                 let mut subnet_alive_count = 0;
-                for handle in discovery_handles {
-                    if let Ok(result) = handle.await {
-                        if result.alive {
+                let total_hosts = discovery_handles.len();
+                let mut completed_hosts = 0;
+                let update_interval = 50; // Update progress every 50 hosts
+
+                // Use select_all to process results as they complete (not in order)
+                let mut remaining_handles = discovery_handles;
+                while !remaining_handles.is_empty() {
+                    let (result, _idx, rest) = select_all(remaining_handles).await;
+                    remaining_handles = rest;
+
+                    if let Ok(host_result) = result {
+                        if host_result.alive {
                             subnet_alive_count += 1;
-                            if !alive_hosts.contains(&result.ip) {
-                                alive_hosts.push(result.ip);
+                            if !alive_hosts.contains(&host_result.ip) {
+                                alive_hosts.push(host_result.ip);
                             }
                         }
+                    }
+                    completed_hosts += 1;
+
+                    // Update progress every 50 hosts
+                    if completed_hosts % update_interval == 0 || completed_hosts == total_hosts {
+                        let pct = (completed_hosts * 100 / total_hosts) as u8;
+                        self.update_progress(&job_id, &format!("Stage 1: TCP {} ({}/{} {}%)", target, subnet_idx + 1, l3_targets.len(), pct), &progress).await;
+                        self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info,
+                            &format!("[L3 {}/{}] スキャン中: {}/{} ホスト (発見:{})", subnet_idx + 1, l3_targets.len(), completed_hosts, total_hosts, subnet_alive_count))).await;
                     }
                 }
 
@@ -355,6 +497,10 @@ impl IpcamScan {
                     self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info,
                         &format!("[L3] TCPスキャン完了: {} - {}ホスト発見", target, subnet_alive_count))).await;
                 }
+
+                // Update progress after each L3 subnet TCP scan (253 units per subnet)
+                progress.complete_units(ScanProgress::IPS_PER_SUBNET);
+                self.update_progress(&job_id, &format!("Stage 1: TCP完了 {}", target), &progress).await;
             }
         }
 
@@ -366,16 +512,21 @@ impl IpcamScan {
         );
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 1-2完了: {}ホスト発見 (ARP:{})", alive_hosts.len(), arp_results.len()))).await;
 
-        // Stage 3: Port Scan (parallel)
-        self.update_phase(&job_id, "Stage 3: ポートスキャン", 30).await;
+        // Phase 1 complete: Discovery (progress already updated per-subnet)
+        let phase_units = targets.len() * ScanProgress::IPS_PER_SUBNET;
+        // Note: Don't add phase_units here - already added incrementally per subnet
+
+        // Stage 3: Port Scan (parallel) (Phase 2/5)
+        self.update_progress(&job_id, "Stage 3: ポートスキャン", &progress).await;
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("ポートスキャン開始: {}ホスト, ポート={:?}", alive_hosts.len(), ports))).await;
         let mut port_results: HashMap<IpAddr, Vec<u16>> = HashMap::new();
         let mut port_handles = Vec::new();
 
         for ip in alive_hosts.clone() {
             let ports_clone = ports.clone();
-            let permit = semaphore.clone().acquire_owned().await.unwrap();
+            let sem = semaphore.clone();
             let handle = tokio::spawn(async move {
+                let permit = sem.acquire_owned().await.unwrap();
                 let results = scan_ports(ip, &ports_clone, timeout_ms).await;
                 drop(permit);
                 (ip, results)
@@ -383,8 +534,17 @@ impl IpcamScan {
             port_handles.push(handle);
         }
 
-        for handle in port_handles {
-            if let Ok((ip, results)) = handle.await {
+        let total_port_hosts = port_handles.len();
+        let mut completed_port_hosts = 0;
+        let port_update_interval = 20; // Update every 20 hosts
+
+        // Use select_all to process results as they complete
+        let mut remaining_port_handles = port_handles;
+        while !remaining_port_handles.is_empty() {
+            let (result, _idx, rest) = select_all(remaining_port_handles).await;
+            remaining_port_handles = rest;
+
+            if let Ok((ip, results)) = result {
                 let open_ports: Vec<u16> = results
                     .iter()
                     .filter(|r| r.open)
@@ -399,6 +559,13 @@ impl IpcamScan {
                     port_results.insert(ip, open_ports);
                 }
             }
+            completed_port_hosts += 1;
+
+            // Update progress every 20 hosts
+            if completed_port_hosts % port_update_interval == 0 || completed_port_hosts == total_port_hosts {
+                let pct = if total_port_hosts > 0 { (completed_port_hosts * 100 / total_port_hosts) as u8 } else { 100 };
+                self.update_progress(&job_id, &format!("Stage 3: ポートスキャン {}/{} ({}%)", completed_port_hosts, total_port_hosts, pct), &progress).await;
+            }
         }
 
         tracing::info!(
@@ -408,8 +575,11 @@ impl IpcamScan {
         );
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 3完了: {}ホストにオープンポートあり", port_results.len()))).await;
 
-        // Stage 4: Discovery Probes (ONVIF, RTSP) + MAC/OUI from ARP
-        self.update_phase(&job_id, "Stage 4: プロトコル検査", 50).await;
+        // Phase 2 complete: Port Scan
+        progress.complete_units(phase_units);
+
+        // Stage 4: Discovery Probes (ONVIF, RTSP) + MAC/OUI from ARP (Phase 3/5)
+        self.update_progress(&job_id, "Stage 4: プロトコル検査", &progress).await;
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("ONVIF/RTSPプローブ開始: {}ホスト", port_results.len()))).await;
         let mut evidence_map: HashMap<IpAddr, DeviceEvidence> = HashMap::new();
         let mut probe_handles = Vec::new();
@@ -421,8 +591,10 @@ impl IpcamScan {
             let ip = *ip;
             let open_ports_clone = open_ports.clone();
             let arp_data = arp_results_arc.clone();
-            let permit = semaphore.clone().acquire_owned().await.unwrap();
+            let sem = semaphore.clone();
             let handle = tokio::spawn(async move {
+                let permit = sem.acquire_owned().await.unwrap();
+
                 // ONVIF probe with detailed result
                 let (onvif_found, onvif_result) = probe_onvif_detailed(ip, timeout_ms).await;
 
@@ -470,8 +642,17 @@ impl IpcamScan {
             probe_handles.push(handle);
         }
 
-        for handle in probe_handles {
-            if let Ok(evidence) = handle.await {
+        let total_probe_hosts = probe_handles.len();
+        let mut completed_probe_hosts = 0;
+        let probe_update_interval = 10; // Update every 10 hosts
+
+        // Use select_all to process results as they complete (not in order)
+        let mut remaining_probe_handles = probe_handles;
+        while !remaining_probe_handles.is_empty() {
+            let (result, _idx, rest) = select_all(remaining_probe_handles).await;
+            remaining_probe_handles = rest;
+
+            if let Ok(evidence) = result {
                 // ONVIF/RTSPプローブ結果をログ
                 let onvif_str = match evidence.onvif_result {
                     ProbeResult::Success => "ONVIF成功",
@@ -496,6 +677,13 @@ impl IpcamScan {
 
                 evidence_map.insert(evidence.ip, evidence);
             }
+            completed_probe_hosts += 1;
+
+            // Update progress every 10 hosts
+            if completed_probe_hosts % probe_update_interval == 0 || completed_probe_hosts == total_probe_hosts {
+                let pct = if total_probe_hosts > 0 { (completed_probe_hosts * 100 / total_probe_hosts) as u8 } else { 100 };
+                self.update_progress(&job_id, &format!("Stage 4: プローブ {}/{} ({}%)", completed_probe_hosts, total_probe_hosts, pct), &progress).await;
+            }
         }
 
         tracing::info!(
@@ -505,9 +693,12 @@ impl IpcamScan {
         );
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 4完了: {}ホストをプローブ", evidence_map.len()))).await;
 
-        // Stage 5: Scoring (全デバイス保存、閾値フィルタなし)
+        // Phase 3 complete: Protocol Probe
+        progress.complete_units(phase_units);
+
+        // Stage 5: Scoring (全デバイス保存、閾値フィルタなし) (Phase 4/5)
         // カメラ関連ポートが開いているデバイスは全て保存
-        self.update_phase(&job_id, "Stage 5: スコアリング", 60).await;
+        self.update_progress(&job_id, "Stage 5: スコアリング", &progress).await;
         let camera_ports: &[u16] = &[554, 2020, 8554, 80, 443, 8000, 8080, 8443];
         let mut candidates: Vec<(IpAddr, u32, DeviceEvidence)> = Vec::new();
 
@@ -533,7 +724,7 @@ impl IpcamScan {
 
         // Stage 6: Verification - Store results to DB (without credential verification)
         // Note: Credential verification requires admin input via separate API
-        self.update_phase(&job_id, "Stage 6: DB保存", 70).await;
+        self.update_progress(&job_id, "Stage 6: DB保存", &progress).await;
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("デバイス情報をDBに保存中..."))).await;
         let now = chrono::Utc::now();
         let mut cameras_found = 0u32;
@@ -621,9 +812,12 @@ impl IpcamScan {
         );
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 6完了: {}台をDBに保存", cameras_found))).await;
 
-        // Stage 7: Automatic credential trial
+        // Phase 4 complete: Scoring + DB Save
+        progress.complete_units(phase_units);
+
+        // Stage 7: Automatic credential trial (Phase 5/5)
         // Fetch credentials for each subnet and try on camera-like devices
-        self.update_phase(&job_id, "Stage 7: 認証試行", 80).await;
+        self.update_progress(&job_id, "Stage 7: 認証試行", &progress).await;
         let mut cameras_verified = 0u32;
 
         // Get unique subnets from targets
@@ -661,7 +855,16 @@ impl IpcamScan {
 
             // Get all camera-like devices we just saved
             let devices = self.list_devices(DeviceFilter::default()).await;
-            self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("認証対象: {}台のカメラ候補", devices.len()))).await;
+            let total_devices = devices.len();
+            self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("認証対象: {}台のカメラ候補", total_devices))).await;
+
+            // Calculate units per device for granular progress in Phase 5
+            let units_per_device = if total_devices > 0 {
+                phase_units / total_devices
+            } else {
+                phase_units
+            };
+            let mut processed_devices = 0usize;
 
             for device in devices {
                 // Only try credentials on devices that look like cameras
@@ -671,6 +874,10 @@ impl IpcamScan {
                 };
 
                 if !should_try {
+                    // Still update progress for skipped devices
+                    processed_devices += 1;
+                    progress.complete_units(units_per_device);
+                    self.update_progress(&job_id, &format!("Stage 7: スキップ {}/{}", processed_devices, total_devices), &progress).await;
                     continue;
                 }
 
@@ -687,7 +894,13 @@ impl IpcamScan {
                 if let Some(credentials) = creds {
                     let ip: IpAddr = match device.ip.parse() {
                         Ok(ip) => ip,
-                        Err(_) => continue,
+                        Err(_) => {
+                            // Update progress even on parse error
+                            processed_devices += 1;
+                            progress.complete_units(units_per_device);
+                            self.update_progress(&job_id, &format!("Stage 7: エラー {}/{}", processed_devices, total_devices), &progress).await;
+                            continue;
+                        }
                     };
 
                     self.add_log(&job_id, ScanLogEntry::new(&device.ip, ScanLogEventType::CredentialTrial,
@@ -697,7 +910,7 @@ impl IpcamScan {
                     let mut success_username: Option<String> = None;
                     let mut success_password: Option<String> = None;
                     let mut auto_completed_label: Option<String> = None;
-                    let mut device_info: Option<OnvifDeviceInfo> = None;
+                    let mut extended_info: Option<OnvifExtendedInfo> = None;
 
                     // Check if device is a confirmed camera (ONVIF or RTSP responded)
                     // Password variations should always be tried for camera_confirmed devices
@@ -727,12 +940,12 @@ impl IpcamScan {
                         };
 
                         for (pass_variant, variant_desc) in &password_variations {
-                            // Try ONVIF with auth first
-                            if let Some(info) = probe_onvif_with_auth(ip, &cred.username, pass_variant, 5000).await {
+                            // Try ONVIF with extended data collection
+                            if let Some(info) = probe_onvif_extended(ip, &cred.username, pass_variant, 5000).await {
                                 success = true;
                                 success_username = Some(cred.username.clone());
                                 success_password = Some(pass_variant.clone());
-                                device_info = Some(info);
+                                extended_info = Some(info);
 
                                 if variant_desc != "original" {
                                     // Password variation worked - log with pass{} label
@@ -744,13 +957,13 @@ impl IpcamScan {
                                         working_password = %pass_variant,
                                         variation = %variant_desc,
                                         label = %auto_completed_label.as_ref().unwrap(),
-                                        "Auto-completed password success via ONVIF"
+                                        "Auto-completed password success via ONVIF (extended)"
                                     );
                                 } else {
                                     tracing::info!(
                                         ip = %device.ip,
                                         username = %cred.username,
-                                        "Credential success via ONVIF"
+                                        "Credential success via ONVIF (extended)"
                                     );
                                 }
                                 break 'cred_loop;
@@ -773,8 +986,9 @@ impl IpcamScan {
                         }
                     }
 
-                    // Update device with credential trial result
-                    let (cred_status, manufacturer, model, firmware, mac, updated_detection) = if success {
+                    // Update device with credential trial result and extended ONVIF data
+                    let (cred_status, manufacturer, model, firmware, mac, updated_detection,
+                         onvif_scopes_json, onvif_network_json, onvif_caps_json) = if success {
                         cameras_verified += 1;
                         self.add_log(&job_id, ScanLogEntry::new(&device.ip, ScanLogEventType::CredentialTrial,
                             &format!("★認証成功: user={}", success_username.as_deref().unwrap_or("?")))).await;
@@ -785,20 +999,60 @@ impl IpcamScan {
                         new_detection.suggested_action = SuggestedAction::None;
                         new_detection.user_message = "カメラ確認済み (認証成功)".to_string();
 
-                        if let Some(info) = device_info {
-                            let mfr = info.manufacturer.clone().unwrap_or_default();
-                            let mdl = info.model.clone().unwrap_or_default();
-                            let fw = info.firmware_version.clone().unwrap_or_default();
+                        if let Some(ref info) = extended_info {
+                            let dev = &info.device_info;
+                            let mfr = dev.manufacturer.clone().unwrap_or_default();
+                            let mdl = dev.model.clone().unwrap_or_default();
+                            let fw = dev.firmware_version.clone().unwrap_or_default();
                             self.add_log(&job_id, ScanLogEntry::new(&device.ip, ScanLogEventType::Info,
                                 &format!("デバイス情報: {} {} ({})", mfr, mdl, fw))).await;
-                            ("success", info.manufacturer, info.model, info.firmware_version, info.mac_address, Some(new_detection))
+
+                            // Log extended data if available
+                            if let Some(ref scopes) = info.scopes {
+                                self.add_log(&job_id, ScanLogEntry::new(&device.ip, ScanLogEventType::Info,
+                                    &format!("ONVIFスコープ: {:?}", scopes.name))).await;
+                            }
+                            if let Some(ref caps) = info.capabilities {
+                                let cap_list: Vec<&str> = [
+                                    if caps.analytics_support { Some("Analytics") } else { None },
+                                    if caps.events_support { Some("Events") } else { None },
+                                    if caps.imaging_support { Some("Imaging") } else { None },
+                                    if caps.media_support { Some("Media") } else { None },
+                                    if caps.ptz_support { Some("PTZ") } else { None },
+                                ].into_iter().flatten().collect();
+                                self.add_log(&job_id, ScanLogEntry::new(&device.ip, ScanLogEventType::Info,
+                                    &format!("ONVIF機能: {}", cap_list.join(", ")))).await;
+                            }
+
+                            // Serialize extended data to JSON
+                            let scopes_json = info.scopes.as_ref()
+                                .and_then(|s| serde_json::to_string(s).ok());
+                            let network_json = if !info.network_interfaces.is_empty() {
+                                serde_json::to_string(&info.network_interfaces).ok()
+                            } else {
+                                None
+                            };
+                            let caps_json = info.capabilities.as_ref()
+                                .and_then(|c| serde_json::to_string(c).ok());
+
+                            (
+                                "success",
+                                dev.manufacturer.clone(),
+                                dev.model.clone(),
+                                dev.firmware_version.clone(),
+                                dev.mac_address.clone(),
+                                Some(new_detection),
+                                scopes_json,
+                                network_json,
+                                caps_json,
+                            )
                         } else {
-                            ("success", None, None, None, None, Some(new_detection))
+                            ("success", None, None, None, None, Some(new_detection), None, None, None)
                         }
                     } else {
                         self.add_log(&job_id, ScanLogEntry::new(&device.ip, ScanLogEventType::CredentialTrial,
                             &format!("認証失敗: 全クレデンシャル不一致"))).await;
-                        ("failed", None, None, None, None, None)
+                        ("failed", None, None, None, None, None, None, None, None)
                     };
 
                     // Update status to 'verified' when credentials succeed
@@ -806,6 +1060,7 @@ impl IpcamScan {
                     let detection_json = updated_detection
                         .map(|d| serde_json::to_string(&d).unwrap_or_else(|_| "{}".to_string()));
 
+                    // Update ipcamscan_devices with extended ONVIF data
                     let _ = sqlx::query(
                         "UPDATE ipcamscan_devices SET \
                          credential_status = ?, \
@@ -833,6 +1088,39 @@ impl IpcamScan {
                     .bind(&device.ip)
                     .execute(&self.pool)
                     .await;
+
+                    // Also update the cameras table if this device is registered
+                    if success && (onvif_scopes_json.is_some() || onvif_network_json.is_some() || onvif_caps_json.is_some()) {
+                        let _ = sqlx::query(
+                            "UPDATE cameras SET \
+                             onvif_scopes = COALESCE(?, onvif_scopes), \
+                             onvif_network_interfaces = COALESCE(?, onvif_network_interfaces), \
+                             onvif_capabilities = COALESCE(?, onvif_capabilities), \
+                             manufacturer = COALESCE(?, manufacturer), \
+                             model = COALESCE(?, model), \
+                             firmware_version = COALESCE(?, firmware_version) \
+                             WHERE ip_address = ?"
+                        )
+                        .bind(&onvif_scopes_json)
+                        .bind(&onvif_network_json)
+                        .bind(&onvif_caps_json)
+                        .bind(&manufacturer)
+                        .bind(&model)
+                        .bind(&firmware)
+                        .bind(&device.ip)
+                        .execute(&self.pool)
+                        .await;
+                    }
+
+                    // Update progress after each device (even if no credentials matched)
+                    processed_devices += 1;
+                    progress.complete_units(units_per_device);
+                    self.update_progress(&job_id, &format!("Stage 7: 認証 {}/{}", processed_devices, total_devices), &progress).await;
+                } else {
+                    // No credentials for this device's subnet - skip but update progress
+                    processed_devices += 1;
+                    progress.complete_units(units_per_device);
+                    self.update_progress(&job_id, &format!("Stage 7: クレデンシャルなし {}/{}", processed_devices, total_devices), &progress).await;
                 }
             }
 
@@ -844,7 +1132,11 @@ impl IpcamScan {
             self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 7完了: {}台の認証成功", cameras_verified))).await;
         } else {
             self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, "Stage 7スキップ: クレデンシャル未設定")).await;
+            // No credentials - complete Phase 5 in one step
+            progress.complete_units(phase_units);
         }
+
+        // Note: Phase 5 progress was updated per-device above (or in one step if skipped)
 
         // Update job summary
         {
@@ -878,7 +1170,7 @@ impl IpcamScan {
     }
 
     /// Verify a device with credentials (Stage 6 completion)
-    /// Also retrieves device info (manufacturer, model, MAC) via ONVIF
+    /// Also retrieves device info (manufacturer, model, MAC) and extended ONVIF data
     pub async fn verify_device(
         &self,
         device_ip: &str,
@@ -901,33 +1193,51 @@ impl IpcamScan {
         let rtsp_uri = scanner::verify_rtsp(ip, 554, username, password, 5000).await;
 
         if let Some(uri) = rtsp_uri {
-            // Also try to get device info via ONVIF with authentication
-            let device_info = probe_onvif_with_auth(ip, username, password, 5000).await;
+            // Get extended ONVIF data
+            let extended_info = probe_onvif_extended(ip, username, password, 5000).await;
 
             // Build the update query with device info if available
-            let (manufacturer, model, firmware, mac, oui_vendor) = if let Some(info) = device_info {
+            let (manufacturer, model, firmware, mac, oui_vendor,
+                 scopes_json, network_json, caps_json) = if let Some(info) = extended_info {
+                let dev = &info.device_info;
                 tracing::info!(
                     ip = %device_ip,
-                    manufacturer = ?info.manufacturer,
-                    model = ?info.model,
-                    mac = ?info.mac_address,
-                    "Retrieved ONVIF device info"
+                    manufacturer = ?dev.manufacturer,
+                    model = ?dev.model,
+                    mac = ?dev.mac_address,
+                    has_scopes = info.scopes.is_some(),
+                    has_capabilities = info.capabilities.is_some(),
+                    "Retrieved extended ONVIF device info"
                 );
 
-                let oui = info.mac_address.as_ref().and_then(|m| scanner::lookup_oui(m));
+                let oui = dev.mac_address.as_ref().and_then(|m| scanner::lookup_oui(m));
+
+                // Serialize extended data
+                let scopes_json = info.scopes.as_ref()
+                    .and_then(|s| serde_json::to_string(s).ok());
+                let network_json = if !info.network_interfaces.is_empty() {
+                    serde_json::to_string(&info.network_interfaces).ok()
+                } else {
+                    None
+                };
+                let caps_json = info.capabilities.as_ref()
+                    .and_then(|c| serde_json::to_string(c).ok());
 
                 (
-                    info.manufacturer,
-                    info.model,
-                    info.firmware_version,
-                    info.mac_address,
+                    dev.manufacturer.clone(),
+                    dev.model.clone(),
+                    dev.firmware_version.clone(),
+                    dev.mac_address.clone(),
                     oui,
+                    scopes_json,
+                    network_json,
+                    caps_json,
                 )
             } else {
-                (None, None, None, None, None)
+                (None, None, None, None, None, None, None, None)
             };
 
-            // Update DB with verification success and device info
+            // Update ipcamscan_devices with verification success and device info
             let result = sqlx::query(
                 "UPDATE ipcamscan_devices SET \
                  verified = 1, \
@@ -953,7 +1263,31 @@ impl IpcamScan {
             .await;
 
             match result {
-                Ok(_) => return Ok(true),
+                Ok(_) => {
+                    // Also update the cameras table with extended ONVIF data
+                    if scopes_json.is_some() || network_json.is_some() || caps_json.is_some() {
+                        let _ = sqlx::query(
+                            "UPDATE cameras SET \
+                             onvif_scopes = COALESCE(?, onvif_scopes), \
+                             onvif_network_interfaces = COALESCE(?, onvif_network_interfaces), \
+                             onvif_capabilities = COALESCE(?, onvif_capabilities), \
+                             manufacturer = COALESCE(?, manufacturer), \
+                             model = COALESCE(?, model), \
+                             firmware_version = COALESCE(?, firmware_version) \
+                             WHERE ip_address = ?"
+                        )
+                        .bind(&scopes_json)
+                        .bind(&network_json)
+                        .bind(&caps_json)
+                        .bind(&manufacturer)
+                        .bind(&model)
+                        .bind(&firmware)
+                        .bind(device_ip)
+                        .execute(&self.pool)
+                        .await;
+                    }
+                    return Ok(true);
+                }
                 Err(e) => {
                     tracing::error!(ip = %device_ip, error = %e, "Failed to update verified device");
                     return Err(Error::Internal(format!("Database error: {}", e)));
@@ -1100,32 +1434,30 @@ impl IpcamScan {
             (None, None)
         };
 
-        // Build RTSP URL with credentials if available
-        let rtsp_url = if let (Some(ref user), Some(ref pass)) = (&use_username, &use_password) {
-            // URL-encode the password (@ becomes %40)
-            let encoded_pass = pass.replace("@", "%40");
-            Some(format!(
-                "rtsp://{}:{}@{}:554/stream1",
-                user, encoded_pass, device_ip
-            ))
+        // FIX-004: Generate both main and sub stream URLs using RtspTemplate
+        let (rtsp_main, rtsp_sub) = if let (Some(ref user), Some(ref pass)) = (&use_username, &use_password) {
+            let template = RtspTemplate::for_family(&device.family);
+            let (main, sub) = template.generate_urls(device_ip, None, user, pass);
+            (Some(main), Some(sub))
         } else {
             // Fall back to stored rtsp_uri (may not have credentials)
-            device.rtsp_uri.clone()
+            (device.rtsp_uri.clone(), None)
         };
 
-        // Insert into cameras table with credentials
+        // Insert into cameras table with credentials (FIX-004: added rtsp_sub)
         let result = sqlx::query(
             "INSERT INTO cameras \
-             (camera_id, name, location, ip_address, mac_address, rtsp_main, rtsp_username, rtsp_password, family, \
+             (camera_id, name, location, ip_address, mac_address, rtsp_main, rtsp_sub, rtsp_username, rtsp_password, family, \
               source_device_id, fid, lacis_id, enabled, polling_enabled) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)"
         )
         .bind(&camera_id)
         .bind(&request.display_name)
         .bind(&request.location)
         .bind(device_ip)
         .bind(&device.mac)
-        .bind(&rtsp_url)
+        .bind(&rtsp_main)
+        .bind(&rtsp_sub)
         .bind(&use_username)
         .bind(&use_password)
         .bind(match device.family {
@@ -1168,7 +1500,8 @@ impl IpcamScan {
                     camera_id,
                     lacis_id,
                     ip_address: device_ip.to_string(),
-                    rtsp_url,
+                    rtsp_main,
+                    rtsp_sub,
                 })
             }
             Err(e) => Err(Error::Internal(format!("Database error: {}", e))),
@@ -1304,326 +1637,7 @@ impl DbDevice {
 // Note: IpcamScan no longer implements Default as it requires a DB pool
 // Use IpcamScan::new(pool) instead
 
-fn default_ports() -> Vec<u16> {
-    vec![554, 2020, 80, 443, 8000, 8080, 8443, 8554]
-}
+// Note: IpcamScan no longer implements Default as it requires a DB pool
+// Use IpcamScan::new(pool) instead
 
-fn extract_subnet(ip: &str) -> String {
-    // Extract /24 subnet
-    let parts: Vec<&str> = ip.split('.').collect();
-    if parts.len() == 4 {
-        format!("{}.{}.{}.0/24", parts[0], parts[1], parts[2])
-    } else {
-        ip.to_string()
-    }
-}
 
-/// Check if an IP address falls within a CIDR subnet
-/// e.g., ip_in_cidr("192.168.96.83", "192.168.96.0/23") = true
-fn ip_in_cidr(ip: &str, cidr: &str) -> bool {
-    use std::net::Ipv4Addr;
-
-    let parts: Vec<&str> = cidr.split('/').collect();
-    if parts.len() != 2 {
-        return false;
-    }
-
-    let network_ip: Ipv4Addr = match parts[0].parse() {
-        Ok(ip) => ip,
-        Err(_) => return false,
-    };
-
-    let prefix: u8 = match parts[1].parse() {
-        Ok(p) if p <= 32 => p,
-        _ => return false,
-    };
-
-    let device_ip: Ipv4Addr = match ip.parse() {
-        Ok(ip) => ip,
-        Err(_) => return false,
-    };
-
-    // Calculate network mask
-    let mask = if prefix == 0 {
-        0u32
-    } else {
-        !((1u32 << (32 - prefix)) - 1)
-    };
-
-    let network_u32 = u32::from(network_ip);
-    let device_u32 = u32::from(device_ip);
-
-    // Check if device IP is within the subnet
-    (device_u32 & mask) == (network_u32 & mask)
-}
-
-fn calculate_confidence(score: u32) -> u8 {
-    // Map score to confidence (0-100)
-    match score {
-        0..=39 => 0,
-        40..=59 => 30,
-        60..=79 => 50,
-        80..=99 => 70,
-        100..=119 => 80,
-        _ => 90,
-    }
-}
-
-/// Determine camera family from device evidence
-fn determine_camera_family(evidence: &scanner::DeviceEvidence) -> CameraFamily {
-    if let Some(ref vendor) = evidence.oui_vendor {
-        let vendor_upper = vendor.to_uppercase();
-        if vendor_upper.contains("TP-LINK") || vendor_upper.contains("TPLINK") {
-            if evidence.onvif_found && evidence.open_ports.contains(&2020) {
-                CameraFamily::Tapo
-            } else if evidence.open_ports.contains(&554) || evidence.open_ports.contains(&2020) {
-                CameraFamily::Tapo // TP-Link with camera ports
-            } else {
-                CameraFamily::Other // TP-Link but possibly not camera
-            }
-        } else if vendor_upper.contains("GOOGLE") {
-            CameraFamily::Nest
-        } else if vendor_upper.contains("AXIS") {
-            CameraFamily::Axis
-        } else if vendor_upper.contains("HIKVISION") || vendor_upper.contains("HIKV") {
-            CameraFamily::Hikvision
-        } else if vendor_upper.contains("DAHUA") {
-            CameraFamily::Dahua
-        } else {
-            CameraFamily::Other
-        }
-    } else if evidence.onvif_found {
-        if evidence.open_ports.contains(&2020) {
-            CameraFamily::Tapo
-        } else {
-            CameraFamily::Other
-        }
-    } else if evidence.open_ports.contains(&554) || evidence.open_ports.contains(&2020) {
-        CameraFamily::Tapo // Assume Tapo-like
-    } else {
-        CameraFamily::Unknown
-    }
-}
-
-/// Generate user-friendly DetectionReason from device evidence
-fn generate_detection_reason(evidence: &scanner::DeviceEvidence) -> DetectionReason {
-    // Convert ProbeResult to ConnectionStatus
-    let onvif_status = match evidence.onvif_result {
-        ProbeResult::NotTested => ConnectionStatus::NotTested,
-        ProbeResult::Success => ConnectionStatus::Success,
-        ProbeResult::AuthRequired => ConnectionStatus::AuthRequired,
-        ProbeResult::Timeout => ConnectionStatus::Timeout,
-        ProbeResult::Refused => ConnectionStatus::Refused,
-        ProbeResult::NoResponse => ConnectionStatus::PortOpenOnly,
-        ProbeResult::Error => ConnectionStatus::Unknown,
-    };
-
-    let rtsp_status = match evidence.rtsp_result {
-        ProbeResult::NotTested => ConnectionStatus::NotTested,
-        ProbeResult::Success => ConnectionStatus::Success,
-        ProbeResult::AuthRequired => ConnectionStatus::AuthRequired,
-        ProbeResult::Timeout => ConnectionStatus::Timeout,
-        ProbeResult::Refused => ConnectionStatus::Refused,
-        ProbeResult::NoResponse => ConnectionStatus::PortOpenOnly,
-        ProbeResult::Error => ConnectionStatus::Unknown,
-    };
-
-    // Collect camera-related open ports
-    let camera_related_ports: &[u16] = &[554, 2020, 8554, 80, 443, 8000, 8080, 8443];
-    let camera_ports: Vec<u16> = evidence.open_ports.iter()
-        .filter(|p| camera_related_ports.contains(p))
-        .cloned()
-        .collect();
-
-    // Determine device type and user message
-    let (device_type, user_message, suggested_action) = if evidence.onvif_found &&
-        (matches!(evidence.rtsp_result, ProbeResult::Success) || evidence.open_ports.contains(&554)) {
-        // ONVIF成功 + RTSP応答あり = カメラ確定
-        (
-            DeviceType::CameraConfirmed,
-            "カメラ確認済み (ONVIF/RTSP応答あり)".to_string(),
-            SuggestedAction::None,
-        )
-    } else if evidence.onvif_found {
-        // ONVIF成功のみ
-        (
-            DeviceType::CameraConfirmed,
-            "カメラ確認済み (ONVIF応答あり)".to_string(),
-            SuggestedAction::None,
-        )
-    } else if matches!(evidence.rtsp_result, ProbeResult::Success) {
-        // RTSP成功
-        (
-            DeviceType::CameraConfirmed,
-            "カメラ確認済み (RTSP応答あり)".to_string(),
-            SuggestedAction::None,
-        )
-    } else if matches!(evidence.onvif_result, ProbeResult::AuthRequired) ||
-              matches!(evidence.rtsp_result, ProbeResult::AuthRequired) {
-        // 認証エラー = カメラの可能性高
-        let vendor_hint = if let Some(ref vendor) = evidence.oui_vendor {
-            let vendor_upper = vendor.to_uppercase();
-            if vendor_upper.contains("TP-LINK") {
-                "Tapoカメラ"
-            } else if vendor_upper.contains("GOOGLE") {
-                "Nest/Googleカメラ"
-            } else if vendor_upper.contains("HIKVISION") {
-                "Hikvisionカメラ"
-            } else if vendor_upper.contains("DAHUA") {
-                "Dahuaカメラ"
-            } else {
-                "カメラ"
-            }
-        } else {
-            "カメラ"
-        };
-        (
-            DeviceType::CameraLikely,
-            format!("{}の可能性あり (認証が必要)", vendor_hint),
-            SuggestedAction::SetCredentials,
-        )
-    } else if let Some(ref vendor) = evidence.oui_vendor {
-        // OUIベンダー一致 + カメラポート開
-        let vendor_upper = vendor.to_uppercase();
-        if vendor_upper.contains("TP-LINK") {
-            if evidence.open_ports.contains(&554) || evidence.open_ports.contains(&2020) {
-                (
-                    DeviceType::CameraLikely,
-                    "Tapoカメラの可能性あり (クレデンシャル設定が必要)".to_string(),
-                    SuggestedAction::SetCredentials,
-                )
-            } else if evidence.open_ports.contains(&80) || evidence.open_ports.contains(&443) {
-                (
-                    DeviceType::CameraPossible,
-                    "TP-Linkデバイス検出 (カメラか要確認)".to_string(),
-                    SuggestedAction::ManualCheck,
-                )
-            } else {
-                (
-                    DeviceType::NetworkDevice,
-                    "TP-Linkネットワーク機器 (スイッチ/ルーター?)".to_string(),
-                    SuggestedAction::Ignore,
-                )
-            }
-        } else if vendor_upper.contains("GOOGLE") {
-            (
-                DeviceType::CameraLikely,
-                "Nest/Googleカメラの可能性あり".to_string(),
-                SuggestedAction::ManualCheck,
-            )
-        } else {
-            (
-                DeviceType::CameraPossible,
-                format!("{}製デバイス検出", vendor),
-                SuggestedAction::ManualCheck,
-            )
-        }
-    } else if evidence.open_ports.contains(&554) || evidence.open_ports.contains(&8554) {
-        // RTSPポート開いているがプローブ失敗
-        (
-            DeviceType::CameraPossible,
-            "RTSPポート検出 (カメラの可能性あり、クレデンシャル設定が必要)".to_string(),
-            SuggestedAction::SetCredentials,
-        )
-    } else if evidence.open_ports.contains(&2020) {
-        // ONVIFポート開いているがプローブ失敗
-        (
-            DeviceType::CameraPossible,
-            "ONVIFポート検出 (カメラの可能性あり、クレデンシャル設定が必要)".to_string(),
-            SuggestedAction::SetCredentials,
-        )
-    } else if evidence.open_ports.contains(&8000) && evidence.open_ports.contains(&8080) {
-        // NVR特有のポートパターン
-        (
-            DeviceType::NvrLikely,
-            "NVR/録画機器の可能性あり".to_string(),
-            SuggestedAction::ManualCheck,
-        )
-    } else if evidence.open_ports.contains(&443) || evidence.open_ports.contains(&8443) {
-        // HTTPS管理ポートのみ
-        (
-            DeviceType::CameraPossible,
-            "Web管理対応デバイス (カメラの可能性あり)".to_string(),
-            SuggestedAction::ManualCheck,
-        )
-    } else {
-        (
-            DeviceType::OtherDevice,
-            "その他のデバイス".to_string(),
-            SuggestedAction::Ignore,
-        )
-    };
-
-    DetectionReason {
-        oui_match: evidence.oui_vendor.clone(),
-        camera_ports,
-        onvif_status,
-        rtsp_status,
-        device_type,
-        user_message,
-        suggested_action,
-    }
-}
-
-/// パスワードバリエーション生成（よくある入力ミス対応）
-/// 1. 先頭文字の大文字/小文字切り替え
-/// 2. 末尾@の追加/削除
-/// Returns: Vec<(password_variation, variation_description)>
-fn generate_password_variations(password: &str) -> Vec<(String, String)> {
-    let mut variations = Vec::new();
-
-    // Helper: toggle first character case
-    let toggle_first_char = |s: &str| -> Option<String> {
-        let mut chars: Vec<char> = s.chars().collect();
-        if chars.is_empty() {
-            return None;
-        }
-        let first = chars[0];
-        if first.is_alphabetic() {
-            chars[0] = if first.is_uppercase() {
-                first.to_lowercase().next().unwrap_or(first)
-            } else {
-                first.to_uppercase().next().unwrap_or(first)
-            };
-            let toggled: String = chars.into_iter().collect();
-            if toggled != s {
-                return Some(toggled);
-            }
-        }
-        None
-    };
-
-    // 1. Original password
-    variations.push((password.to_string(), "original".to_string()));
-
-    // 2. First char toggled
-    if let Some(toggled) = toggle_first_char(password) {
-        variations.push((toggled, "first_char_toggled".to_string()));
-    }
-
-    if password.ends_with('@') {
-        // Password ends with @ - try removing it
-        let without_at = password.trim_end_matches('@').to_string();
-        if !without_at.is_empty() && without_at != password {
-            variations.push((without_at.clone(), "without_trailing_at".to_string()));
-
-            // Also try with first char toggled
-            if let Some(toggled) = toggle_first_char(&without_at) {
-                variations.push((toggled, "without_at+first_toggled".to_string()));
-            }
-        }
-    } else {
-        // Password doesn't end with @ - try adding @, @@, @@@
-        for (suffix, suffix_name) in [("@", "at1"), ("@@", "at2"), ("@@@", "at3")] {
-            let with_suffix = format!("{}{}", password, suffix);
-            variations.push((with_suffix.clone(), format!("with_{}", suffix_name)));
-
-            // Also try with first char toggled
-            if let Some(toggled) = toggle_first_char(&with_suffix) {
-                variations.push((toggled, format!("with_{}+first_toggled", suffix_name)));
-            }
-        }
-    }
-
-    variations
-}

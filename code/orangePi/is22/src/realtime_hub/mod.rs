@@ -32,6 +32,10 @@ pub enum HubMessage {
     /// Notification that a camera's snapshot has been updated
     /// Client should fetch new image via HTTP GET
     SnapshotUpdated(SnapshotUpdatedMessage),
+    /// Polling cycle statistics (broadcast at end of each cycle)
+    CycleStats(CycleStatsMessage),
+    /// Cooldown countdown during inter-cycle pause
+    CooldownTick(CooldownTickMessage),
 }
 
 /// Event log message
@@ -62,7 +66,7 @@ pub struct CameraStatusMessage {
 }
 
 /// Snapshot updated notification
-/// Sent when PollingOrchestrator successfully captures a new frame
+/// Sent when PollingOrchestrator captures a frame (or fails)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotUpdatedMessage {
     pub camera_id: String,
@@ -71,6 +75,48 @@ pub struct SnapshotUpdatedMessage {
     pub primary_event: Option<String>,
     /// Detection severity (0-3)
     pub severity: Option<i32>,
+    /// Processing time in milliseconds (capture + AI inference)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub processing_ms: Option<u64>,
+    /// Error message if capture failed (timeout, network error, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Source of snapshot capture: "go2rtc" (from active stream), "ffmpeg" (direct RTSP), "http" (snapshot URL)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_source: Option<String>,
+}
+
+/// Polling cycle statistics message
+/// Broadcast at the end of each polling cycle
+/// Each subnet broadcasts independently for per-subnet display
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CycleStatsMessage {
+    /// Subnet identifier (e.g., "192.168.125.0/24")
+    pub subnet: String,
+    /// Cycle duration in seconds
+    pub cycle_duration_sec: u64,
+    /// Formatted duration "mm:ss"
+    pub cycle_duration_formatted: String,
+    /// Number of cameras polled in this cycle
+    pub cameras_polled: u32,
+    /// Number of successful polls
+    pub successful: u32,
+    /// Number of failed polls
+    pub failed: u32,
+    /// Cycle number (incrementing)
+    pub cycle_number: u64,
+    /// Timestamp when cycle completed
+    pub completed_at: String,
+}
+
+/// Cooldown tick message
+/// Sent during inter-cycle cooldown period
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CooldownTickMessage {
+    /// Seconds remaining until next cycle
+    pub seconds_remaining: u32,
+    /// Total cooldown duration in seconds
+    pub total_cooldown_sec: u32,
 }
 
 /// Client connection
