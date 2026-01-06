@@ -52,7 +52,8 @@ import { API_BASE_URL } from "@/lib/config"
 interface CameraBrand {
   id: number
   name: string
-  family: string
+  display_name?: string
+  category: string  // API returns "category" (consumer, professional, enterprise)
   is_builtin: boolean
   oui_count: number
   template_count: number
@@ -104,7 +105,7 @@ export function CameraBrandsSettings() {
   const [showAddGenericPath, setShowAddGenericPath] = useState(false)
 
   // Form states
-  const [newBrand, setNewBrand] = useState({ name: "", family: "other" })
+  const [newBrand, setNewBrand] = useState({ name: "", display_name: "", category: "consumer" })
   const [newOui, setNewOui] = useState<{ oui_prefix: string; brand_id: number; description: string; status: "confirmed" | "candidate" | "investigating" }>({ oui_prefix: "", brand_id: 0, description: "", status: "candidate" })
   const [newTemplate, setNewTemplate] = useState({
     brand_id: 0,
@@ -133,19 +134,20 @@ export function CameraBrandsSettings() {
 
       if (brandsRes.ok) {
         const json = await brandsRes.json()
-        setBrands(json.data?.brands || json.brands || [])
+        // API returns {ok: true, data: [...]} format
+        setBrands(Array.isArray(json.data) ? json.data : (json.data?.brands || json.brands || []))
       }
       if (ouiRes.ok) {
         const json = await ouiRes.json()
-        setOuiEntries(json.data?.entries || json.entries || [])
+        setOuiEntries(Array.isArray(json.data) ? json.data : (json.data?.entries || json.entries || []))
       }
       if (templatesRes.ok) {
         const json = await templatesRes.json()
-        setTemplates(json.data?.templates || json.templates || [])
+        setTemplates(Array.isArray(json.data) ? json.data : (json.data?.templates || json.templates || []))
       }
       if (pathsRes.ok) {
         const json = await pathsRes.json()
-        setGenericPaths(json.data?.paths || json.paths || [])
+        setGenericPaths(Array.isArray(json.data) ? json.data : (json.data?.paths || json.paths || []))
       }
     } catch (error) {
       console.error("Failed to fetch camera brand data:", error)
@@ -162,15 +164,23 @@ export function CameraBrandsSettings() {
   const handleAddBrand = async () => {
     if (!newBrand.name.trim()) return
     try {
+      const brandData = {
+        name: newBrand.name,
+        display_name: newBrand.display_name || newBrand.name, // Use name if display_name not set
+        category: newBrand.category,
+      }
       const resp = await fetch(`${API_BASE_URL}/api/settings/camera-brands`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newBrand),
+        body: JSON.stringify(brandData),
       })
       if (resp.ok) {
         setShowAddBrand(false)
-        setNewBrand({ name: "", family: "other" })
+        setNewBrand({ name: "", display_name: "", category: "consumer" })
         fetchData()
+      } else {
+        const json = await resp.json()
+        alert(json.error || json.message || "追加に失敗しました")
       }
     } catch (error) {
       console.error("Failed to add brand:", error)
@@ -394,7 +404,7 @@ export function CameraBrandsSettings() {
                           <div>
                             <p className="font-medium">{brand.name}</p>
                             <p className="text-xs text-muted-foreground">
-                              {brand.family} | OUI: {brand.oui_count} | テンプレート: {brand.template_count}
+                              {brand.category} | OUI: {brand.oui_count} | テンプレート: {brand.template_count}
                             </p>
                           </div>
                         </div>
@@ -599,27 +609,33 @@ export function CameraBrandsSettings() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>ブランド名</Label>
+              <Label>ブランド名（識別子）</Label>
               <Input
                 placeholder="例: Hikvision"
                 value={newBrand.name}
                 onChange={(e) => setNewBrand({ ...newBrand, name: e.target.value })}
               />
+              <p className="text-xs text-muted-foreground">内部識別用（英数字推奨）</p>
             </div>
             <div className="space-y-2">
-              <Label>ファミリー</Label>
-              <Select value={newBrand.family} onValueChange={(v: string) => setNewBrand({ ...newBrand, family: v })}>
+              <Label>表示名</Label>
+              <Input
+                placeholder="例: Hikvision（海康威視）"
+                value={newBrand.display_name}
+                onChange={(e) => setNewBrand({ ...newBrand, display_name: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">空欄の場合はブランド名を使用</p>
+            </div>
+            <div className="space-y-2">
+              <Label>カテゴリ</Label>
+              <Select value={newBrand.category} onValueChange={(v: string) => setNewBrand({ ...newBrand, category: v })}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="tapo">Tapo</SelectItem>
-                  <SelectItem value="vigi">VIGI</SelectItem>
-                  <SelectItem value="hikvision">Hikvision</SelectItem>
-                  <SelectItem value="dahua">Dahua</SelectItem>
-                  <SelectItem value="axis">Axis</SelectItem>
-                  <SelectItem value="nest">Nest</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
+                  <SelectItem value="consumer">Consumer（一般向け）</SelectItem>
+                  <SelectItem value="professional">Professional（業務用）</SelectItem>
+                  <SelectItem value="enterprise">Enterprise（企業向け）</SelectItem>
                 </SelectContent>
               </Select>
             </div>
