@@ -45,9 +45,11 @@ import {
   ChevronRight,
   Code,
   Video,
+  Tags,
 } from "lucide-react"
 import { API_BASE_URL } from "@/lib/config"
 import { PerformanceDashboard } from "@/components/PerformanceDashboard"
+import { CameraBrandsSettings } from "@/components/CameraBrandsSettings"
 
 interface SettingsModalProps {
   open: boolean
@@ -127,6 +129,10 @@ export function SettingsModal({
   const [saving, setSaving] = useState(false)
   // Expanded log entry index for showing raw IS21 log
   const [expandedLogIndex, setExpandedLogIndex] = useState<number | null>(null)
+  // Global timeout settings
+  const [timeoutMainSec, setTimeoutMainSec] = useState<number>(10)
+  const [timeoutSubSec, setTimeoutSubSec] = useState<number>(20)
+  const [savingTimeouts, setSavingTimeouts] = useState(false)
 
   // Fetch IS21 status
   const fetchIS21Status = useCallback(async () => {
@@ -189,6 +195,21 @@ export function SettingsModal({
     }
   }, [])
 
+  // Fetch global timeout settings
+  const fetchTimeoutSettings = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/settings/timeouts`)
+      if (resp.ok) {
+        const json = await resp.json()
+        const data = json.data || json
+        if (data.timeout_main_sec) setTimeoutMainSec(data.timeout_main_sec)
+        if (data.timeout_sub_sec) setTimeoutSubSec(data.timeout_sub_sec)
+      }
+    } catch (error) {
+      console.error("Failed to fetch timeout settings:", error)
+    }
+  }, [])
+
   // Save IS21 URL
   const handleSaveIS21 = async () => {
     setSaving(true)
@@ -225,6 +246,28 @@ export function SettingsModal({
     }
   }
 
+  // Save global timeout settings
+  const handleSaveTimeouts = async () => {
+    setSavingTimeouts(true)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/settings/timeouts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          timeout_main_sec: timeoutMainSec,
+          timeout_sub_sec: timeoutSubSec,
+        }),
+      })
+      if (resp.ok) {
+        await fetchTimeoutSettings()
+      }
+    } catch (error) {
+      console.error("Failed to save timeout settings:", error)
+    } finally {
+      setSavingTimeouts(false)
+    }
+  }
+
   // Load data when modal opens or tab changes
   useEffect(() => {
     if (!open) return
@@ -233,6 +276,9 @@ export function SettingsModal({
       setLoading(true)
       try {
         switch (activeTab) {
+          case "display":
+            await fetchTimeoutSettings()
+            break
           case "is21":
             await fetchIS21Status()
             break
@@ -252,7 +298,7 @@ export function SettingsModal({
     }
 
     fetchData()
-  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs])
+  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings])
 
   // Auto-refresh for active tabs
   useEffect(() => {
@@ -260,6 +306,9 @@ export function SettingsModal({
 
     const interval = setInterval(() => {
       switch (activeTab) {
+        case "display":
+          fetchTimeoutSettings()
+          break
         case "is21":
           fetchIS21Status()
           break
@@ -276,7 +325,7 @@ export function SettingsModal({
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs])
+  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -289,7 +338,7 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="display" className="flex items-center gap-1 text-xs">
               <Video className="h-4 w-4" />
               表示
@@ -313,6 +362,10 @@ export function SettingsModal({
             <TabsTrigger value="dashboard" className="flex items-center gap-1 text-xs">
               <Gauge className="h-4 w-4" />
               統計
+            </TabsTrigger>
+            <TabsTrigger value="brands" className="flex items-center gap-1 text-xs">
+              <Tags className="h-4 w-4" />
+              ブランド
             </TabsTrigger>
           </TabsList>
 
@@ -376,6 +429,74 @@ export function SettingsModal({
                       </Button>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+
+              {/* Global Timeout Settings */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    グローバルタイムアウト設定
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="timeout-main">メインストリームタイムアウト（秒）</Label>
+                    <div className="flex items-center gap-4">
+                      <Input
+                        id="timeout-main"
+                        type="number"
+                        min={5}
+                        max={120}
+                        step={1}
+                        value={timeoutMainSec}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const value = parseInt(e.target.value, 10)
+                          if (!isNaN(value) && value >= 5 && value <= 120) {
+                            setTimeoutMainSec(value)
+                          }
+                        }}
+                        className="w-32"
+                      />
+                      <span className="text-sm text-muted-foreground">現在: {timeoutMainSec}秒</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      メインストリーム（高画質）のスナップショット取得タイムアウト時間。5〜120秒の範囲で設定可能。
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="timeout-sub">サブストリームタイムアウト（秒）</Label>
+                    <div className="flex items-center gap-4">
+                      <Input
+                        id="timeout-sub"
+                        type="number"
+                        min={5}
+                        max={120}
+                        step={1}
+                        value={timeoutSubSec}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const value = parseInt(e.target.value, 10)
+                          if (!isNaN(value) && value >= 5 && value <= 120) {
+                            setTimeoutSubSec(value)
+                          }
+                        }}
+                        className="w-32"
+                      />
+                      <span className="text-sm text-muted-foreground">現在: {timeoutSubSec}秒</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      サブストリーム（低画質フォールバック）のスナップショット取得タイムアウト時間。5〜120秒の範囲で設定可能。
+                    </p>
+                  </div>
+
+                  <Button onClick={handleSaveTimeouts} disabled={savingTimeouts}>
+                    {savingTimeouts ? (
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    タイムアウト設定を保存
+                  </Button>
                 </CardContent>
               </Card>
             </div>
@@ -772,6 +893,13 @@ export function SettingsModal({
           <TabsContent value="dashboard" className="flex-1 overflow-hidden mt-4">
             <div className="h-full overflow-auto">
               <PerformanceDashboard />
+            </div>
+          </TabsContent>
+
+          {/* Brands Tab - Camera Brand/OUI/RTSP Template Management */}
+          <TabsContent value="brands" className="flex-1 overflow-hidden mt-4">
+            <div className="h-full overflow-auto">
+              <CameraBrandsSettings />
             </div>
           </TabsContent>
         </Tabs>
