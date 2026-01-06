@@ -431,3 +431,22 @@ pub struct LostCameraInfo {
     /// New IP address (if StrayChild detected via MAC match)
     pub new_ip_address: Option<String>,
 }
+
+/// Force register request (#83 T2-10)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForceRegisterRequest {
+    pub name: String,
+    pub location: String,
+    pub fid: String,
+}
+
+/// Force register response (#83 T2-10)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForceRegisterResponse {
+    pub camera_id: String,
+    pub lacis_id: String,
+    pub ip_address: String,
+    pub status: String,
+    pub rtsp_main: String,
+    pub message: String,
+}

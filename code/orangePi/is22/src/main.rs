@@ -237,6 +237,19 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Start credential cleanup task (#83 T2-11)
+    // Clears tried_credentials older than 24 hours (runs every hour)
+    let ipcam_scan_cleanup = state.ipcam_scan.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(3600)); // Every hour
+        loop {
+            interval.tick().await;
+            if let Err(e) = ipcam_scan_cleanup.cleanup_tried_credentials().await {
+                tracing::error!(error = %e, "Failed to cleanup expired credentials");
+            }
+        }
+    });
+
     // Start polling orchestrator (is21 AI integration)
     polling.start().await;
     tracing::info!("PollingOrchestrator started - AI integration active");

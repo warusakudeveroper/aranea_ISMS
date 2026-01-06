@@ -1839,6 +1839,246 @@ impl IpcamScan {
             }
         }
     }
+
+    /// Force register a camera without authentication (#83 T2-10)
+    ///
+    /// Creates a camera entry with:
+    /// - status = 'pending_auth' (polling disabled until auth succeeds)
+    /// - polling_enabled = false
+    /// - rtsp_main = basic URL without credentials
+    ///
+    /// Use activate_camera() after successful authentication.
+    pub async fn force_register_camera(
+        &self,
+        device_ip: &str,
+        request: &ForceRegisterRequest,
+    ) -> Result<ForceRegisterResponse> {
+        // Get device from DB (optional - may not exist if force registering unknown device)
+        let device = self.get_device(device_ip).await;
+
+        // Check for duplicate by IP address
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT camera_id FROM cameras WHERE ip_address = ?"
+        )
+        .bind(device_ip)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("Database error: {}", e)))?;
+
+        if let Some((existing_id,)) = existing {
+            return Err(Error::Validation(format!(
+                "Camera with IP {} already exists: {}. Use update or delete first.",
+                device_ip, existing_id
+            )));
+        }
+
+        // Generate IDs
+        let camera_id = format!("cam-{}", Uuid::new_v4());
+        let mac_part = device.as_ref()
+            .and_then(|d| d.mac.as_ref())
+            .map(|m| m.replace(":", "").replace("-", "").to_uppercase())
+            .unwrap_or_else(|| {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                device_ip.hash(&mut hasher);
+                format!("{:012X}", hasher.finish() & 0xFFFFFFFFFFFF)
+            });
+        let lacis_id = format!("3022{}0001", &mac_part[..12.min(mac_part.len())]);
+
+        // Determine family from device or default to Unknown
+        let family = device.as_ref()
+            .map(|d| d.family.clone())
+            .unwrap_or(CameraFamily::Unknown);
+
+        // Generate basic RTSP URL without credentials
+        let template = RtspTemplate::for_family(&family);
+        let rtsp_main = format!("rtsp://{}:{}{}", device_ip, template.default_port, template.main_path);
+
+        // Camera name from request or auto-generate
+        let camera_name = if request.name.is_empty() {
+            format!("Camera_{}", device_ip)
+        } else {
+            request.name.clone()
+        };
+
+        tracing::info!(
+            ip = %device_ip,
+            name = %camera_name,
+            camera_id = %camera_id,
+            "Force registering camera with pending_auth status"
+        );
+
+        // Insert with status = 'pending_auth' and polling_enabled = false
+        let result = sqlx::query(
+            "INSERT INTO cameras \
+             (camera_id, name, location, ip_address, mac_address, rtsp_main, family, \
+              manufacturer, model, fid, lacis_id, status, polling_enabled, enabled) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_auth', false, true)"
+        )
+        .bind(&camera_id)
+        .bind(&camera_name)
+        .bind(&request.location)
+        .bind(device_ip)
+        .bind(device.as_ref().and_then(|d| d.mac.clone()))
+        .bind(&rtsp_main)
+        .bind(match family {
+            CameraFamily::Tapo => "tapo",
+            CameraFamily::Vigi => "vigi",
+            CameraFamily::Nest => "nest",
+            CameraFamily::Axis => "axis",
+            CameraFamily::Hikvision => "hikvision",
+            CameraFamily::Dahua => "dahua",
+            CameraFamily::Other => "other",
+            CameraFamily::Unknown => "unknown",
+        })
+        .bind(device.as_ref().and_then(|d| d.manufacturer.clone()))
+        .bind(device.as_ref().and_then(|d| d.model.clone()))
+        .bind(&request.fid)
+        .bind(&lacis_id)
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Ok(_) => {
+                // Update scan device status if exists
+                if device.is_some() {
+                    let _ = sqlx::query(
+                        "UPDATE ipcamscan_devices SET status = 'approved', last_seen = NOW(3) WHERE ip = ?"
+                    )
+                    .bind(device_ip)
+                    .execute(&self.pool)
+                    .await;
+                }
+
+                Ok(ForceRegisterResponse {
+                    camera_id,
+                    lacis_id,
+                    ip_address: device_ip.to_string(),
+                    status: "pending_auth".to_string(),
+                    rtsp_main,
+                    message: "Camera registered with pending_auth status. Set credentials and call activate_camera after successful authentication.".to_string(),
+                })
+            }
+            Err(e) => Err(Error::Internal(format!("Database error: {}", e))),
+        }
+    }
+
+    /// Activate a pending_auth camera after successful authentication (#83 T2-10)
+    ///
+    /// Updates:
+    /// - status = 'active'
+    /// - polling_enabled = true
+    /// - rtsp_main/rtsp_sub with credentials
+    pub async fn activate_camera(
+        &self,
+        camera_id: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<()> {
+        // Get camera info
+        let camera: Option<(String, String)> = sqlx::query_as(
+            "SELECT ip_address, family FROM cameras WHERE camera_id = ? AND status = 'pending_auth'"
+        )
+        .bind(camera_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("Database error: {}", e)))?;
+
+        let (ip_address, family_str) = camera.ok_or_else(|| {
+            Error::NotFound(format!(
+                "Camera {} not found or not in pending_auth status",
+                camera_id
+            ))
+        })?;
+
+        // Determine family
+        let family = match family_str.as_str() {
+            "tapo" => CameraFamily::Tapo,
+            "vigi" => CameraFamily::Vigi,
+            "nest" => CameraFamily::Nest,
+            "axis" => CameraFamily::Axis,
+            "hikvision" => CameraFamily::Hikvision,
+            "dahua" => CameraFamily::Dahua,
+            "other" => CameraFamily::Other,
+            _ => CameraFamily::Unknown,
+        };
+
+        // Generate RTSP URLs with credentials
+        let template = RtspTemplate::for_family(&family);
+        let (rtsp_main, rtsp_sub) = template.generate_urls(&ip_address, None, username, password);
+
+        tracing::info!(
+            camera_id = %camera_id,
+            ip = %ip_address,
+            "Activating camera: pending_auth -> active"
+        );
+
+        // Update camera
+        let result = sqlx::query(
+            "UPDATE cameras SET \
+             status = 'active', \
+             polling_enabled = true, \
+             rtsp_main = ?, \
+             rtsp_sub = ?, \
+             rtsp_username = ?, \
+             rtsp_password = ?, \
+             updated_at = NOW(3) \
+             WHERE camera_id = ? AND status = 'pending_auth'"
+        )
+        .bind(&rtsp_main)
+        .bind(&rtsp_sub)
+        .bind(username)
+        .bind(password)
+        .bind(camera_id)
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Ok(r) if r.rows_affected() > 0 => {
+                tracing::info!(camera_id = %camera_id, "Camera activated successfully");
+                Ok(())
+            }
+            Ok(_) => Err(Error::NotFound(format!(
+                "Camera {} not found or already active",
+                camera_id
+            ))),
+            Err(e) => Err(Error::Internal(format!("Database error: {}", e))),
+        }
+    }
+
+    /// Cleanup old tried_credentials (24-hour expiry) - #83 T2-11
+    ///
+    /// Should be called periodically (e.g., hourly) to clear stale credential data.
+    pub async fn cleanup_tried_credentials(&self) -> Result<u64> {
+        // Clear tried_credentials from devices scanned more than 24 hours ago
+        // Note: In current implementation, tried_credentials is stored in detection_json
+        // This clears the credential trial results from scan devices
+        let result = sqlx::query(
+            "UPDATE ipcamscan_devices \
+             SET credential_status = 'not_tried', \
+                 credential_username = NULL, \
+                 credential_password = NULL \
+             WHERE last_seen < NOW() - INTERVAL 24 HOUR \
+               AND credential_status IS NOT NULL \
+               AND credential_status != 'not_tried'"
+        )
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Ok(r) => {
+                let affected = r.rows_affected();
+                if affected > 0 {
+                    tracing::info!(
+                        cleared = affected,
+                        "Cleared expired credential data (24h policy)"
+                    );
+                }
+                Ok(affected)
+            }
+            Err(e) => Err(Error::Internal(format!("Database error: {}", e))),
+        }
+    }
 }
 
 /// Database row for scanned device

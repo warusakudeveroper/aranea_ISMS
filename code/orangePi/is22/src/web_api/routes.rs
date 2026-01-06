@@ -112,6 +112,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/ipcamscan/devices", delete(clear_scanned_devices))
         .route("/api/ipcamscan/devices/approve-batch", post(approve_devices_batch))
         .route("/api/ipcamscan/devices/verify-batch", post(verify_devices_batch))
+        .route("/api/ipcamscan/devices/:ip/force-register", post(force_register_device))
+        .route("/api/ipcamscan/cameras/:id/activate", post(activate_pending_camera))
+        .route("/api/ipcamscan/maintenance/cleanup-credentials", post(cleanup_credentials))
         // Subnets
         .route("/api/subnets", get(list_subnets))
         .route("/api/subnets", post(create_subnet))
@@ -2579,6 +2582,67 @@ async fn clear_scanned_devices(State(state): State<AppState>) -> impl IntoRespon
         Ok(count) => Json(serde_json::json!({
             "ok": true,
             "deleted": count
+        })).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Force register device without authentication (#83 T2-10)
+/// Creates camera with status='pending_auth', polling_enabled=false
+async fn force_register_device(
+    State(state): State<AppState>,
+    Path(device_ip): Path<String>,
+    Json(req): Json<crate::ipcam_scan::ForceRegisterRequest>,
+) -> impl IntoResponse {
+    match state.ipcam_scan.force_register_camera(&device_ip, &req).await {
+        Ok(response) => {
+            // Refresh config cache
+            let _ = state.config_store.refresh_cache().await;
+
+            Json(serde_json::json!({
+                "ok": true,
+                "camera": response
+            })).into_response()
+        }
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Activate request for pending_auth camera (#83 T2-10)
+#[derive(Deserialize)]
+struct ActivateCameraRequest {
+    username: String,
+    password: String,
+}
+
+/// Activate a pending_auth camera after authentication success (#83 T2-10)
+async fn activate_pending_camera(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    Json(req): Json<ActivateCameraRequest>,
+) -> impl IntoResponse {
+    match state.ipcam_scan.activate_camera(&camera_id, &req.username, &req.password).await {
+        Ok(_) => {
+            // Refresh config cache so polling picks up the now-active camera
+            let _ = state.config_store.refresh_cache().await;
+
+            Json(serde_json::json!({
+                "ok": true,
+                "message": format!("Camera {} activated (pending_auth -> active)", camera_id)
+            })).into_response()
+        }
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Manually trigger credential cleanup (#83 T2-11)
+/// Normally run by scheduled job, but can be triggered manually for testing
+async fn cleanup_credentials(State(state): State<AppState>) -> impl IntoResponse {
+    match state.ipcam_scan.cleanup_tried_credentials().await {
+        Ok(cleared) => Json(serde_json::json!({
+            "ok": true,
+            "cleared": cleared,
+            "message": format!("Cleared {} expired credential records (24h policy)", cleared)
         })).into_response(),
         Err(e) => e.into_response(),
     }
