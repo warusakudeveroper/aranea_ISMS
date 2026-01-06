@@ -110,13 +110,17 @@ pub struct CycleStatsMessage {
 }
 
 /// Cooldown tick message
-/// Sent during inter-cycle cooldown period
+/// Sent during inter-cycle cooldown period OR pre-cycle countdown
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CooldownTickMessage {
+    /// Subnet identifier (e.g., "192.168.125")
+    pub subnet: String,
     /// Seconds remaining until next cycle
     pub seconds_remaining: u32,
     /// Total cooldown duration in seconds
     pub total_cooldown_sec: u32,
+    /// Phase: "pre_cycle" (3-2-1 countdown before cycle start) or "inter_cycle" (cooldown between cycles)
+    pub phase: String,
 }
 
 /// Client connection

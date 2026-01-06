@@ -1,6 +1,17 @@
 mod rtsp;
 mod onvif;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeResult {
+    NotTested,
+    Success,
+    NoResponse,
+    AuthRequired,
+    Timeout,
+    Refused,
+    Error,
+}
+
 pub use rtsp::{probe_rtsp, probe_rtsp_detailed, verify_rtsp};
 pub use onvif::{
     probe_onvif,

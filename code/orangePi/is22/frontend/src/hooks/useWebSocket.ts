@@ -54,10 +54,12 @@ export interface CycleStatsMessage {
   completed_at: string
 }
 
-// Cooldown countdown during inter-cycle pause
+// Cooldown countdown during inter-cycle pause OR pre-cycle countdown
 export interface CooldownTickMessage {
+  subnet: string
   seconds_remaining: number
   total_cooldown_sec: number
+  phase: string  // "pre_cycle" (3-2-1 countdown before cycle start) or "inter_cycle" (cooldown between cycles)
 }
 
 export interface HubMessage {

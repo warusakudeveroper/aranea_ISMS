@@ -305,8 +305,23 @@ impl PollingOrchestrator {
             let subnet = camera
                 .ip_address
                 .as_ref()
-                .map(|ip| Self::extract_subnet(ip))
-                .unwrap_or_else(|| "unknown".to_string());
+                .map(|ip| {
+                    let s = Self::extract_subnet(ip);
+                    tracing::debug!(
+                        camera_id = %camera.camera_id,
+                        ip_address = %ip,
+                        subnet = %s,
+                        "Camera subnet classification"
+                    );
+                    s
+                })
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                        camera_id = %camera.camera_id,
+                        "Camera has no ip_address, assigning to 'unknown' subnet"
+                    );
+                    "unknown".to_string()
+                });
             groups.entry(subnet).or_default().push(camera.clone());
         }
         groups
@@ -442,7 +457,36 @@ impl PollingOrchestrator {
                 cycle = cycle_number,
                 polling_id = %polling_id,
                 cameras = camera_count,
-                "Subnet cycle started"
+                "Subnet cycle starting with 3-second countdown"
+            );
+
+            // Pre-cycle countdown: 3, 2, 1...
+            // This provides stabilization time after go2rtc registration
+            // and helps ensure cameras are ready before polling starts
+            for countdown in (1..=3).rev() {
+                realtime_hub
+                    .broadcast(HubMessage::CooldownTick(CooldownTickMessage {
+                        subnet: subnet.clone(),
+                        seconds_remaining: countdown,
+                        total_cooldown_sec: 3,
+                        phase: "pre_cycle".to_string(),
+                    }))
+                    .await;
+
+                tracing::debug!(
+                    subnet = %subnet,
+                    countdown = countdown,
+                    "Pre-cycle countdown"
+                );
+
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+
+            tracing::info!(
+                subnet = %subnet,
+                cycle = cycle_number,
+                polling_id = %polling_id,
+                "Subnet cycle started after countdown"
             );
 
             // Poll each camera sequentially within this subnet
@@ -655,6 +699,7 @@ impl PollingOrchestrator {
             // Broadcast cycle stats to frontend (per subnet)
             realtime_hub
                 .broadcast(HubMessage::CycleStats(CycleStatsMessage {
+                    subnet: subnet.clone(),
                     cycle_duration_sec,
                     cycle_duration_formatted: cycle_duration_formatted.clone(),
                     cameras_polled: camera_count,
