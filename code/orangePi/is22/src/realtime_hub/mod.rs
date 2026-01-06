@@ -43,6 +43,8 @@ pub enum HubMessage {
 pub struct EventLogMessage {
     pub event_id: u64,
     pub camera_id: String,
+    /// LacisID for camera lookup in frontend (BUG-001 fix)
+    pub lacis_id: String,
     pub primary_event: String,
     pub severity: i32,
     pub timestamp: String,

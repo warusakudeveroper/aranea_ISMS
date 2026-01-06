@@ -12,6 +12,8 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
+use serde_json::json;
+use sqlx::Row;
 
 use crate::admission_controller::{LeaseRequest, LeaseResponse, StreamQuality};
 use crate::config_store::{Camera, CreateCameraRequest, UpdateCameraRequest};
@@ -64,6 +66,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/settings/timeouts", put(update_global_timeouts))
         // Performance Dashboard API (統合デバッグAPI)
         .route("/api/debug/performance/dashboard", get(get_performance_dashboard))
+        // Test API for E2E testing (BUG-001 verification)
+        .route("/api/test/trigger-event", post(trigger_test_event))
         // IpcamScan
         .route("/api/ipcamscan/jobs", post(create_scan_job))
         .route("/api/ipcamscan/jobs/:id", get(get_scan_job))
@@ -3136,4 +3140,77 @@ async fn handle_websocket(socket: WebSocket, state: AppState) {
 
     // Unregister from hub
     state.realtime.unregister(&conn_id).await;
+}
+
+// ========================================
+// Test API (E2E testing)
+// ========================================
+
+/// Request body for trigger_test_event
+#[derive(Debug, Deserialize)]
+struct TriggerEventRequest {
+    camera_id: Option<String>,
+    lacis_id: Option<String>,
+    severity: Option<i32>,
+    primary_event: Option<String>,
+}
+
+/// Trigger a test event via WebSocket (for E2E testing BUG-001)
+/// POST /api/test/trigger-event
+async fn trigger_test_event(
+    State(state): State<AppState>,
+    Json(req): Json<TriggerEventRequest>,
+) -> impl IntoResponse {
+    use crate::realtime_hub::{EventLogMessage, HubMessage};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TEST_EVENT_COUNTER: AtomicU64 = AtomicU64::new(1_000_000);
+
+    // Get camera info if camera_id provided
+    let (camera_id, lacis_id) = if let Some(cid) = req.camera_id {
+        let cameras = state.config_store.get_cached_cameras().await;
+        let camera = cameras.iter().find(|c| c.camera_id == cid);
+        match camera {
+            Some(c) => (c.camera_id.clone(), c.lacis_id.clone().unwrap_or_default()),
+            None => (cid, req.lacis_id.unwrap_or_default()),
+        }
+    } else {
+        // Use defaults or provided values
+        ("test-camera-001".to_string(), req.lacis_id.unwrap_or("TEST_LACIS_ID".to_string()))
+    };
+
+    let event_id = TEST_EVENT_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let severity = req.severity.unwrap_or(3);
+    let primary_event = req.primary_event.unwrap_or("test_event".to_string());
+    let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+    let event_msg = EventLogMessage {
+        event_id,
+        camera_id: camera_id.clone(),
+        lacis_id: lacis_id.clone(),
+        primary_event: primary_event.clone(),
+        severity,
+        timestamp: timestamp.clone(),
+    };
+
+    // Broadcast via WebSocket
+    state.realtime.broadcast(HubMessage::EventLog(event_msg)).await;
+
+    tracing::info!(
+        event_id = event_id,
+        camera_id = %camera_id,
+        lacis_id = %lacis_id,
+        severity = severity,
+        primary_event = %primary_event,
+        "[TEST] Event broadcast via WebSocket"
+    );
+
+    Json(ApiResponse::success(json!({
+        "event_id": event_id,
+        "camera_id": camera_id,
+        "lacis_id": lacis_id,
+        "severity": severity,
+        "primary_event": primary_event,
+        "timestamp": timestamp,
+        "message": "Test event broadcast via WebSocket"
+    })))
 }

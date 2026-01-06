@@ -10,6 +10,8 @@ import { WS_BASE_URL } from "@/lib/config"
 export interface EventLogMessage {
   event_id: number
   camera_id: string
+  /** LacisID for camera lookup (BUG-001 fix) */
+  lacis_id: string
   primary_event: string
   severity: number
   timestamp: string

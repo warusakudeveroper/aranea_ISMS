@@ -533,9 +533,9 @@ impl PollingOrchestrator {
                     .update_status(&camera.camera_id, is_online)
                     .await
                 {
-                    // Get TID/FID for camera event logging
-                    let tid = camera.tid.as_deref().unwrap_or(&default_tid);
-                    let fid = camera.fid.as_deref().unwrap_or(&default_fid);
+                    // Get TID/FID for camera event logging (use defaults)
+                    let tid = &default_tid;
+                    let fid = &default_fid;
                     let lacis_id = camera.lacis_id.as_deref();
 
                     match status_event {
@@ -891,9 +891,9 @@ impl PollingOrchestrator {
         // === Phase 3: Database save ===
         let save_start = Instant::now();
 
-        // Get TID/FID from camera or use defaults
-        let tid = camera.tid.as_deref().unwrap_or(default_tid);
-        let fid = camera.fid.as_deref().unwrap_or(default_fid);
+        // Get TID/FID from defaults
+        let tid = default_tid;
+        let fid = default_fid;
         let lacis_id = camera.lacis_id.as_deref();
 
         // Parse camera context for persistence
@@ -956,10 +956,12 @@ impl PollingOrchestrator {
                 .await;
 
             // Broadcast detection event via WebSocket
+            // BUG-001 fix: Include lacis_id for frontend camera lookup
             realtime_hub
                 .broadcast(HubMessage::EventLog(EventLogMessage {
                     event_id,
                     camera_id: camera.camera_id.clone(),
+                    lacis_id: camera.lacis_id.clone().unwrap_or_default(),
                     primary_event: event.primary_event.clone(),
                     severity: event.severity,
                     timestamp: captured_at_str.clone(),

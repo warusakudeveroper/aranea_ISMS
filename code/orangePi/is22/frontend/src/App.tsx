@@ -10,6 +10,7 @@ import { LiveViewModal } from "@/components/LiveViewModal"
 import { SettingsModal } from "@/components/SettingsModal"
 import { useApi } from "@/hooks/useApi"
 import { useEventLogStore } from "@/stores/eventLogStore"
+import { API_BASE_URL } from "@/lib/config"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -60,34 +61,12 @@ function App() {
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
   // Per-camera snapshot timestamps (from WebSocket notifications)
   // Key: camera_id, Value: Unix timestamp (ms)
-  // Initialize from localStorage to persist across page reloads
-  const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem("snapshotTimestamps")
-    if (saved) {
-      try {
-        return JSON.parse(saved)
-      } catch {
-        return {}
-      }
-    }
-    return {}
-  })
+  const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>({})
   // Per-camera status (processing time, errors) for slow/timeout display
   const [cameraStatuses, setCameraStatuses] = useState<Record<string, CameraStatus>>({})
   // Per-subnet cycle statistics (from WebSocket notifications)
   // Key: subnet (e.g., "192.168.125.0/24"), Value: CycleStatsMessage
-  // Initialize from localStorage to persist across page reloads
-  const [cycleStats, setCycleStats] = useState<Record<string, CycleStatsMessage>>(() => {
-    const saved = localStorage.getItem("cycleStats")
-    if (saved) {
-      try {
-        return JSON.parse(saved)
-      } catch {
-        return {}
-      }
-    }
-    return {}
-  })
+  const [cycleStats, setCycleStats] = useState<Record<string, CycleStatsMessage>>({})
   // On-air camera IDs (for tile highlighting)
   const [onAirCameraIds, setOnAirCameraIds] = useState<string[]>([])
   // On-air time setting (persisted to localStorage)
@@ -108,16 +87,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem("onairtime_seconds", String(onAirTimeSeconds))
   }, [onAirTimeSeconds])
-
-  // Persist cycleStats to localStorage
-  useEffect(() => {
-    localStorage.setItem("cycleStats", JSON.stringify(cycleStats))
-  }, [cycleStats])
-
-  // Persist snapshotTimestamps to localStorage
-  useEffect(() => {
-    localStorage.setItem("snapshotTimestamps", JSON.stringify(snapshotTimestamps))
-  }, [snapshotTimestamps])
 
   // Grid container ref for measuring height (no-scroll layout)
   const gridContainerRef = useRef<HTMLDivElement>(null)
@@ -144,6 +113,38 @@ function App() {
     fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
   }, [fetchLogs])
 
+  // Initialize snapshot timestamps from backend on page load
+  // This fetches the CURRENT state from detection_logs (most recent captures)
+  useEffect(() => {
+    const initializeFromBackend = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/detection-logs?limit=500`)
+        if (!response.ok) {
+          console.error('[App] Failed to fetch detection logs:', response.status)
+          return
+        }
+
+        const logs = (await response.json()) as DetectionLog[]
+
+        // Extract latest captured_at for each camera
+        const latestTimestamps: Record<string, number> = {}
+        logs.forEach(log => {
+          const timestamp = new Date(log.captured_at).getTime()
+          const existing = latestTimestamps[log.camera_id]
+          if (!existing || timestamp > existing) {
+            latestTimestamps[log.camera_id] = timestamp
+          }
+        })
+
+        setSnapshotTimestamps(latestTimestamps)
+      } catch (error) {
+        console.error('[App] Failed to initialize from backend:', error)
+      }
+    }
+
+    initializeFromBackend()
+  }, []) // Run once on mount
+
   // Camera list (needed for patrol feedback camera names)
   const { data: cameras, loading: camerasLoading, refetch: refetchCameras } = useApi<Camera[]>(
     "/api/cameras",
@@ -152,12 +153,12 @@ function App() {
 
   // Handle real-time event log updates from WebSocket
   // FIX-002: Convert to DetectionLog and set as realtime event (NOT from fetched logs)
+  // BUG-001 fix: Use lacis_id directly from WebSocket message (no camera lookup needed)
   const handleEventLog = useCallback((msg: EventLogMessage) => {
     // Only process events with severity > 0 (AI detections)
     if (msg.severity > 0) {
-      // Find lacis_id from cameras by camera_id
-      const camera = cameras?.find(c => c.camera_id === msg.camera_id)
-      const lacisId = camera?.lacis_id || null
+      // BUG-001 fix: lacis_id is now included in EventLogMessage from backend
+      // No need to lookup from cameras cache (which could be stale or miss new cameras)
 
       // Create DetectionLog for SuggestPane
       // SuggestPane uses: log_id, lacis_id, severity, primary_event
@@ -166,7 +167,7 @@ function App() {
         tid: "",
         fid: "",
         camera_id: msg.camera_id,
-        lacis_id: lacisId,
+        lacis_id: msg.lacis_id || null,  // BUG-001: Use lacis_id from message
         captured_at: msg.timestamp,
         analyzed_at: msg.timestamp,
         primary_event: msg.primary_event,
@@ -201,7 +202,7 @@ function App() {
 
     // Also refetch logs for EventLogPane display (historical list)
     fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
-  }, [fetchLogs, cameras])
+  }, [fetchLogs])  // BUG-001: Removed cameras dependency (lacis_id now from message)
 
   // Handle snapshot update notifications from WebSocket
   // Each camera is notified individually when its snapshot is updated
@@ -327,8 +328,8 @@ function App() {
                     {Object.entries(cycleStats)
                       .sort(([a], [b]) => a.localeCompare(b))
                       .map(([subnet, stats], idx) => {
-                        // Format "192.168.125.0/24" -> "125.0/24"
-                        const shortSubnet = subnet.split('.').slice(2).join('.')
+                        // Format "192.168.125" -> "125.0/24"
+                        const shortSubnet = subnet.split('.')[2] + '.0/24'
                         return (
                           <span key={subnet} className="text-xs">
                             {idx > 0 && <span className="text-muted-foreground mx-1">|</span>}
