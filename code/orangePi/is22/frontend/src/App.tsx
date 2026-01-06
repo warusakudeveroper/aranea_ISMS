@@ -10,6 +10,7 @@ import { LiveViewModal } from "@/components/LiveViewModal"
 import { SettingsModal } from "@/components/SettingsModal"
 import { useApi } from "@/hooks/useApi"
 import { useEventLogStore } from "@/stores/eventLogStore"
+import { API_BASE_URL } from "@/lib/config"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -108,9 +109,40 @@ function App() {
   const { addPatrolFeedback, fetchLogs } = useEventLogStore()
 
   // Fetch detection logs on mount (for SuggestPane currentEvent)
+  // Also initialize snapshot timestamps from logs
   useEffect(() => {
     fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
   }, [fetchLogs])
+
+  // Initialize snapshot timestamps from detection logs on mount
+  // This ensures timestamps are displayed correctly after page reload
+  useEffect(() => {
+    const initializeTimestamps = async () => {
+      try {
+        // Fetch recent logs for all cameras (not just detected)
+        const response = await fetch(`${API_BASE_URL}/api/detection-logs?limit=500`)
+        if (!response.ok) return
+
+        const logs = (await response.json()) as DetectionLog[]
+
+        // Get latest log timestamp for each camera
+        const latestTimestamps: Record<string, number> = {}
+        logs.forEach(log => {
+          const timestamp = new Date(log.captured_at).getTime()
+          const existing = latestTimestamps[log.camera_id]
+          if (!existing || timestamp > existing) {
+            latestTimestamps[log.camera_id] = timestamp
+          }
+        })
+
+        setSnapshotTimestamps(latestTimestamps)
+      } catch (error) {
+        console.error('[App] Failed to initialize snapshot timestamps:', error)
+      }
+    }
+
+    initializeTimestamps()
+  }, []) // Run once on mount
 
   // Camera list (needed for patrol feedback camera names)
   const { data: cameras, loading: camerasLoading, refetch: refetchCameras } = useApi<Camera[]>(
