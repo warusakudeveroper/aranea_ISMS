@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { Video, Globe } from "lucide-react"
 import { Go2rtcPlayer } from "./Go2rtcPlayer"
 import { cn } from "@/lib/utils"
+import { motion, AnimatePresence } from "framer-motion"
 
 // On-air camera state
 interface OnAirCamera {
@@ -36,6 +37,7 @@ interface OnAirCamera {
   // Animation state
   isEntering: boolean
   isExiting: boolean
+  isFloating: boolean  // Floating up animation (when existing camera gets new event)
 }
 
 interface SuggestPaneProps {
@@ -90,18 +92,48 @@ export function SuggestPane({
       const existingIndex = prev.findIndex(c => c.lacisId === eventLacisId && !c.isExiting)
 
       if (existingIndex >= 0) {
-        // Extend: just update lastEventAt and event info (keep video player running)
-        console.log("[SuggestPane] Extending on-air camera:", event.lacis_id)
-        return prev.map((c, i) =>
-          i === existingIndex
-            ? {
-                ...c,
-                lastEventAt: Date.now(),
-                primaryEvent: event.primary_event,
-                severity: event.severity,
-              }
-            : c
-        )
+        // Extend: update lastEventAt and event info
+        console.log("[SuggestPane] Extending on-air camera:", event.lacis_id, "at index:", existingIndex)
+
+        if (existingIndex === 0) {
+          // Already at top - just update event info (no animation needed)
+          return prev.map((c, i) =>
+            i === 0
+              ? {
+                  ...c,
+                  lastEventAt: Date.now(),
+                  primaryEvent: event.primary_event,
+                  severity: event.severity,
+                }
+              : c
+          )
+        }
+
+        // Not at top - move to top with floating animation
+        console.log("[SuggestPane] Floating camera to top:", event.lacis_id)
+        const existing = prev[existingIndex]
+        const updated: OnAirCamera = {
+          ...existing,
+          lastEventAt: Date.now(),
+          primaryEvent: event.primary_event,
+          severity: event.severity,
+          isFloating: true,
+        }
+
+        // Remove from current position and add to top
+        const others = prev.filter((_, i) => i !== existingIndex)
+        const newList = [updated, ...others]
+
+        // Remove floating state after animation
+        setTimeout(() => {
+          setOnAirCameras(current =>
+            current.map(c =>
+              c.id === updated.id ? { ...c, isFloating: false } : c
+            )
+          )
+        }, ANIMATION_DURATION)
+
+        return newList
       }
 
       // New camera - use eventLacisId already normalized above
@@ -124,6 +156,7 @@ export function SuggestPane({
         severity: event.severity,
         isEntering: true,
         isExiting: false,
+        isFloating: false,
       }
 
       // Remove entering state after animation
@@ -225,19 +258,26 @@ export function SuggestPane({
 
   return (
     <div className="h-full flex flex-col">
-      {visibleCameras.map((cam, index) => (
-        <div
-          key={cam.id}
-          className={cn(
-            // Fixed 1/3 height (not flex-1)
-            "h-1/3 relative overflow-hidden bg-black",
-            // Minimal gap (1px border)
-            index > 0 && "border-t border-white/10",
-            // Animation classes
-            cam.isEntering && "animate-slide-in-from-top",
-            cam.isExiting && "animate-slide-out-to-left"
-          )}
-        >
+      <AnimatePresence mode="popLayout">
+        {visibleCameras.map((cam, index) => (
+          <motion.div
+            key={cam.lacisId}
+            layout
+            layoutId={cam.lacisId}
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, x: -100 }}
+            transition={{
+              layout: { type: "spring", stiffness: 300, damping: 30 },
+              opacity: { duration: 0.2 }
+            }}
+            className={cn(
+              // Fixed 1/3 height (not flex-1)
+              "h-1/3 relative overflow-hidden bg-black",
+              // Minimal gap (1px border)
+              index > 0 && "border-t border-white/10"
+            )}
+          >
           {/* Video Player */}
           <Go2rtcPlayer
             cameraId={cam.cameraId}
@@ -278,8 +318,9 @@ export function SuggestPane({
               <span>{cam.ipAddress}</span>
             </div>
           </div>
-        </div>
+        </motion.div>
       ))}
+      </AnimatePresence>
     </div>
   )
 }

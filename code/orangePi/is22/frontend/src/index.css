@@ -182,6 +182,27 @@
     animation: slide-out-to-left 0.3s ease-in forwards;
   }
 
+  /* Float up animation - existing camera moves to top */
+  @keyframes float-up {
+    0% {
+      transform: scale(1);
+      box-shadow: 0 0 0 0 transparent;
+    }
+    50% {
+      transform: scale(1.02);
+      box-shadow: 0 0 20px 4px rgba(251, 191, 36, 0.8);
+    }
+    100% {
+      transform: scale(1);
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+
+  .animate-float-up {
+    animation: float-up 0.3s ease-out forwards;
+    z-index: 10;
+  }
+
   /* Event log slide-in animation (500ms) */
   @keyframes event-slide-in {
     from {
