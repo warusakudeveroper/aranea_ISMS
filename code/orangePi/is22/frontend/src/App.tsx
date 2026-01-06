@@ -190,18 +190,17 @@ function App() {
       setExecutionState(prev => prev === "accessing" ? "waiting" : prev)
     }, 2000)
 
-    // Only update timestamp and patrol feedback for successful captures (no error)
-    if (!msg.error) {
-      // Update snapshot timestamp for CameraGrid
-      setSnapshotTimestamps((prev) => ({
-        ...prev,
-        [msg.camera_id]: Date.now(),
-      }))
+    // Update snapshot timestamp from backend (RFC3339 string -> Unix timestamp ms)
+    // CRITICAL: Use backend timestamp, NOT Date.now() (frontend time)
+    const backendTimestamp = new Date(msg.timestamp).getTime()
+    setSnapshotTimestamps((prev) => ({
+      ...prev,
+      [msg.camera_id]: backendTimestamp,
+    }))
 
-      // Add to patrol feedback for "動いてる安心感"
-      if (cameras) {
-        addPatrolFeedback(msg, cameras)
-      }
+    // Add to patrol feedback for "動いてる安心感" (only for successful captures)
+    if (!msg.error && cameras) {
+      addPatrolFeedback(msg, cameras)
     }
   }, [cameras, addPatrolFeedback])
 
