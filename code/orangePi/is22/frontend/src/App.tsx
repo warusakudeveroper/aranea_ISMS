@@ -66,7 +66,18 @@ function App() {
   const [cameraStatuses, setCameraStatuses] = useState<Record<string, CameraStatus>>({})
   // Per-subnet cycle statistics (from WebSocket notifications)
   // Key: subnet (e.g., "192.168.125.0/24"), Value: CycleStatsMessage
-  const [cycleStats, setCycleStats] = useState<Record<string, CycleStatsMessage>>({})
+  // Initialize from localStorage to persist across page reloads
+  const [cycleStats, setCycleStats] = useState<Record<string, CycleStatsMessage>>(() => {
+    const saved = localStorage.getItem("cycleStats")
+    if (saved) {
+      try {
+        return JSON.parse(saved)
+      } catch {
+        return {}
+      }
+    }
+    return {}
+  })
   // On-air camera IDs (for tile highlighting)
   const [onAirCameraIds, setOnAirCameraIds] = useState<string[]>([])
   // On-air time setting (persisted to localStorage)
@@ -87,6 +98,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem("onairtime_seconds", String(onAirTimeSeconds))
   }, [onAirTimeSeconds])
+
+  // Persist cycleStats to localStorage
+  useEffect(() => {
+    localStorage.setItem("cycleStats", JSON.stringify(cycleStats))
+  }, [cycleStats])
 
   // Grid container ref for measuring height (no-scroll layout)
   const gridContainerRef = useRef<HTMLDivElement>(null)
