@@ -1,36 +1,56 @@
-//! PollingOrchestrator - Sequential Camera Polling
+//! PollingOrchestrator - Subnet-Parallel Camera Polling
 //!
-//! ## Responsibilities
+//! ## Design Intent
 //!
-//! - Sequential camera polling (1 at a time)
-//! - Poll scheduling based on priority
-//! - Integration with SnapshotService, AIClient, and AI Event Log pipeline
+//! サブネットごとに独立したポーリングループを実行する並列システム。
+//! - サブネット分離: 192.168.125.x と 192.168.126.x が独立して巡回
+//! - 同期的処理: 各サブネット内ではカメラを順次処理
+//! - タイムアウト: スナップショット取得に3秒タイムアウト（遅いカメラをスキップ）
+//! - 帯域制御: サブネット内は同時に1台、サブネット間は並列
+//! - AI Event Log: 常に何かしら巡回中なのでログが途切れない
 //!
-//! ## AI Event Log Integration
+//! ## Flow
 //!
-//! Uses new analyze() API with:
-//! - PrevFrameCache for frame diff analysis
-//! - PresetLoader for camera preset configuration
-//! - DetectionLogService for MySQL persistence
+//! ```text
+//! サブネット 192.168.125.x:
+//!   [Camera1取得(3s timeout)] → [is21 POST] → [Camera2取得] → ...
+//! サブネット 192.168.126.x: (並列実行)
+//!   [Camera1取得(3s timeout)] → [is21 POST] → [Camera2取得] → ...
+//! ```
 
 use crate::ai_client::{AIClient, AnalyzeRequest, AnalyzeResponse, CameraContext};
+use crate::camera_status_tracker::{CameraStatusEvent, CameraStatusTracker};
 use crate::config_store::{Camera, ConfigStore};
+use crate::models::ProcessingTimings;
 use crate::detection_log_service::DetectionLogService;
 use crate::event_log_service::{DetectionEvent, EventLogService};
 use crate::prev_frame_cache::{FrameMeta, PrevFrameCache};
 use crate::preset_loader::PresetLoader;
-use crate::snapshot_service::SnapshotService;
+use crate::snapshot_service::{CaptureResult, SnapshotService, SnapshotSource};
+use crate::stream_gateway::StreamGateway;
 use crate::suggest_engine::SuggestEngine;
-use crate::realtime_hub::{CycleStatsMessage, EventLogMessage, HubMessage, RealtimeHub, SnapshotUpdatedMessage};
-use chrono::Utc;
+use crate::realtime_hub::{
+    CooldownTickMessage, CycleStatsMessage, EventLogMessage, HubMessage, RealtimeHub,
+    SnapshotUpdatedMessage,
+};
+use chrono::{DateTime, Utc};
+use rand::Rng;
+use sqlx::MySqlPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tokio::time::interval;
+
+/// Cooldown duration between polling cycles (seconds)
+const CYCLE_COOLDOWN_SEC: u32 = 15;
+/// Snapshot capture timeout in milliseconds (30 seconds for very slow cameras)
+const SNAPSHOT_TIMEOUT_MS: u64 = 30000;
+/// Threshold for "slow camera" warning (10 seconds)
+const SLOW_CAMERA_THRESHOLD_MS: u64 = 10000;
 
 /// PollingOrchestrator instance
 pub struct PollingOrchestrator {
+    pool: MySqlPool,
     config_store: Arc<ConfigStore>,
     snapshot_service: Arc<SnapshotService>,
     ai_client: Arc<AIClient>,
@@ -40,6 +60,8 @@ pub struct PollingOrchestrator {
     preset_loader: Arc<PresetLoader>,
     suggest_engine: Arc<SuggestEngine>,
     realtime_hub: Arc<RealtimeHub>,
+    camera_status_tracker: Arc<CameraStatusTracker>,
+    stream_gateway: Arc<StreamGateway>,
     running: Arc<RwLock<bool>>,
     /// Default TID (tenant ID) for logging
     default_tid: String,
@@ -50,6 +72,7 @@ pub struct PollingOrchestrator {
 impl PollingOrchestrator {
     /// Create new PollingOrchestrator
     pub fn new(
+        pool: MySqlPool,
         config_store: Arc<ConfigStore>,
         snapshot_service: Arc<SnapshotService>,
         ai_client: Arc<AIClient>,
@@ -59,10 +82,13 @@ impl PollingOrchestrator {
         preset_loader: Arc<PresetLoader>,
         suggest_engine: Arc<SuggestEngine>,
         realtime_hub: Arc<RealtimeHub>,
+        camera_status_tracker: Arc<CameraStatusTracker>,
+        stream_gateway: Arc<StreamGateway>,
         default_tid: String,
         default_fid: String,
     ) -> Self {
         Self {
+            pool,
             config_store,
             snapshot_service,
             ai_client,
@@ -72,13 +98,119 @@ impl PollingOrchestrator {
             preset_loader,
             suggest_engine,
             realtime_hub,
+            camera_status_tracker,
+            stream_gateway,
             running: Arc::new(RwLock::new(false)),
             default_tid,
             default_fid,
         }
     }
 
-    /// Start polling loop
+    /// Generate a unique polling ID
+    /// Format: {subnet_octet3}-{YYMMDD}-{HHmmss}-{rand4}
+    /// Example: 125-250103-143052-7a3f
+    fn generate_polling_id(subnet: &str, now: DateTime<Utc>) -> String {
+        // Extract subnet third octet (e.g., "192.168.125" -> "125")
+        let octet3 = subnet.split('.').nth(2).unwrap_or("0");
+
+        // Format timestamp
+        let date_str = now.format("%y%m%d").to_string();
+        let time_str = now.format("%H%M%S").to_string();
+
+        // Generate 4-char random hex
+        let rand_hex: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(4)
+            .map(|c| c.to_ascii_lowercase() as char)
+            .collect();
+
+        format!("{}-{}-{}-{}", octet3, date_str, time_str, rand_hex)
+    }
+
+    /// Extract subnet third octet as integer
+    fn extract_subnet_octet3(subnet: &str) -> i32 {
+        subnet
+            .split('.')
+            .nth(2)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// Insert a new polling cycle record (at cycle start)
+    async fn insert_polling_cycle(
+        pool: &MySqlPool,
+        polling_id: &str,
+        subnet: &str,
+        cycle_number: u64,
+        camera_count: u32,
+        started_at: DateTime<Utc>,
+    ) -> crate::error::Result<()> {
+        let subnet_octet3 = Self::extract_subnet_octet3(subnet);
+
+        sqlx::query(
+            r#"
+            INSERT INTO polling_cycles (
+                polling_id, subnet, subnet_octet3,
+                started_at, cycle_number, camera_count,
+                status
+            ) VALUES (?, ?, ?, ?, ?, ?, 'running')
+            "#,
+        )
+        .bind(polling_id)
+        .bind(subnet)
+        .bind(subnet_octet3)
+        .bind(started_at)
+        .bind(cycle_number)
+        .bind(camera_count)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Update polling cycle record (at cycle completion)
+    async fn complete_polling_cycle(
+        pool: &MySqlPool,
+        polling_id: &str,
+        success_count: u32,
+        failed_count: u32,
+        timeout_count: u32,
+        duration_ms: i32,
+        avg_processing_ms: Option<i32>,
+    ) -> crate::error::Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE polling_cycles
+            SET completed_at = NOW(3),
+                success_count = ?,
+                failed_count = ?,
+                timeout_count = ?,
+                duration_ms = ?,
+                avg_processing_ms = ?,
+                status = 'completed'
+            WHERE polling_id = ?
+            "#,
+        )
+        .bind(success_count)
+        .bind(failed_count)
+        .bind(timeout_count)
+        .bind(duration_ms)
+        .bind(avg_processing_ms)
+        .bind(polling_id)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Start polling loops (subnet-parallel)
+    ///
+    /// ## Design
+    ///
+    /// - サブネットごとに独立したポーリングループを起動
+    /// - 各サブネット内ではカメラを順次処理（同期的）
+    /// - スナップショット取得に3秒タイムアウト（遅いカメラはスキップ）
+    /// - サブネット間は完全に並列（IS21がキューイング）
     pub async fn start(&self) {
         {
             let mut running = self.running.write().await;
@@ -89,28 +221,458 @@ impl PollingOrchestrator {
             *running = true;
         }
 
-        tracing::info!("Starting polling orchestrator with AI Event Log pipeline");
+        // Get enabled cameras and group by subnet
+        let cameras = self.config_store.get_cached_cameras().await;
+        let enabled: Vec<_> = cameras
+            .into_iter()
+            .filter(|c| c.enabled && c.polling_enabled)
+            .collect();
 
-        let config_store = self.config_store.clone();
-        let snapshot_service = self.snapshot_service.clone();
-        let ai_client = self.ai_client.clone();
-        let event_log = self.event_log.clone();
-        let detection_log = self.detection_log.clone();
-        let prev_frame_cache = self.prev_frame_cache.clone();
-        let preset_loader = self.preset_loader.clone();
-        let suggest_engine = self.suggest_engine.clone();
-        let realtime_hub = self.realtime_hub.clone();
-        let running = self.running.clone();
-        let default_tid = self.default_tid.clone();
-        let default_fid = self.default_fid.clone();
+        let subnets = Self::group_cameras_by_subnet(&enabled);
 
-        tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(5)); // Check interval
-            let mut cycle_counters: HashMap<String, u64> = HashMap::new(); // Per-subnet cycle numbers
+        tracing::info!(
+            cooldown_sec = CYCLE_COOLDOWN_SEC,
+            snapshot_timeout_ms = SNAPSHOT_TIMEOUT_MS,
+            subnet_count = subnets.len(),
+            total_cameras = enabled.len(),
+            "Starting subnet-parallel polling orchestrator"
+        );
 
-            loop {
-                interval.tick().await;
+        // Spawn a polling loop for each subnet
+        for (subnet, cameras) in subnets {
+            let pool = self.pool.clone();
+            let config_store = self.config_store.clone();
+            let snapshot_service = self.snapshot_service.clone();
+            let ai_client = self.ai_client.clone();
+            let event_log = self.event_log.clone();
+            let detection_log = self.detection_log.clone();
+            let prev_frame_cache = self.prev_frame_cache.clone();
+            let preset_loader = self.preset_loader.clone();
+            let suggest_engine = self.suggest_engine.clone();
+            let realtime_hub = self.realtime_hub.clone();
+            let camera_status_tracker = self.camera_status_tracker.clone();
+            let stream_gateway = self.stream_gateway.clone();
+            let running = self.running.clone();
+            let default_tid = self.default_tid.clone();
+            let default_fid = self.default_fid.clone();
 
+            let initial_camera_count = cameras.len();
+
+            tracing::info!(
+                subnet = %subnet,
+                initial_cameras = initial_camera_count,
+                "Spawning subnet polling loop (dynamic camera detection enabled)"
+            );
+
+            tokio::spawn(async move {
+                Self::run_subnet_loop(
+                    pool,
+                    subnet,
+                    config_store,
+                    snapshot_service,
+                    ai_client,
+                    event_log,
+                    detection_log,
+                    prev_frame_cache,
+                    preset_loader,
+                    suggest_engine,
+                    realtime_hub,
+                    camera_status_tracker,
+                    stream_gateway,
+                    running,
+                    default_tid,
+                    default_fid,
+                )
+                .await;
+            });
+        }
+    }
+
+    /// Extract subnet from IP address (first 3 octets)
+    fn extract_subnet(ip: &str) -> String {
+        let parts: Vec<&str> = ip.split('.').collect();
+        if parts.len() >= 3 {
+            format!("{}.{}.{}", parts[0], parts[1], parts[2])
+        } else {
+            "unknown".to_string()
+        }
+    }
+
+    /// Group cameras by their subnet
+    fn group_cameras_by_subnet(cameras: &[Camera]) -> HashMap<String, Vec<Camera>> {
+        let mut groups: HashMap<String, Vec<Camera>> = HashMap::new();
+        for camera in cameras {
+            let subnet = camera
+                .ip_address
+                .as_ref()
+                .map(|ip| Self::extract_subnet(ip))
+                .unwrap_or_else(|| "unknown".to_string());
+            groups.entry(subnet).or_default().push(camera.clone());
+        }
+        groups
+    }
+
+    /// Run polling loop for a specific subnet
+    #[allow(clippy::too_many_arguments)]
+    async fn run_subnet_loop(
+        pool: MySqlPool,
+        subnet: String,
+        config_store: Arc<ConfigStore>,
+        snapshot_service: Arc<SnapshotService>,
+        ai_client: Arc<AIClient>,
+        event_log: Arc<EventLogService>,
+        detection_log: Arc<DetectionLogService>,
+        prev_frame_cache: Arc<PrevFrameCache>,
+        preset_loader: Arc<PresetLoader>,
+        suggest_engine: Arc<SuggestEngine>,
+        realtime_hub: Arc<RealtimeHub>,
+        camera_status_tracker: Arc<CameraStatusTracker>,
+        stream_gateway: Arc<StreamGateway>,
+        running: Arc<RwLock<bool>>,
+        default_tid: String,
+        default_fid: String,
+    ) {
+        let mut cycle_number: u64 = 0;
+
+        loop {
+            // Check if still running
+            {
+                let is_running = running.read().await;
+                if !*is_running {
+                    break;
+                }
+            }
+
+            cycle_number += 1;
+            let cycle_start = Instant::now();
+            let cycle_started_at = Utc::now();
+            let mut successful: u32 = 0;
+            let mut failed: u32 = 0;
+            let mut timeout_count: u32 = 0;
+            let mut processing_times: Vec<i32> = Vec::new();
+
+            // Generate polling ID for this cycle
+            let polling_id = Self::generate_polling_id(&subnet, cycle_started_at);
+
+            // Refresh camera list for this subnet (dynamically - new cameras included)
+            let all_cameras = config_store.get_cached_cameras().await;
+            let enabled: Vec<_> = all_cameras
+                .into_iter()
+                .filter(|c| {
+                    c.enabled && c.polling_enabled &&
+                    c.ip_address.as_ref()
+                        .map(|ip| Self::extract_subnet(ip) == subnet)
+                        .unwrap_or(false)
+                })
+                .collect();
+
+            let camera_count = enabled.len() as u32;
+
+            // === go2rtc Stream Registration at Cycle Start ===
+            // Register all cameras with RTSP URLs to go2rtc at the beginning of each cycle.
+            // This ensures go2rtc always has fresh stream registrations synced with DB.
+            // - Idempotent: go2rtc handles duplicates gracefully
+            // - No orphans: deleted cameras won't be re-registered next cycle
+            // - IS21 lag window: registration completes during AI inference of previous cameras
+            let mut go2rtc_registered: u32 = 0;
+            let mut go2rtc_failed: u32 = 0;
+            for camera in &enabled {
+                // Use camera_id directly as stream name (already has cam- prefix)
+                let stream_name = camera.camera_id.clone();
+
+                // Get RTSP URL (prefer rtsp_main, fallback to rtsp_sub)
+                let rtsp_url = camera.rtsp_main.as_ref()
+                    .or(camera.rtsp_sub.as_ref())
+                    .cloned();
+
+                if let Some(url) = rtsp_url {
+                    // Register to go2rtc (non-blocking, best-effort)
+                    match stream_gateway.add_source(&stream_name, &url).await {
+                        Ok(_) => {
+                            go2rtc_registered += 1;
+                            tracing::debug!(
+                                camera_id = %camera.camera_id,
+                                stream_name = %stream_name,
+                                "go2rtc stream registered"
+                            );
+                        }
+                        Err(e) => {
+                            go2rtc_failed += 1;
+                            tracing::warn!(
+                                camera_id = %camera.camera_id,
+                                stream_name = %stream_name,
+                                error = %e,
+                                "go2rtc stream registration failed"
+                            );
+                        }
+                    }
+                }
+            }
+
+            if go2rtc_registered > 0 || go2rtc_failed > 0 {
+                tracing::info!(
+                    subnet = %subnet,
+                    cycle = cycle_number,
+                    go2rtc_registered = go2rtc_registered,
+                    go2rtc_failed = go2rtc_failed,
+                    "go2rtc streams refreshed at cycle start"
+                );
+            }
+
+            // Insert polling cycle record at start
+            if let Err(e) = Self::insert_polling_cycle(
+                &pool,
+                &polling_id,
+                &subnet,
+                cycle_number,
+                camera_count,
+                cycle_started_at,
+            )
+            .await
+            {
+                tracing::warn!(
+                    polling_id = %polling_id,
+                    error = %e,
+                    "Failed to insert polling cycle record"
+                );
+            }
+
+            tracing::info!(
+                subnet = %subnet,
+                cycle = cycle_number,
+                polling_id = %polling_id,
+                cameras = camera_count,
+                "Subnet cycle started"
+            );
+
+            // Poll each camera sequentially within this subnet
+            for (index, camera) in enabled.iter().enumerate() {
+                // Check if still running before each camera
+                {
+                    let is_running = running.read().await;
+                    if !*is_running {
+                        break;
+                    }
+                }
+
+                tracing::debug!(
+                    subnet = %subnet,
+                    cycle = cycle_number,
+                    polling_id = %polling_id,
+                    camera = index + 1,
+                    total = camera_count,
+                    camera_id = %camera.camera_id,
+                    "Polling camera"
+                );
+
+                // Poll camera with timeout
+                let poll_result = Self::poll_camera_with_ai_log(
+                    camera,
+                    &snapshot_service,
+                    &ai_client,
+                    &event_log,
+                    &detection_log,
+                    &prev_frame_cache,
+                    &preset_loader,
+                    &suggest_engine,
+                    &realtime_hub,
+                    &config_store,
+                    &default_tid,
+                    &default_fid,
+                    Some(&polling_id),
+                )
+                .await;
+
+                // Track camera connection status and generate events
+                let is_online = poll_result.is_ok();
+                if let Some(status_event) = camera_status_tracker
+                    .update_status(&camera.camera_id, is_online)
+                    .await
+                {
+                    // Get TID/FID for camera event logging
+                    let tid = camera.tid.as_deref().unwrap_or(&default_tid);
+                    let fid = camera.fid.as_deref().unwrap_or(&default_fid);
+                    let lacis_id = camera.lacis_id.as_deref();
+
+                    match status_event {
+                        CameraStatusEvent::Lost => {
+                            // Log camera lost event (severity 4)
+                            let error_msg = if !is_online {
+                                poll_result.as_ref().err().map(|e| format!("{}", e))
+                            } else {
+                                None
+                            };
+                            if let Err(e) = detection_log
+                                .save_camera_event(
+                                    tid,
+                                    fid,
+                                    &camera.camera_id,
+                                    lacis_id,
+                                    "camera_lost",
+                                    4,
+                                    error_msg.as_deref(),
+                                )
+                                .await
+                            {
+                                tracing::error!(
+                                    camera_id = %camera.camera_id,
+                                    error = %e,
+                                    "Failed to save camera_lost event"
+                                );
+                            }
+                        }
+                        CameraStatusEvent::Recovered => {
+                            // Log camera recovered event (severity 2)
+                            if let Err(e) = detection_log
+                                .save_camera_event(
+                                    tid,
+                                    fid,
+                                    &camera.camera_id,
+                                    lacis_id,
+                                    "camera_recovered",
+                                    2,
+                                    None,
+                                )
+                                .await
+                            {
+                                tracing::error!(
+                                    camera_id = %camera.camera_id,
+                                    error = %e,
+                                    "Failed to save camera_recovered event"
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // Handle poll result
+                match poll_result {
+                    Ok(processing_ms) => {
+                        successful += 1;
+                        if let Some(ms) = processing_ms {
+                            processing_times.push(ms);
+                        }
+                    }
+                    Err(e) => {
+                        let error_str = format!("{}", e);
+                        if error_str.contains("timeout") || error_str.contains("Timeout") {
+                            timeout_count += 1;
+                            tracing::warn!(
+                                subnet = %subnet,
+                                cycle = cycle_number,
+                                polling_id = %polling_id,
+                                camera_id = %camera.camera_id,
+                                "Camera snapshot timeout (skipped)"
+                            );
+                            // Broadcast timeout error to frontend
+                            realtime_hub
+                                .broadcast(HubMessage::SnapshotUpdated(SnapshotUpdatedMessage {
+                                    camera_id: camera.camera_id.clone(),
+                                    timestamp: Utc::now().to_rfc3339(),
+                                    primary_event: None,
+                                    severity: None,
+                                    processing_ms: Some(SNAPSHOT_TIMEOUT_MS),
+                                    error: Some("timeout".to_string()),
+                                    snapshot_source: None,
+                                }))
+                                .await;
+                        } else {
+                            failed += 1;
+                            tracing::error!(
+                                subnet = %subnet,
+                                cycle = cycle_number,
+                                polling_id = %polling_id,
+                                camera_id = %camera.camera_id,
+                                error = %e,
+                                "Camera poll failed"
+                            );
+                            // Broadcast error to frontend
+                            realtime_hub
+                                .broadcast(HubMessage::SnapshotUpdated(SnapshotUpdatedMessage {
+                                    camera_id: camera.camera_id.clone(),
+                                    timestamp: Utc::now().to_rfc3339(),
+                                    primary_event: None,
+                                    severity: None,
+                                    processing_ms: None,
+                                    error: Some(error_str),
+                                    snapshot_source: None,
+                                }))
+                                .await;
+                        }
+                    }
+                }
+            }
+
+            // Cycle completed - calculate stats
+            let cycle_duration = cycle_start.elapsed();
+            let cycle_duration_sec = cycle_duration.as_secs();
+            let cycle_duration_ms = cycle_duration.as_millis() as i32;
+            let minutes = cycle_duration_sec / 60;
+            let seconds = cycle_duration_sec % 60;
+            let cycle_duration_formatted = format!("{:02}:{:02}", minutes, seconds);
+
+            // Calculate average processing time
+            let avg_processing_ms = if !processing_times.is_empty() {
+                Some((processing_times.iter().sum::<i32>() as f32 / processing_times.len() as f32) as i32)
+            } else {
+                None
+            };
+
+            // Update polling cycle record at completion
+            if let Err(e) = Self::complete_polling_cycle(
+                &pool,
+                &polling_id,
+                successful,
+                failed,
+                timeout_count,
+                cycle_duration_ms,
+                avg_processing_ms,
+            )
+            .await
+            {
+                tracing::warn!(
+                    polling_id = %polling_id,
+                    error = %e,
+                    "Failed to update polling cycle record"
+                );
+            }
+
+            tracing::info!(
+                subnet = %subnet,
+                cycle = cycle_number,
+                polling_id = %polling_id,
+                duration_sec = cycle_duration_sec,
+                duration_ms = cycle_duration_ms,
+                duration = %cycle_duration_formatted,
+                cameras = camera_count,
+                successful = successful,
+                failed = failed,
+                timeout = timeout_count,
+                avg_processing_ms = ?avg_processing_ms,
+                "Subnet cycle completed"
+            );
+
+            // Broadcast cycle stats to frontend (per subnet)
+            realtime_hub
+                .broadcast(HubMessage::CycleStats(CycleStatsMessage {
+                    cycle_duration_sec,
+                    cycle_duration_formatted: cycle_duration_formatted.clone(),
+                    cameras_polled: camera_count,
+                    successful,
+                    failed: failed + timeout_count, // Include timeouts in failed count
+                    cycle_number,
+                    completed_at: Utc::now().to_rfc3339(),
+                }))
+                .await;
+
+            // Cooldown period (no countdown broadcast - not meaningful for parallel subnets)
+            tracing::debug!(
+                subnet = %subnet,
+                cooldown_sec = CYCLE_COOLDOWN_SEC,
+                "Starting inter-cycle cooldown"
+            );
+
+            for remaining in (1..=CYCLE_COOLDOWN_SEC).rev() {
                 // Check if still running
                 {
                     let is_running = running.read().await;
@@ -119,104 +681,11 @@ impl PollingOrchestrator {
                     }
                 }
 
-                // Get enabled cameras
-                let cameras = config_store.get_cached_cameras().await;
-                let enabled: Vec<_> = cameras
-                    .into_iter()
-                    .filter(|c| c.enabled && c.polling_enabled)
-                    .collect();
-
-                // Group cameras by subnet
-                let mut by_subnet: HashMap<String, Vec<_>> = HashMap::new();
-                for camera in enabled {
-                    let subnet = if let Some(ref rtsp_main) = camera.rtsp_main {
-                        Self::extract_subnet_from_rtsp_url(rtsp_main)
-                    } else if let Some(ref ip) = camera.ip_address {
-                        Self::extract_subnet(ip)
-                    } else {
-                        "unknown".to_string()
-                    };
-                    by_subnet.entry(subnet).or_insert_with(Vec::new).push(camera);
-                }
-
-                // Poll each subnet independently
-                for (subnet, cameras) in by_subnet {
-                    let cycle_start = Instant::now();
-                    let mut successful = 0u32;
-                    let mut failed = 0u32;
-                    let camera_count = cameras.len() as u32;
-
-                    // Poll each camera in this subnet sequentially
-                    for camera in cameras {
-                        match Self::poll_camera_with_ai_log(
-                            &camera,
-                            &snapshot_service,
-                            &ai_client,
-                            &event_log,
-                            &detection_log,
-                            &prev_frame_cache,
-                            &preset_loader,
-                            &suggest_engine,
-                            &realtime_hub,
-                            &config_store,
-                            &default_tid,
-                            &default_fid,
-                        )
-                        .await
-                        {
-                            Ok(_) => successful += 1,
-                            Err(e) => {
-                                failed += 1;
-                                tracing::error!(
-                                    camera_id = %camera.camera_id,
-                                    error = %e,
-                                    "Camera poll failed"
-                                );
-                            }
-                        }
-
-                        // Small delay between cameras
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
-
-                    // Calculate cycle duration
-                    let cycle_duration = cycle_start.elapsed();
-                    let cycle_duration_sec = cycle_duration.as_secs();
-                    let mins = cycle_duration_sec / 60;
-                    let secs = cycle_duration_sec % 60;
-                    let cycle_duration_formatted = format!("{:02}:{:02}", mins, secs);
-
-                    // Increment cycle number for this subnet
-                    let cycle_number = cycle_counters.entry(subnet.clone()).or_insert(0);
-                    *cycle_number += 1;
-
-                    // Broadcast cycle statistics
-                    realtime_hub
-                        .broadcast(HubMessage::CycleStats(CycleStatsMessage {
-                            subnet: subnet.clone(),
-                            cycle_duration_sec,
-                            cycle_duration_formatted,
-                            cameras_polled: camera_count,
-                            successful,
-                            failed,
-                            cycle_number: *cycle_number,
-                            completed_at: Utc::now().to_rfc3339(),
-                        }))
-                        .await;
-
-                    tracing::debug!(
-                        subnet = %subnet,
-                        cycle_number = %cycle_number,
-                        duration = %cycle_duration_formatted,
-                        successful,
-                        failed,
-                        "Subnet cycle completed"
-                    );
-                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
+        }
 
-            tracing::info!("Polling orchestrator stopped");
-        });
+        tracing::info!(subnet = %subnet, "Subnet polling loop stopped");
     }
 
     /// Stop polling loop
@@ -238,6 +707,8 @@ impl PollingOrchestrator {
     /// 7. Persist to MySQL via DetectionLogService
     /// 8. Legacy: update in-memory EventLogService
     /// 9. Broadcast updates via RealtimeHub
+    ///
+    /// Returns: Ok(Some(processing_ms)) on success, or error
     #[allow(clippy::too_many_arguments)]
     async fn poll_camera_with_ai_log(
         camera: &Camera,
@@ -252,14 +723,59 @@ impl PollingOrchestrator {
         config_store: &ConfigStore,
         default_tid: &str,
         default_fid: &str,
-    ) -> crate::error::Result<()> {
+        polling_cycle_id: Option<&str>,
+    ) -> crate::error::Result<Option<i32>> {
         let start_time = Instant::now();
         let captured_at = Utc::now();
         let captured_at_str = captured_at.to_rfc3339();
 
-        // 1. Capture snapshot via ffmpeg
-        let image_data = snapshot_service.capture(camera).await?;
+        // Get camera IP for logging
+        let camera_ip = camera.ip_address.as_deref().unwrap_or("unknown");
+        let preset_id = camera.preset_id.as_deref().unwrap_or("balanced");
+
+        // === Phase 1: Snapshot capture ===
+        let snapshot_start = Instant::now();
+        let capture_result = match tokio::time::timeout(
+            Duration::from_millis(SNAPSHOT_TIMEOUT_MS),
+            snapshot_service.capture(camera),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    camera_id = %camera.camera_id,
+                    camera_ip = %camera_ip,
+                    preset_id = %preset_id,
+                    error = %e,
+                    "Snapshot capture failed"
+                );
+                return Err(e);
+            }
+            Err(_) => {
+                tracing::warn!(
+                    camera_id = %camera.camera_id,
+                    camera_ip = %camera_ip,
+                    preset_id = %preset_id,
+                    timeout_ms = SNAPSHOT_TIMEOUT_MS,
+                    "Snapshot capture timeout"
+                );
+                return Err(crate::error::Error::Internal(format!(
+                    "Snapshot capture timeout ({}ms) for camera {}",
+                    SNAPSHOT_TIMEOUT_MS, camera.camera_id
+                )));
+            }
+        };
+        let snapshot_ms = snapshot_start.elapsed().as_millis() as i32;
+        let image_data = capture_result.data;
+        let snapshot_source = capture_result.source;
         let image_size = image_data.len();
+
+        // Generate image filename for logging
+        let image_filename = format!(
+            "{}.jpg",
+            captured_at_str.replace([':', '-', 'T', 'Z', '.'], "")
+        );
 
         // 2. Save to cache for CameraGrid display
         snapshot_service.save_cache(&camera.camera_id, &image_data).await?;
@@ -269,7 +785,6 @@ impl PollingOrchestrator {
         let prev_image_data = prev_frame.as_ref().map(|(data, _)| data.clone());
 
         // 4. Build AnalyzeRequest with preset configuration
-        let preset_id = camera.preset_id.as_deref().unwrap_or("balanced");
         let mut request = preset_loader.create_request(
             preset_id,
             camera.camera_id.clone(),
@@ -290,10 +805,17 @@ impl PollingOrchestrator {
             }
         }
 
-        // 5. Send to IS21 using new analyze() API
+        // === Phase 2: IS21 inference ===
+        let is21_start = Instant::now();
         let result = ai_client
             .analyze(image_data.clone(), prev_image_data, request)
             .await?;
+        let is21_roundtrip_ms = is21_start.elapsed().as_millis() as i32;
+
+        // Extract IS21 internal timings
+        let is21_inference_ms = result.performance.as_ref().map(|p| p.inference_ms as i32).unwrap_or(0);
+        let is21_yolo_ms = result.performance.as_ref().map(|p| p.yolo_ms as i32).unwrap_or(0);
+        let is21_par_ms = result.performance.as_ref().map(|p| p.par_ms as i32).unwrap_or(0);
 
         let processing_ms = start_time.elapsed().as_millis() as i32;
 
@@ -308,16 +830,22 @@ impl PollingOrchestrator {
         let _ = prev_frame_cache.store(&camera.camera_id, image_data.clone(), frame_meta).await;
 
         // 7. Broadcast snapshot update notification (triggers CameraGrid to refresh)
+        let processing_ms_u64 = processing_ms as u64;
         realtime_hub
             .broadcast(HubMessage::SnapshotUpdated(SnapshotUpdatedMessage {
                 camera_id: camera.camera_id.clone(),
                 timestamp: captured_at_str.clone(),
                 primary_event: Some(result.primary_event.clone()),
                 severity: Some(result.severity),
+                processing_ms: Some(processing_ms_u64),
+                error: None,
+                snapshot_source: Some(snapshot_source.as_str().to_string()),
             }))
             .await;
 
-        // 8. Persist to MySQL via DetectionLogService (always, even if not detected)
+        // === Phase 3: Database save ===
+        let save_start = Instant::now();
+
         // Get TID/FID from camera or use defaults
         let tid = camera.tid.as_deref().unwrap_or(default_tid);
         let fid = camera.fid.as_deref().unwrap_or(default_fid);
@@ -326,6 +854,18 @@ impl PollingOrchestrator {
         // Parse camera context for persistence
         let camera_context = camera.camera_context.as_ref()
             .and_then(|v| serde_json::from_value::<CameraContext>(v.clone()).ok());
+
+        // Build timing breakdown with snapshot source
+        let timings = ProcessingTimings {
+            total_ms: processing_ms,
+            snapshot_ms,
+            is21_roundtrip_ms,
+            is21_inference_ms,
+            is21_yolo_ms,
+            is21_par_ms,
+            save_ms: 0, // Will be updated after save
+            snapshot_source: Some(snapshot_source.as_str().to_string()),
+        };
 
         let log_id = detection_log
             .save_detection(
@@ -336,8 +876,13 @@ impl PollingOrchestrator {
                 &image_data,
                 camera_context.as_ref(),
                 Some(processing_ms),
+                Some(&timings),
+                polling_cycle_id,
             )
             .await?;
+
+        let save_ms = save_start.elapsed().as_millis() as i32;
+        let total_ms = start_time.elapsed().as_millis() as i32;
 
         // 9. Update legacy in-memory EventLogService (for backward compatibility)
         if result.detected {
@@ -376,25 +921,65 @@ impl PollingOrchestrator {
                 }))
                 .await;
 
+            // Detailed logging with timing breakdown
             tracing::info!(
                 camera_id = %camera.camera_id,
+                camera_ip = %camera_ip,
+                preset_id = %preset_id,
+                image_filename = %image_filename,
+                image_size_kb = image_size / 1024,
                 log_id = log_id,
                 event_id = event_id,
                 primary_event = %result.primary_event,
                 severity = result.severity,
-                processing_ms = processing_ms,
-                "Detection recorded to MySQL"
+                confidence = result.confidence,
+                count_hint = result.count_hint,
+                // Timing breakdown (ボトルネック特定用)
+                total_ms = total_ms,
+                snapshot_ms = snapshot_ms,
+                is21_roundtrip_ms = is21_roundtrip_ms,
+                is21_inference_ms = is21_inference_ms,
+                is21_yolo_ms = is21_yolo_ms,
+                is21_par_ms = is21_par_ms,
+                save_ms = save_ms,
+                // IS21 decision chain visibility
+                analyzed = result.analyzed,
+                detected = result.detected,
+                bbox_count = result.bboxes.len(),
+                "DETECTED: {}",
+                result.primary_event
             );
         } else {
-            tracing::debug!(
+            // No detection - but still log with full detail for debugging "why none?"
+            tracing::info!(
                 camera_id = %camera.camera_id,
+                camera_ip = %camera_ip,
+                preset_id = %preset_id,
+                image_filename = %image_filename,
+                image_size_kb = image_size / 1024,
                 log_id = log_id,
-                processing_ms = processing_ms,
-                "No detection, log saved"
+                primary_event = %result.primary_event,
+                // Timing breakdown (ボトルネック特定用)
+                total_ms = total_ms,
+                snapshot_ms = snapshot_ms,
+                is21_roundtrip_ms = is21_roundtrip_ms,
+                is21_inference_ms = is21_inference_ms,
+                is21_yolo_ms = is21_yolo_ms,
+                is21_par_ms = is21_par_ms,
+                save_ms = save_ms,
+                // IS21 decision chain visibility - WHY was this "none"?
+                analyzed = result.analyzed,
+                detected = result.detected,
+                bbox_count = result.bboxes.len(),
+                confidence = result.confidence,
+                "NO_DETECTION: analyzed={}, bboxes={}, confidence={}",
+                result.analyzed,
+                result.bboxes.len(),
+                result.confidence
             );
         }
 
-        Ok(())
+        Ok(Some(total_ms))
     }
 
     /// Build event attributes JSON from AnalyzeResponse
@@ -425,38 +1010,23 @@ impl PollingOrchestrator {
             attrs.insert("frame_diff".to_string(), serde_json::json!(frame_diff));
         }
 
-        // Preset info
-        if let Some(ref preset_id) = result.preset_id {
+        // Preset info (Phase 4)
+        if let Some(ref preset_applied) = result.preset_applied {
+            attrs.insert("preset_applied".to_string(), serde_json::json!(preset_applied));
+        } else if let Some(ref preset_id) = result.preset_id {
+            // Fallback to legacy preset_id field
             attrs.insert("preset_id".to_string(), serde_json::json!(preset_id));
+        }
+
+        // Performance metrics (Phase 4)
+        if let Some(ref performance) = result.performance {
+            attrs.insert("is21_performance".to_string(), serde_json::json!(performance));
         }
 
         if attrs.is_empty() {
             None
         } else {
             Some(serde_json::Value::Object(attrs))
-        }
-    }
-
-    /// Extract subnet identifier from RTSP URL (e.g., "192.168.125.0/24")
-    fn extract_subnet_from_rtsp_url(url: &str) -> String {
-        // Extract IP from rtsp://IP:port/path
-        if let Some(start) = url.find("://") {
-            let after_protocol = &url[start + 3..];
-            if let Some(end) = after_protocol.find(':').or_else(|| after_protocol.find('/')) {
-                let ip = &after_protocol[..end];
-                return Self::extract_subnet(ip);
-            }
-        }
-        "unknown".to_string()
-    }
-
-    /// Extract subnet from IP address (e.g., "192.168.125.101" -> "192.168.125.0/24")
-    fn extract_subnet(ip: &str) -> String {
-        let parts: Vec<&str> = ip.split('.').collect();
-        if parts.len() >= 3 {
-            format!("{}.{}.{}.0/24", parts[0], parts[1], parts[2])
-        } else {
-            "unknown".to_string()
         }
     }
 }

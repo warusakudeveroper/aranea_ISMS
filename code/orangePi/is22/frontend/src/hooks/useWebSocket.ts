@@ -21,6 +21,12 @@ export interface SnapshotUpdatedMessage {
   timestamp: string
   primary_event: string | null
   severity: number | null
+  /** Processing time in milliseconds (capture + AI inference) */
+  processing_ms?: number
+  /** Error message if capture failed (timeout, network error, etc.) */
+  error?: string
+  /** Source of snapshot capture: "go2rtc" (from active stream), "ffmpeg" (direct RTSP), "http" (snapshot URL) */
+  snapshot_source?: string
 }
 
 export interface SystemStatusMessage {
@@ -36,10 +42,10 @@ export interface CameraStatusMessage {
   last_frame_at: string | null
 }
 
+// Polling cycle statistics - broadcast at end of each cycle
 export interface CycleStatsMessage {
-  subnet: string
   cycle_duration_sec: number
-  cycle_duration_formatted: string
+  cycle_duration_formatted: string  // "mm:ss"
   cameras_polled: number
   successful: number
   failed: number
@@ -47,9 +53,15 @@ export interface CycleStatsMessage {
   completed_at: string
 }
 
+// Cooldown countdown during inter-cycle pause
+export interface CooldownTickMessage {
+  seconds_remaining: number
+  total_cooldown_sec: number
+}
+
 export interface HubMessage {
-  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated" | "cycle_stats"
-  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | CycleStatsMessage | unknown
+  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated" | "cycle_stats" | "cooldown_tick"
+  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | CycleStatsMessage | CooldownTickMessage | unknown
 }
 
 interface UseWebSocketOptions {
@@ -58,16 +70,22 @@ interface UseWebSocketOptions {
   onCameraStatus?: (msg: CameraStatusMessage) => void
   onSnapshotUpdated?: (msg: SnapshotUpdatedMessage) => void
   onCycleStats?: (msg: CycleStatsMessage) => void
+  onCooldownTick?: (msg: CooldownTickMessage) => void
   onMessage?: (msg: HubMessage) => void
   reconnectInterval?: number
 }
 
 export function useWebSocket(options: UseWebSocketOptions = {}) {
-  const { onEventLog, onSystemStatus, onCameraStatus, onSnapshotUpdated, onCycleStats, onMessage, reconnectInterval = 3000 } = options
+  const { reconnectInterval = 3000 } = options
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Store callbacks in refs to avoid reconnection on callback changes
+  // This prevents the infinite reconnect loop when inline callbacks are passed
+  const callbacksRef = useRef(options)
+  callbacksRef.current = options
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -86,23 +104,26 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       ws.onmessage = (event) => {
         try {
           const msg: HubMessage = JSON.parse(event.data)
+          const callbacks = callbacksRef.current
 
           // Route message to appropriate handler
-          if (msg.type === "event_log" && onEventLog) {
-            onEventLog(msg.data as EventLogMessage)
-          } else if (msg.type === "system_status" && onSystemStatus) {
-            onSystemStatus(msg.data as SystemStatusMessage)
-          } else if (msg.type === "camera_status" && onCameraStatus) {
-            onCameraStatus(msg.data as CameraStatusMessage)
-          } else if (msg.type === "snapshot_updated" && onSnapshotUpdated) {
-            onSnapshotUpdated(msg.data as SnapshotUpdatedMessage)
-          } else if (msg.type === "cycle_stats" && onCycleStats) {
-            onCycleStats(msg.data as CycleStatsMessage)
+          if (msg.type === "event_log" && callbacks.onEventLog) {
+            callbacks.onEventLog(msg.data as EventLogMessage)
+          } else if (msg.type === "system_status" && callbacks.onSystemStatus) {
+            callbacks.onSystemStatus(msg.data as SystemStatusMessage)
+          } else if (msg.type === "camera_status" && callbacks.onCameraStatus) {
+            callbacks.onCameraStatus(msg.data as CameraStatusMessage)
+          } else if (msg.type === "snapshot_updated" && callbacks.onSnapshotUpdated) {
+            callbacks.onSnapshotUpdated(msg.data as SnapshotUpdatedMessage)
+          } else if (msg.type === "cycle_stats" && callbacks.onCycleStats) {
+            callbacks.onCycleStats(msg.data as CycleStatsMessage)
+          } else if (msg.type === "cooldown_tick" && callbacks.onCooldownTick) {
+            callbacks.onCooldownTick(msg.data as CooldownTickMessage)
           }
 
           // Generic message handler
-          if (onMessage) {
-            onMessage(msg)
+          if (callbacks.onMessage) {
+            callbacks.onMessage(msg)
           }
         } catch (e) {
           console.error("[WS] Failed to parse message:", e)
@@ -134,7 +155,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       // Retry after delay
       reconnectTimeoutRef.current = setTimeout(connect, reconnectInterval)
     }
-  }, [onEventLog, onSystemStatus, onCameraStatus, onSnapshotUpdated, onCycleStats, onMessage, reconnectInterval])
+  }, [reconnectInterval]) // Only reconnectInterval in deps - callbacks are in ref
 
   useEffect(() => {
     connect()

@@ -2,13 +2,13 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::auth_base::{generate_ws_security_header, probe_onvif_mac, probe_onvif_with_auth};
-use super::super::types::{
+use super::types::{
     OnvifCapabilities,
     OnvifExtendedInfo,
     OnvifNetworkInterface,
     OnvifScopes,
 };
-use super::super::xml::{
+use super::xml::{
     extract_capability_xaddr,
     extract_xml_attribute,
     extract_xml_value,

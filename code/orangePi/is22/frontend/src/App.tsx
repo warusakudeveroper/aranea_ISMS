@@ -1,11 +1,13 @@
-import { useState, useMemo, useCallback } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import type { Camera, SystemStatus, DetectionLog } from "@/types/api"
-import { CameraGrid } from "@/components/CameraGrid"
-import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage, type CycleStatsMessage } from "@/hooks/useWebSocket"
+import { CameraGrid, type CameraStatus } from "@/components/CameraGrid"
+import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage, type CycleStatsMessage, type CooldownTickMessage } from "@/hooks/useWebSocket"
 import { SuggestPane } from "@/components/SuggestPane"
 import { EventLogPane } from "@/components/EventLogPane"
 import { ScanModal } from "@/components/ScanModal"
 import { CameraDetailModal } from "@/components/CameraDetailModal"
+import { LiveViewModal } from "@/components/LiveViewModal"
+import { SettingsModal } from "@/components/SettingsModal"
 import { useApi } from "@/hooks/useApi"
 import { useEventLogStore } from "@/stores/eventLogStore"
 import { Button } from "@/components/ui/button"
@@ -47,19 +49,79 @@ function BlankCard({ onScanClick }: { onScanClick: () => void }) {
   )
 }
 
+// Polling cycle state for header display
+// With parallel subnet polling, we track the most recent cycle from any subnet
+interface CycleState {
+  durationFormatted: string  // "mm:ss"
+  camerasPolled: number
+  cycleNumber: number
+}
+
+// Default onairtime in seconds
+const DEFAULT_ONAIRTIME_SECONDS = 180
+
 function App() {
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null)
   const [cameraDetailOpen, setCameraDetailOpen] = useState(false)
+  const [liveViewOpen, setLiveViewOpen] = useState(false)
   const [scanModalOpen, setScanModalOpen] = useState(false)
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
   // Per-camera snapshot timestamps (from WebSocket notifications)
   // Key: camera_id, Value: Unix timestamp (ms)
   const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>({})
-  // Per-subnet cycle statistics (from WebSocket notifications)
-  // Key: subnet (e.g., "192.168.125.0/24"), Value: CycleStatsMessage
-  const [cycleStats, setCycleStats] = useState<Record<string, CycleStatsMessage>>({})
+  // Per-camera status (processing time, errors) for slow/timeout display
+  const [cameraStatuses, setCameraStatuses] = useState<Record<string, CameraStatus>>({})
+  // Polling cycle state (parallel subnet polling - shows most recent cycle)
+  const [cycleState, setCycleState] = useState<CycleState>({
+    durationFormatted: "--:--",
+    camerasPolled: 0,
+    cycleNumber: 0,
+  })
+  // On-air camera IDs (for tile highlighting)
+  const [onAirCameraIds, setOnAirCameraIds] = useState<string[]>([])
+  // On-air time setting (persisted to localStorage)
+  const [onAirTimeSeconds, setOnAirTimeSeconds] = useState<number>(() => {
+    const saved = localStorage.getItem("onairtime_seconds")
+    return saved ? parseInt(saved, 10) : DEFAULT_ONAIRTIME_SECONDS
+  })
 
-  // Event log store for patrol feedback
-  const { addPatrolFeedback, logs: detectionLogs } = useEventLogStore()
+  // Patrol execution state for EventLogPane (single responsibility: App manages WebSocket state)
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0)
+  const [executionState, setExecutionState] = useState<"idle" | "accessing" | "cooldown" | "waiting">("waiting")
+
+  // FIX-002: Real-time event from WebSocket only (NOT from fetched historical logs)
+  // This ensures page reload doesn't trigger video playback in SuggestPane
+  const [realtimeEvent, setRealtimeEvent] = useState<DetectionLog | null>(null)
+
+  // Persist onairtime to localStorage
+  useEffect(() => {
+    localStorage.setItem("onairtime_seconds", String(onAirTimeSeconds))
+  }, [onAirTimeSeconds])
+
+  // Grid container ref for measuring height (no-scroll layout)
+  const gridContainerRef = useRef<HTMLDivElement>(null)
+  const [gridContainerHeight, setGridContainerHeight] = useState<number>(0)
+
+  // Measure grid container height for tile sizing
+  useEffect(() => {
+    const updateHeight = () => {
+      if (gridContainerRef.current) {
+        setGridContainerHeight(gridContainerRef.current.clientHeight)
+      }
+    }
+    updateHeight()
+    window.addEventListener('resize', updateHeight)
+    return () => window.removeEventListener('resize', updateHeight)
+  }, [])
+
+  // Event log store for patrol feedback and log fetching
+  // Note: EventLogPane accesses logs directly from the store
+  const { addPatrolFeedback, fetchLogs } = useEventLogStore()
+
+  // Fetch detection logs on mount (for SuggestPane currentEvent)
+  useEffect(() => {
+    fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
+  }, [fetchLogs])
 
   // Camera list (needed for patrol feedback camera names)
   const { data: cameras, loading: camerasLoading, refetch: refetchCameras } = useApi<Camera[]>(
@@ -68,40 +130,117 @@ function App() {
   )
 
   // Handle real-time event log updates from WebSocket
-  const handleEventLog = useCallback((_msg: EventLogMessage) => {
-    // Detection events are persisted to MySQL and fetched via API
-    // This handler can be used for additional real-time UI updates if needed
-  }, [])
+  // FIX-002: Convert to DetectionLog and set as realtime event (NOT from fetched logs)
+  const handleEventLog = useCallback((msg: EventLogMessage) => {
+    // Only process events with severity > 0 (AI detections)
+    if (msg.severity > 0) {
+      // Find lacis_id from cameras by camera_id
+      const camera = cameras?.find(c => c.camera_id === msg.camera_id)
+      const lacisId = camera?.lacis_id || null
+
+      // Create DetectionLog for SuggestPane
+      // SuggestPane uses: log_id, lacis_id, severity, primary_event
+      const realtimeLog: DetectionLog = {
+        log_id: msg.event_id,
+        tid: "",
+        fid: "",
+        camera_id: msg.camera_id,
+        lacis_id: lacisId,
+        captured_at: msg.timestamp,
+        analyzed_at: msg.timestamp,
+        primary_event: msg.primary_event,
+        severity: msg.severity,
+        confidence: 0,
+        count_hint: 0,
+        tags: [],
+        unknown_flag: false,
+        bboxes: null,
+        person_details: null,
+        suspicious: null,
+        frame_diff: null,
+        loitering_detected: false,
+        preset_id: null,
+        preset_version: null,
+        output_schema: null,
+        context_applied: false,
+        camera_context: null,
+        is21_log: {},
+        image_path_local: "",
+        image_path_cloud: null,
+        processing_ms: null,
+        polling_cycle_id: null,
+        schema_version: "1.0",
+        timings: null,
+        synced_to_bq: false,
+        synced_at: null,
+        created_at: msg.timestamp,
+      }
+      setRealtimeEvent(realtimeLog)
+    }
+
+    // Also refetch logs for EventLogPane display (historical list)
+    fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
+  }, [fetchLogs, cameras])
 
   // Handle snapshot update notifications from WebSocket
   // Each camera is notified individually when its snapshot is updated
   const handleSnapshotUpdated = useCallback((msg: SnapshotUpdatedMessage) => {
-    // Update snapshot timestamp for CameraGrid
-    setSnapshotTimestamps((prev) => ({
+    // Update camera status (processing time, errors)
+    setCameraStatuses((prev) => ({
       ...prev,
-      [msg.camera_id]: Date.now(),
+      [msg.camera_id]: {
+        processingMs: msg.processing_ms,
+        error: msg.error,
+      },
     }))
 
-    // Add to patrol feedback for "動いてる安心感"
-    if (cameras) {
-      addPatrolFeedback(msg, cameras)
+    // Update execution state for EventLogPane patrol ticker
+    setExecutionState("accessing")
+    // Auto-reset to waiting after a delay
+    setTimeout(() => {
+      setExecutionState(prev => prev === "accessing" ? "waiting" : prev)
+    }, 2000)
+
+    // Only update timestamp and patrol feedback for successful captures (no error)
+    if (!msg.error) {
+      // Update snapshot timestamp for CameraGrid
+      setSnapshotTimestamps((prev) => ({
+        ...prev,
+        [msg.camera_id]: Date.now(),
+      }))
+
+      // Add to patrol feedback for "動いてる安心感"
+      if (cameras) {
+        addPatrolFeedback(msg, cameras)
+      }
     }
   }, [cameras, addPatrolFeedback])
 
-  // Handle cycle statistics updates from WebSocket
-  // Each subnet broadcasts independently with its own cycle timing
-  const handleCycleStats = useCallback((msg: CycleStatsMessage) => {
-    setCycleStats((prev) => ({
-      ...prev,
-      [msg.subnet]: msg,
-    }))
+  // Handle cooldown tick from WebSocket (for EventLogPane patrol ticker)
+  const handleCooldownTick = useCallback((msg: CooldownTickMessage) => {
+    setCooldownSeconds(msg.seconds_remaining)
+    if (msg.seconds_remaining > 0) {
+      setExecutionState("cooldown")
+    } else {
+      setExecutionState("waiting")
+    }
   }, [])
 
-  // WebSocket connection for real-time notifications
+  // Handle cycle stats from polling orchestrator (parallel subnets)
+  const handleCycleStats = useCallback((msg: CycleStatsMessage) => {
+    setCycleState({
+      durationFormatted: msg.cycle_duration_formatted,
+      camerasPolled: msg.cameras_polled,
+      cycleNumber: msg.cycle_number,
+    })
+  }, [])
+
+  // WebSocket connection for real-time notifications (single connection point)
   const { connected: wsConnected } = useWebSocket({
     onEventLog: handleEventLog,
     onSnapshotUpdated: handleSnapshotUpdated,
     onCycleStats: handleCycleStats,
+    onCooldownTick: handleCooldownTick,
   })
 
   const { data: systemStatus } = useApi<SystemStatus>(
@@ -109,28 +248,20 @@ function App() {
     5000
   )
 
-  // Get the most recent detection for suggest pane (from store)
-  const currentEvent = useMemo(() => {
-    if (detectionLogs.length === 0) return null
-    // Find the most recent detection with severity > 0
-    const significantEvent = detectionLogs.find(e => e.severity > 0)
-    return significantEvent || detectionLogs[0]
-  }, [detectionLogs])
+  // FIX-002: currentEvent for SuggestPane is from realtime WebSocket events only
+  // NOT from fetched logs (which include historical data)
+  // This ensures page reload doesn't trigger video playback in SuggestPane
+  const currentEvent = realtimeEvent
 
-  // Get camera info for suggest pane
-  const suggestCamera = useMemo(() => {
-    if (!currentEvent || !cameras) return undefined
-    // Find by lacis_id since that's what detection logs use
-    return cameras.find(c => c.lacis_id === currentEvent.lacis_id)
-  }, [currentEvent, cameras])
+  // Handle on-air camera changes from SuggestPane
+  const handleOnAirChange = useCallback((cameraIds: string[]) => {
+    setOnAirCameraIds(cameraIds)
+  }, [])
 
-  const suggestCameraName = suggestCamera?.name
-  const suggestCameraId = suggestCamera?.camera_id
-
-  // Camera card click - for future video modal playback
+  // Camera card click - open live view modal for video streaming
   const handleCameraClick = useCallback((camera: Camera) => {
-    // TODO: Open video playback modal
-    console.log('Camera clicked for video:', camera.camera_id)
+    setSelectedCamera(camera)
+    setLiveViewOpen(true)
   }, [])
 
   // Settings icon click - open camera detail modal
@@ -152,16 +283,6 @@ function App() {
     setCameraDetailOpen(false)
   }, [refetchCameras])
 
-  // Handle detection log click - find camera by lacis_id
-  const handleLogClick = useCallback((log: DetectionLog) => {
-    if (!cameras) return
-    const camera = cameras.find(c => c.lacis_id === log.lacis_id)
-    if (camera) {
-      setSelectedCamera(camera)
-      setCameraDetailOpen(true)
-    }
-  }, [cameras])
-
   return (
     <div className="h-screen flex flex-col">
       {/* Header */}
@@ -172,29 +293,16 @@ function App() {
           <Badge variant="outline" className="text-xs">mAcT</Badge>
         </div>
         <div className="flex items-center gap-4">
-          {/* WebSocket connection status & Subnet cycle times */}
+          {/* WebSocket connection status + Polling cycle stats */}
           <div className="flex items-center gap-2 text-sm">
             {wsConnected ? (
               <>
                 <Wifi className="h-4 w-4 text-green-500" />
                 <span className="text-green-500 text-xs">LIVE</span>
-                {Object.entries(cycleStats).length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground text-xs">巡回</span>
-                    {Object.entries(cycleStats)
-                      .sort(([a], [b]) => a.localeCompare(b))
-                      .map(([subnet, stats], idx) => {
-                        // Format "192.168.125.0/24" -> "125.0/24"
-                        const shortSubnet = subnet.split('.').slice(2).join('.')
-                        return (
-                          <span key={subnet} className="text-xs">
-                            {idx > 0 && <span className="text-muted-foreground mx-1">|</span>}
-                            {shortSubnet}: {stats.cycle_duration_formatted}
-                          </span>
-                        )
-                      })}
-                  </div>
-                )}
+                {/* Polling cycle duration display (parallel subnets) */}
+                <span className="text-muted-foreground text-xs ml-1">
+                  巡回 {cycleState.durationFormatted}
+                </span>
               </>
             ) : (
               <>
@@ -216,25 +324,29 @@ function App() {
               )}
             </div>
           )}
-          <Button variant="ghost" size="icon">
+          <Button variant="ghost" size="icon" onClick={() => setSettingsModalOpen(true)}>
             <Settings className="h-5 w-5" />
           </Button>
         </div>
       </header>
 
-      {/* Main Content - 3 Pane Layout (IS22_UI_DETAILED_SPEC Section 1.1: 30%/45%/25%) */}
+      {/* Main Content - 3 Pane Layout: 30%/55%/15% */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Pane - Suggest View (30%) */}
-        <aside className="w-[30%] min-w-[320px] max-w-[450px] border-r bg-card overflow-hidden">
+        <aside className="w-[30%] border-r overflow-hidden flex flex-col">
           <SuggestPane
             currentEvent={currentEvent}
-            cameraName={suggestCameraName}
-            cameraId={suggestCameraId}
+            cameras={cameras || []}
+            onAirTimeSeconds={onAirTimeSeconds}
+            onOnAirChange={handleOnAirChange}
           />
         </aside>
 
-        {/* Center Pane - Camera Grid (45%) */}
-        <main className="w-[45%] flex-1 p-4 overflow-auto">
+        {/* Center Pane - Camera Grid (55%) - No scroll, tiles compress to fit */}
+        <main
+          ref={gridContainerRef}
+          className="w-[55%] p-4 overflow-hidden flex flex-col"
+        >
           {camerasLoading ? (
             <div className="flex items-center justify-center h-full">
               <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -246,21 +358,28 @@ function App() {
               onSettingsClick={handleSettingsClick}
               onAddClick={() => setScanModalOpen(true)}
               snapshotTimestamps={snapshotTimestamps}
+              cameraStatuses={cameraStatuses}
               fallbackPollingEnabled={!wsConnected}
               fallbackPollingIntervalMs={30000}
               animationEnabled={true}
               animationStyle="slide-down"
+              containerHeight={gridContainerHeight}
+              onAirCameraIds={onAirCameraIds}
             />
           ) : (
             <BlankCard onScanClick={() => setScanModalOpen(true)} />
           )}
         </main>
 
-        {/* Right Pane - Event Log (25%) */}
-        <aside className="w-[25%] min-w-[280px] max-w-[360px] border-l bg-card overflow-hidden">
+        {/* Right Pane - Event Log (15%) */}
+        <aside
+          className="w-[15%] border-l bg-card overflow-hidden flex flex-col relative z-10 isolate"
+          onClick={(e) => e.stopPropagation()}
+        >
           <EventLogPane
             cameras={cameras || []}
-            onLogClick={handleLogClick}
+            cooldownSeconds={cooldownSeconds}
+            executionState={executionState}
           />
         </aside>
       </div>
@@ -282,6 +401,25 @@ function App() {
         camera={selectedCamera}
         onSave={handleCameraSave}
         onDelete={handleCameraDelete}
+      />
+
+      {/* Live View Modal */}
+      <LiveViewModal
+        open={liveViewOpen}
+        onOpenChange={setLiveViewOpen}
+        camera={selectedCamera}
+        onSettingsClick={() => {
+          setLiveViewOpen(false)
+          setCameraDetailOpen(true)
+        }}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        open={settingsModalOpen}
+        onOpenChange={setSettingsModalOpen}
+        onAirTimeSeconds={onAirTimeSeconds}
+        onOnAirTimeSecondsChange={setOnAirTimeSeconds}
       />
     </div>
   )

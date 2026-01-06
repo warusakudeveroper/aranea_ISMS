@@ -1,7 +1,7 @@
 mod auth_base;
 mod auth_data;
 
-pub use auth_base::{probe_onvif_mac, probe_onvif_with_auth};
+pub use auth_base::{generate_ws_security_header, probe_onvif_mac, probe_onvif_with_auth};
 pub use auth_data::{
     probe_onvif_capabilities,
     probe_onvif_extended,

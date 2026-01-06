@@ -4,8 +4,8 @@ use std::time::Duration;
 use rand::Rng;
 use sha1::{Digest, Sha1};
 
-use super::super::types::OnvifDeviceInfo;
-use super::super::xml::extract_xml_value;
+use super::types::OnvifDeviceInfo;
+use super::xml::extract_xml_value;
 
 /// Generate WS-Security UsernameToken Digest header for ONVIF authentication
 pub(super) fn generate_ws_security_header(username: &str, password: &str) -> String {
