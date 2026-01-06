@@ -16,6 +16,10 @@ use serde_json::json;
 use sqlx::Row;
 
 use crate::admission_controller::{LeaseRequest, LeaseResponse, StreamQuality};
+use crate::camera_brand::{
+    AddGenericPathRequest, AddOuiRequest, AddTemplateRequest, CreateBrandRequest,
+    UpdateBrandRequest, UpdateGenericPathRequest, UpdateOuiRequest, UpdateTemplateRequest,
+};
 use crate::config_store::{Camera, CreateCameraRequest, UpdateCameraRequest};
 use crate::models::ApiResponse;
 use crate::state::AppState;
@@ -64,6 +68,32 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/settings/polling/logs", get(get_polling_logs))
         .route("/api/settings/timeouts", get(get_global_timeouts))
         .route("/api/settings/timeouts", put(update_global_timeouts))
+        // Camera Brands (OUI/RTSP SSoT)
+        .route("/api/settings/camera-brands", get(list_camera_brands))
+        .route("/api/settings/camera-brands", post(create_camera_brand))
+        .route("/api/settings/camera-brands/:id", get(get_camera_brand))
+        .route("/api/settings/camera-brands/:id", put(update_camera_brand))
+        .route("/api/settings/camera-brands/:id", delete(delete_camera_brand))
+        // OUI Entries
+        .route("/api/settings/camera-brands/:id/oui", get(list_oui_entries_for_brand))
+        .route("/api/settings/camera-brands/:id/oui", post(add_oui_entry))
+        .route("/api/settings/oui", get(list_all_oui_entries))
+        .route("/api/settings/oui/:prefix", get(get_oui_entry))
+        .route("/api/settings/oui/:prefix", put(update_oui_entry))
+        .route("/api/settings/oui/:prefix", delete(delete_oui_entry))
+        // RTSP Templates
+        .route("/api/settings/camera-brands/:id/rtsp-templates", get(list_templates_for_brand))
+        .route("/api/settings/camera-brands/:id/rtsp-templates", post(add_rtsp_template))
+        .route("/api/settings/rtsp-templates", get(list_all_rtsp_templates))
+        .route("/api/settings/rtsp-templates/:id", get(get_rtsp_template))
+        .route("/api/settings/rtsp-templates/:id", put(update_rtsp_template))
+        .route("/api/settings/rtsp-templates/:id", delete(delete_rtsp_template))
+        // Generic RTSP Paths
+        .route("/api/settings/generic-rtsp-paths", get(list_generic_rtsp_paths))
+        .route("/api/settings/generic-rtsp-paths", post(add_generic_rtsp_path))
+        .route("/api/settings/generic-rtsp-paths/:id", get(get_generic_rtsp_path))
+        .route("/api/settings/generic-rtsp-paths/:id", put(update_generic_rtsp_path))
+        .route("/api/settings/generic-rtsp-paths/:id", delete(delete_generic_rtsp_path))
         // Performance Dashboard API (統合デバッグAPI)
         .route("/api/debug/performance/dashboard", get(get_performance_dashboard))
         // Test API for E2E testing (BUG-001 verification)
@@ -129,6 +159,12 @@ async fn create_camera(
     match state.config_store.service().create_camera(req).await {
         Ok(camera) => {
             let _ = state.config_store.refresh_cache().await;
+
+            // Spawn polling loop for new subnet if needed
+            if let Some(ip) = &camera.ip_address {
+                state.polling.spawn_subnet_loop_if_needed(ip).await;
+            }
+
             (StatusCode::CREATED, Json(ApiResponse::success(camera))).into_response()
         }
         Err(e) => e.into_response(),
@@ -143,6 +179,12 @@ async fn update_camera(
     match state.config_store.service().update_camera(&id, req).await {
         Ok(camera) => {
             let _ = state.config_store.refresh_cache().await;
+
+            // Spawn polling loop for new subnet if needed (IP may have changed)
+            if let Some(ip) = &camera.ip_address {
+                state.polling.spawn_subnet_loop_if_needed(ip).await;
+            }
+
             Json(ApiResponse::success(camera)).into_response()
         }
         Err(e) => e.into_response(),
@@ -2286,6 +2328,9 @@ async fn approve_device(
             // Refresh config cache so polling orchestrator picks up new camera
             let _ = state.config_store.refresh_cache().await;
 
+            // Spawn polling loop for new subnet if needed
+            state.polling.spawn_subnet_loop_if_needed(&device_ip).await;
+
             Json(serde_json::json!({
                 "ok": true,
                 "camera": response
@@ -2327,6 +2372,7 @@ async fn approve_devices_batch(
     Json(req): Json<BatchApproveRequest>,
 ) -> impl IntoResponse {
     let mut results = Vec::new();
+    let mut approved_ips = Vec::new();
 
     for item in req.devices {
         let approve_req = crate::ipcam_scan::ApproveDeviceRequest {
@@ -2336,18 +2382,20 @@ async fn approve_devices_batch(
             credentials: item.credentials,
         };
 
+        let ip = item.ip.clone();
         match state.ipcam_scan.approve_device(&item.ip, &approve_req).await {
             Ok(response) => {
                 // go2rtc registration is handled by polling_orchestrator at cycle start
+                approved_ips.push(ip.clone());
                 results.push(serde_json::json!({
-                    "ip": item.ip,
+                    "ip": ip,
                     "ok": true,
                     "camera": response
                 }));
             }
             Err(e) => {
                 results.push(serde_json::json!({
-                    "ip": item.ip,
+                    "ip": ip,
                     "ok": false,
                     "error": e.to_string()
                 }));
@@ -2357,6 +2405,11 @@ async fn approve_devices_batch(
 
     // Refresh config cache after all approvals
     let _ = state.config_store.refresh_cache().await;
+
+    // Spawn polling loops for new subnets if needed
+    for ip in &approved_ips {
+        state.polling.spawn_subnet_loop_if_needed(ip).await;
+    }
 
     let success_count = results.iter().filter(|r| r["ok"].as_bool().unwrap_or(false)).count();
 
@@ -3213,4 +3266,228 @@ async fn trigger_test_event(
         "timestamp": timestamp,
         "message": "Test event broadcast via WebSocket"
     })))
+}
+
+// ========================================
+// Camera Brand API Handlers
+// ========================================
+
+/// List all camera brands
+async fn list_camera_brands(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let brands = state.camera_brand.list_brands_with_counts().await?;
+    Ok(Json(ApiResponse::success(brands)))
+}
+
+/// Create camera brand
+async fn create_camera_brand(
+    State(state): State<AppState>,
+    Json(req): Json<CreateBrandRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let brand = state.camera_brand.create_brand(req).await?;
+    Ok((StatusCode::CREATED, Json(ApiResponse::success(brand))))
+}
+
+/// Get camera brand by ID
+async fn get_camera_brand(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let brand = state.camera_brand.get_brand(id).await?.ok_or_else(|| {
+        crate::Error::NotFound(format!("Brand {} not found", id))
+    })?;
+    Ok(Json(ApiResponse::success(brand)))
+}
+
+/// Update camera brand
+async fn update_camera_brand(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    Json(req): Json<UpdateBrandRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let brand = state.camera_brand.update_brand(id, req).await?;
+    Ok(Json(ApiResponse::success(brand)))
+}
+
+/// Delete camera brand
+async fn delete_camera_brand(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    state.camera_brand.delete_brand(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ========================================
+// OUI Entry API Handlers
+// ========================================
+
+/// List all OUI entries
+async fn list_all_oui_entries(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let entries = state.camera_brand.list_oui_entries().await?;
+    Ok(Json(ApiResponse::success(entries)))
+}
+
+/// List OUI entries for a brand
+async fn list_oui_entries_for_brand(
+    State(state): State<AppState>,
+    Path(brand_id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let entries = state.camera_brand.get_oui_entries_for_brand(brand_id).await?;
+    Ok(Json(ApiResponse::success(entries)))
+}
+
+/// Get OUI entry by prefix
+async fn get_oui_entry(
+    State(state): State<AppState>,
+    Path(prefix): Path<String>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let entry = state.camera_brand.get_oui_entry(&prefix).await?.ok_or_else(|| {
+        crate::Error::NotFound(format!("OUI {} not found", prefix))
+    })?;
+    Ok(Json(ApiResponse::success(entry)))
+}
+
+/// Add OUI entry
+async fn add_oui_entry(
+    State(state): State<AppState>,
+    Path(brand_id): Path<i32>,
+    Json(req): Json<AddOuiRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let entry = state.camera_brand.add_oui_entry(brand_id, req).await?;
+    Ok((StatusCode::CREATED, Json(ApiResponse::success(entry))))
+}
+
+/// Update OUI entry
+async fn update_oui_entry(
+    State(state): State<AppState>,
+    Path(prefix): Path<String>,
+    Json(req): Json<UpdateOuiRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let entry = state.camera_brand.update_oui_entry(&prefix, req).await?;
+    Ok(Json(ApiResponse::success(entry)))
+}
+
+/// Delete OUI entry
+async fn delete_oui_entry(
+    State(state): State<AppState>,
+    Path(prefix): Path<String>,
+) -> Result<impl IntoResponse, crate::Error> {
+    state.camera_brand.delete_oui_entry(&prefix).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ========================================
+// RTSP Template API Handlers
+// ========================================
+
+/// List all RTSP templates
+async fn list_all_rtsp_templates(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let templates = state.camera_brand.list_templates().await?;
+    Ok(Json(ApiResponse::success(templates)))
+}
+
+/// List RTSP templates for a brand
+async fn list_templates_for_brand(
+    State(state): State<AppState>,
+    Path(brand_id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let templates = state.camera_brand.get_templates_for_brand_db(brand_id).await?;
+    Ok(Json(ApiResponse::success(templates)))
+}
+
+/// Get RTSP template by ID
+async fn get_rtsp_template(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let template = state.camera_brand.get_template(id).await?.ok_or_else(|| {
+        crate::Error::NotFound(format!("Template {} not found", id))
+    })?;
+    Ok(Json(ApiResponse::success(template)))
+}
+
+/// Add RTSP template
+async fn add_rtsp_template(
+    State(state): State<AppState>,
+    Path(brand_id): Path<i32>,
+    Json(req): Json<AddTemplateRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let template = state.camera_brand.add_template(brand_id, req).await?;
+    Ok((StatusCode::CREATED, Json(ApiResponse::success(template))))
+}
+
+/// Update RTSP template
+async fn update_rtsp_template(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    Json(req): Json<UpdateTemplateRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let template = state.camera_brand.update_template(id, req).await?;
+    Ok(Json(ApiResponse::success(template)))
+}
+
+/// Delete RTSP template
+async fn delete_rtsp_template(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    state.camera_brand.delete_template(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ========================================
+// Generic RTSP Path API Handlers
+// ========================================
+
+/// List all generic RTSP paths
+async fn list_generic_rtsp_paths(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let paths = state.camera_brand.list_generic_paths().await?;
+    Ok(Json(ApiResponse::success(paths)))
+}
+
+/// Get generic RTSP path by ID
+async fn get_generic_rtsp_path(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let path = state.camera_brand.get_generic_path(id).await?.ok_or_else(|| {
+        crate::Error::NotFound(format!("Generic path {} not found", id))
+    })?;
+    Ok(Json(ApiResponse::success(path)))
+}
+
+/// Add generic RTSP path
+async fn add_generic_rtsp_path(
+    State(state): State<AppState>,
+    Json(req): Json<AddGenericPathRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let path = state.camera_brand.add_generic_path(req).await?;
+    Ok((StatusCode::CREATED, Json(ApiResponse::success(path))))
+}
+
+/// Update generic RTSP path
+async fn update_generic_rtsp_path(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    Json(req): Json<UpdateGenericPathRequest>,
+) -> Result<impl IntoResponse, crate::Error> {
+    let path = state.camera_brand.update_generic_path(id, req).await?;
+    Ok(Json(ApiResponse::success(path)))
+}
+
+/// Delete generic RTSP path
+async fn delete_generic_rtsp_path(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<impl IntoResponse, crate::Error> {
+    state.camera_brand.delete_generic_path(id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

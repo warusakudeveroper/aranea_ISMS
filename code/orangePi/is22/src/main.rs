@@ -5,6 +5,7 @@
 use is22_camserver::{
     admission_controller::AdmissionController,
     ai_client::AIClient,
+    camera_brand::CameraBrandService,
     camera_status_tracker::CameraStatusTracker,
     config_store::ConfigStore,
     detection_log_service::DetectionLogService,
@@ -22,12 +23,47 @@ use is22_camserver::{
     web_api,
 };
 use sqlx::mysql::MySqlPoolOptions;
+use sqlx::Row;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Load global timeout settings from settings.polling
+async fn load_global_timeout_settings(pool: &sqlx::MySqlPool) -> (u64, u64) {
+    let result = sqlx::query("SELECT setting_json FROM settings WHERE setting_key = 'polling'")
+        .fetch_optional(pool)
+        .await;
+
+    match result {
+        Ok(Some(row)) => {
+            let setting_json: String = row.get("setting_json");
+            if let Ok(polling_settings) = serde_json::from_str::<serde_json::Value>(&setting_json) {
+                let timeout_main = polling_settings["timeout_main_sec"].as_u64().unwrap_or(10);
+                let timeout_sub = polling_settings["timeout_sub_sec"].as_u64().unwrap_or(20);
+
+                tracing::info!(
+                    timeout_main_sec = timeout_main,
+                    timeout_sub_sec = timeout_sub,
+                    "Loaded global timeout settings from database"
+                );
+
+                return (timeout_main, timeout_sub);
+            }
+        }
+        Ok(None) => {
+            tracing::warn!("settings.polling not found, using default timeouts (10s/20s)");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to load timeout settings, using defaults (10s/20s)");
+        }
+    }
+
+    // フォールバックデフォルト
+    (10, 20)
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -97,22 +133,34 @@ async fn main() -> anyhow::Result<()> {
     let rtsp_manager = Arc::new(RtspManager::new());
     tracing::info!("RtspManager initialized (RTSP access control)");
 
+    // Load global timeout settings for SnapshotService
+    let (timeout_main_sec, timeout_sub_sec) = load_global_timeout_settings(&pool).await;
+
     let snapshot_service = Arc::new(
         SnapshotService::new(
             config.snapshot_dir.clone(),
             config.temp_dir.clone(),
             rtsp_manager.clone(),
+            timeout_main_sec,
+            timeout_sub_sec,
         )
         .await?
     );
     tracing::info!(
         snapshot_dir = %config.snapshot_dir.display(),
         temp_dir = %config.temp_dir.display(),
-        "SnapshotService initialized (ffmpeg direct RTSP with access control)"
+        timeout_main_sec = timeout_main_sec,
+        timeout_sub_sec = timeout_sub_sec,
+        "SnapshotService initialized with global timeout settings (ffmpeg direct RTSP with access control)"
     );
 
     let ipcam_scan = Arc::new(IpcamScan::new(pool.clone()));
     tracing::info!("IpcamScan initialized with DB persistence");
+
+    // Initialize CameraBrandService with cache
+    let camera_brand = Arc::new(CameraBrandService::new(pool.clone()));
+    camera_brand.init().await?;
+    tracing::info!("CameraBrandService initialized with OUI/RTSP template cache");
 
     // Get default TID/FID from environment or use defaults
     let default_tid = std::env::var("DEFAULT_TID")
@@ -158,8 +206,10 @@ async fn main() -> anyhow::Result<()> {
         stream,
         realtime,
         ipcam_scan,
+        camera_brand,
         snapshot_service,
         system_health,
+        polling: polling.clone(),
     };
 
     // Create router

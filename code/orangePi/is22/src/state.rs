@@ -4,10 +4,12 @@
 
 use crate::admission_controller::AdmissionController;
 use crate::ai_client::AIClient;
+use crate::camera_brand::CameraBrandService;
 use crate::config_store::ConfigStore;
 use crate::detection_log_service::DetectionLogService;
 use crate::event_log_service::EventLogService;
 use crate::ipcam_scan::IpcamScan;
+use crate::polling_orchestrator::PollingOrchestrator;
 use crate::prev_frame_cache::PrevFrameCache;
 use crate::preset_loader::PresetLoader;
 use crate::realtime_hub::RealtimeHub;
@@ -92,10 +94,14 @@ pub struct AppState {
     pub realtime: Arc<RealtimeHub>,
     /// IpcamScan (camera discovery)
     pub ipcam_scan: Arc<IpcamScan>,
+    /// CameraBrandService (OUI/RTSP template management)
+    pub camera_brand: Arc<CameraBrandService>,
     /// SnapshotService (RTSP -> ffmpeg -> cache)
     pub snapshot_service: Arc<SnapshotService>,
     /// System health status
     pub system_health: Arc<RwLock<SystemHealth>>,
+    /// PollingOrchestrator (camera polling)
+    pub polling: Arc<PollingOrchestrator>,
 }
 
 /// System health metrics

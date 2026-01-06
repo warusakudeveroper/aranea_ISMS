@@ -22,6 +22,7 @@
 //! - SOLID: Single responsibility per module
 //! - MECE: Mutually exclusive, collectively exhaustive
 
+pub mod camera_brand;
 pub mod config_store;
 pub mod admission_controller;
 pub mod ai_client;

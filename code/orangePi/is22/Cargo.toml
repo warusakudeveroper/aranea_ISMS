@@ -68,6 +68,9 @@ urlencoding = "2.1"
 sha1 = "0.10"
 rand = "0.8"
 
+# Regular expressions (OUI validation)
+regex = "1.10"
+
 # RTSP/Stream
 # go2rtc integration via HTTP API
 
