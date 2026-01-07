@@ -8,7 +8,7 @@ mod probes;
 mod network;
 
 pub use port_weights::PORT_WEIGHTS;
-pub use oui_data::{lookup_oui, OUI_CAMERA_VENDORS};
+pub use oui_data::{lookup_oui, extract_oui_prefix, is_locally_administered, OuiMap};
 pub use probes::{
     probe_onvif,
     probe_onvif_capabilities,
@@ -25,6 +25,7 @@ pub use probes::{
     OnvifExtendedInfo,
     OnvifNetworkInterface,
     OnvifScopes,
+    ProbeResult as ProbesProbeResult,  // Re-export for type conversion
 };
 pub use network::{
     arp_scan_subnet,

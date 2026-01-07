@@ -23,7 +23,7 @@ use scanner::{
     parse_cidr, probe_onvif_detailed, probe_onvif_extended, probe_onvif_with_auth,
     probe_rtsp_detailed, scan_port, scan_ports, ArpScanResult, DeviceEvidence,
     OnvifCapabilities, OnvifDeviceInfo, OnvifExtendedInfo, OnvifNetworkInterface, OnvifScopes,
-    ProbeResult, ProbesProbeResult,
+    ProbeResult, ProbesProbeResult, OuiMap,
 };
 use futures::future::select_all;
 use sqlx::MySqlPool;
@@ -37,10 +37,14 @@ use utils::{
     generate_detection_reason, generate_password_variations, ip_in_cidr,
 };
 
-/// IpcamScan service
+/// IpcamScan service with single execution guarantee
 pub struct IpcamScan {
     pool: MySqlPool,
     jobs: Arc<RwLock<HashMap<Uuid, ScanJob>>>,
+    /// Currently running job ID (single execution guarantee)
+    running_job_id: Arc<RwLock<Option<Uuid>>>,
+    /// Abort flags for jobs
+    abort_flags: Arc<RwLock<HashMap<Uuid, bool>>>,
 }
 
 impl IpcamScan {
@@ -49,11 +53,100 @@ impl IpcamScan {
         Self {
             pool,
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            running_job_id: Arc::new(RwLock::new(None)),
+            abort_flags: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
+    /// Check if a scan is currently running
+    pub async fn is_scan_running(&self) -> bool {
+        self.running_job_id.read().await.is_some()
+    }
+
+    /// Get currently running job ID
+    pub async fn get_running_job_id(&self) -> Option<Uuid> {
+        *self.running_job_id.read().await
+    }
+
+    /// Request abort for a job
+    pub async fn abort_job(&self, job_id: &Uuid) -> bool {
+        // Check if this job is actually running
+        let running = self.running_job_id.read().await;
+        if *running != Some(*job_id) {
+            return false;
+        }
+        drop(running);
+
+        // Set abort flag
+        let mut flags = self.abort_flags.write().await;
+        flags.insert(*job_id, true);
+
+        tracing::info!(job_id = %job_id, "Abort requested for scan job");
+        true
+    }
+
+    /// Check if abort was requested for a job
+    async fn is_abort_requested(&self, job_id: &Uuid) -> bool {
+        let flags = self.abort_flags.read().await;
+        flags.get(job_id).copied().unwrap_or(false)
+    }
+
+    /// Clear abort flag for a job
+    async fn clear_abort_flag(&self, job_id: &Uuid) {
+        let mut flags = self.abort_flags.write().await;
+        flags.remove(job_id);
+    }
+
+    /// Cleanup job state (running_job_id and abort_flag)
+    /// Called at the end of run_job (success, abort, or error)
+    async fn cleanup_job_state(&self, job_id: &Uuid) {
+        {
+            let mut running = self.running_job_id.write().await;
+            if *running == Some(*job_id) {
+                *running = None;
+            }
+        }
+        self.clear_abort_flag(job_id).await;
+        tracing::debug!(job_id = %job_id, "Job state cleaned up");
+    }
+
+    /// Check if abort was requested and handle it
+    /// Returns true if aborted, false to continue
+    async fn check_and_handle_abort(&self, job_id: &Uuid, phase: &str) -> bool {
+        if self.is_abort_requested(job_id).await {
+            tracing::info!(job_id = %job_id, phase = %phase, "Scan aborted by user");
+            self.add_log(job_id, ScanLogEntry::new("*", ScanLogEventType::Info,
+                &format!("⚠️ スキャン中止 ({})", phase))).await;
+
+            // Update job status to Canceled
+            {
+                let mut jobs = self.jobs.write().await;
+                if let Some(job) = jobs.get_mut(job_id) {
+                    job.status = JobStatus::Canceled;
+                    job.ended_at = Some(chrono::Utc::now());
+                    job.current_phase = Some(format!("中止 ({})", phase));
+                    job.logs.push(ScanLogEntry::new("*", ScanLogEventType::Info, "ユーザーによりスキャン中止"));
+                }
+            }
+
+            // Cleanup state
+            self.cleanup_job_state(job_id).await;
+            return true;
+        }
+        false
+    }
+
     /// Create a new scan job
-    pub async fn create_job(&self, request: ScanJobRequest) -> ScanJob {
+    /// Returns Error if a scan is already running (single execution guard)
+    pub async fn create_job(&self, request: ScanJobRequest) -> Result<ScanJob> {
+        // Single execution guard: Check if another scan is already running
+        if let Some(running_id) = self.get_running_job_id().await {
+            return Err(Error::Conflict(format!(
+                "スキャンは既に実行中です (job_id: {}). 完了後に再度お試しください",
+                running_id
+            )));
+        }
+
         let job = ScanJob {
             job_id: Uuid::new_v4(),
             targets: request.targets,
@@ -78,7 +171,7 @@ impl IpcamScan {
 
         tracing::info!(job_id = %job.job_id, "Scan job created");
 
-        job
+        Ok(job)
     }
 
     /// Add a log entry to a job
@@ -201,14 +294,58 @@ impl IpcamScan {
         result.ok().map(|d| d.into_scanned_device())
     }
 
+    /// Load OUI map from database for scanner use
+    /// Returns HashMap<OUI prefix, brand display name>
+    async fn load_oui_map(&self) -> OuiMap {
+        #[derive(sqlx::FromRow)]
+        struct OuiRow {
+            oui_prefix: String,
+            display_name: String,
+        }
+
+        let result: std::result::Result<Vec<OuiRow>, _> = sqlx::query_as(
+            "SELECT o.oui_prefix, b.display_name \
+             FROM oui_entries o \
+             JOIN camera_brands b ON o.brand_id = b.id"
+        )
+        .fetch_all(&self.pool)
+        .await;
+
+        match result {
+            Ok(rows) => {
+                let map: OuiMap = rows.into_iter()
+                    .map(|r| (r.oui_prefix.to_uppercase(), r.display_name))
+                    .collect();
+                tracing::info!(oui_count = map.len(), "Loaded OUI map from database");
+                map
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to load OUI map from database, using empty map");
+                OuiMap::new()
+            }
+        }
+    }
+
     /// Run a scan job (async)
+    /// The job runs in the background and can be aborted via abort_job()
     pub async fn run_job(&self, job_id: Uuid) -> Result<()> {
+        // Set running_job_id (single execution guard)
+        {
+            let mut running = self.running_job_id.write().await;
+            *running = Some(job_id);
+        }
+
         // Get job configuration
         let (targets, ports, timeout_ms, concurrency) = {
             let mut jobs = self.jobs.write().await;
-            let job = jobs.get_mut(&job_id).ok_or_else(|| {
-                Error::NotFound("Job not found".to_string())
-            })?;
+            let job = match jobs.get_mut(&job_id) {
+                Some(j) => j,
+                None => {
+                    // Cleanup before returning error
+                    self.cleanup_job_state(&job_id).await;
+                    return Err(Error::NotFound("Job not found".to_string()));
+                }
+            };
             job.status = JobStatus::Running;
             job.started_at = Some(chrono::Utc::now());
             job.current_phase = Some("Stage 0: 準備".to_string());
@@ -232,6 +369,10 @@ impl IpcamScan {
         let local_ip = get_local_ip().await.unwrap_or_else(|| "0.0.0.0".to_string());
         tracing::info!(job_id = %job_id, local_ip = %local_ip, "Detected local IP");
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("ローカルIP検出: {}", local_ip))).await;
+
+        // Load OUI map from database for vendor lookups
+        let oui_map = self.load_oui_map().await;
+        self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("OUIマップ読み込み: {}件", oui_map.len()))).await;
 
         let mut all_ips: Vec<IpAddr> = Vec::new();
         let mut l2_targets: Vec<String> = Vec::new();
@@ -280,6 +421,11 @@ impl IpcamScan {
         );
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 0完了: 計{}ホスト (L2:{}, L3:{})", total_ips, l2_targets.len(), l3_targets.len()))).await;
 
+        // Check for abort after Stage 0
+        if self.check_and_handle_abort(&job_id, "Stage 0").await {
+            return Ok(());
+        }
+
         // Stage 1 & 2: Host Discovery + MAC/OUI (Phase 1/5)
         // For L2 subnets: Use ARP scan (gets MAC addresses)
         // For L3 subnets: Use TCP port scan
@@ -327,7 +473,7 @@ impl IpcamScan {
             self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("[L2 {}/{}] ARPスキャン開始: {}", subnet_idx + 1, l2_targets.len(), target))).await;
             self.update_progress(&job_id, &format!("Stage 1: ARP {} ({}/{})", target, subnet_idx + 1, l2_targets.len()), &progress).await;
 
-            let results = arp_scan_subnet(target, None).await;
+            let results = arp_scan_subnet(target, None, Some(&oui_map)).await;
             let result_count = results.len();
             for result in results {
                 // 各ARP応答をログに記録
@@ -578,6 +724,11 @@ impl IpcamScan {
         // Phase 2 complete: Port Scan
         progress.complete_units(phase_units);
 
+        // Check for abort after Stage 3
+        if self.check_and_handle_abort(&job_id, "Stage 3").await {
+            return Ok(());
+        }
+
         // Stage 4: Discovery Probes (ONVIF, RTSP) + MAC/OUI from ARP (Phase 3/5)
         self.update_progress(&job_id, "Stage 4: プロトコル検査", &progress).await;
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("ONVIF/RTSPプローブ開始: {}ホスト", port_results.len()))).await;
@@ -707,6 +858,11 @@ impl IpcamScan {
         // Phase 3 complete: Protocol Probe
         progress.complete_units(phase_units);
 
+        // Check for abort after Stage 4
+        if self.check_and_handle_abort(&job_id, "Stage 4").await {
+            return Ok(());
+        }
+
         // Stage 5: Scoring (全デバイス保存、閾値フィルタなし) (Phase 4/5)
         // カメラ関連ポートが開いているデバイスは全て保存
         self.update_progress(&job_id, "Stage 5: スコアリング", &progress).await;
@@ -732,6 +888,11 @@ impl IpcamScan {
             "Stage 5: Scoring complete (no threshold filter, all camera-port devices saved)"
         );
         self.add_log(&job_id, ScanLogEntry::new("*", ScanLogEventType::Info, &format!("Stage 5完了: {}台がカメラ候補", candidates.len()))).await;
+
+        // Check for abort after Stage 5
+        if self.check_and_handle_abort(&job_id, "Stage 5").await {
+            return Ok(());
+        }
 
         // Stage 6: Verification - Store results to DB (without credential verification)
         // Note: Credential verification requires admin input via separate API
@@ -825,6 +986,11 @@ impl IpcamScan {
 
         // Phase 4 complete: Scoring + DB Save
         progress.complete_units(phase_units);
+
+        // Check for abort after Stage 6
+        if self.check_and_handle_abort(&job_id, "Stage 6").await {
+            return Ok(());
+        }
 
         // Stage 7: Automatic credential trial (Phase 5/5)
         // Fetch credentials for each subnet and try on camera-like devices
@@ -1177,6 +1343,9 @@ impl IpcamScan {
             "Scan job completed"
         );
 
+        // Cleanup job state on successful completion
+        self.cleanup_job_state(&job_id).await;
+
         Ok(())
     }
 
@@ -1391,6 +1560,9 @@ impl IpcamScan {
             .parse()
             .map_err(|_| Error::Validation("Invalid IP address".to_string()))?;
 
+        // Load OUI map for vendor lookups
+        let oui_map = self.load_oui_map().await;
+
         // Update status to verifying
         let _ = sqlx::query(
             "UPDATE ipcamscan_devices SET status = 'verifying' WHERE ip = ?"
@@ -1420,7 +1592,7 @@ impl IpcamScan {
                     "Retrieved extended ONVIF device info"
                 );
 
-                let oui = dev.mac_address.as_ref().and_then(|m| scanner::lookup_oui(m));
+                let oui = dev.mac_address.as_ref().and_then(|m| lookup_oui(m, Some(&oui_map)));
 
                 // Serialize extended data
                 let scopes_json = info.scopes.as_ref()

@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use super::super::ProbeResult;
+use crate::ipcam_scan::scanner::probes::ProbeResult;
 
 /// Stage 4: ONVIF probe (simplified - GetSystemDateAndTime)
 /// Returns (success_bool, detailed_result)

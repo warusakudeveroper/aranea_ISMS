@@ -2,6 +2,8 @@ pub mod types;
 pub mod xml;
 pub mod basic;
 pub mod auth;
+pub mod auth_base;
+pub mod auth_data;
 
 pub use auth::{
     probe_onvif_capabilities,

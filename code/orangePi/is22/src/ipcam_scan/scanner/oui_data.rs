@@ -1,37 +1,12 @@
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
-use std::process::{Command, Stdio};
+use tokio::process::Command;
+use std::process::Stdio;
 
-/// OUI prefixes for camera vendors
-pub const OUI_CAMERA_VENDORS: &[(&str, &str, u32)] = &[
-    // TP-Link / Tapo
-    ("70:5A:0F", "TP-LINK", 20),
-    ("54:AF:97", "TP-LINK", 20),
-    ("B0:A7:B9", "TP-LINK", 20),
-    ("6C:5A:B0", "TP-LINK", 20),
-    ("6C:C8:40", "TP-LINK", 20),
-    ("08:A6:F7", "TP-LINK", 20),
-    ("78:20:51", "TP-LINK", 20),
-    ("BC:07:1D", "TP-LINK", 20),
-    ("18:D6:C7", "TP-LINK", 20),
-    ("3C:84:6A", "TP-LINK", 20),  // Tapo C500/C310 etc
-    ("D8:07:B6", "TP-LINK", 20),  // Tapo
-    ("D8:44:89", "TP-LINK", 20),  // Tapo
-    ("9C:53:22", "TP-LINK", 20),  // Tapo C310
-    // Google / Nest
-    ("F4:F5:D8", "Google", 20),
-    ("30:FD:38", "Google", 20),
-    ("3C:22:FB", "Google", 20),
-    // Hikvision
-    ("A8:42:A1", "Hikvision", 20),
-    ("C0:56:E3", "Hikvision", 20),
-    ("44:19:B6", "Hikvision", 20),
-    // Dahua
-    ("3C:EF:8C", "Dahua", 20),
-    ("4C:11:BF", "Dahua", 20),
-    // Axis
-    ("00:40:8C", "Axis", 20),
-    ("AC:CC:8E", "Axis", 20),
-];
+/// Type alias for OUI lookup map
+/// Key: OUI prefix in format "XX:XX:XX" (uppercase)
+/// Value: Vendor name (e.g., "TP-LINK", "Google")
+pub type OuiMap = HashMap<String, String>;
 
 /// ARP scan result for a single host
 #[derive(Debug, Clone)]
@@ -95,7 +70,8 @@ pub async fn get_local_ip() -> Option<String> {
 
 /// Perform ARP scan on a subnet (requires root/sudo)
 /// Returns list of (IP, MAC) pairs for responsive hosts
-pub async fn arp_scan_subnet(cidr: &str, interface: Option<&str>) -> Vec<ArpScanResult> {
+/// Use oui_map from CameraBrandService for vendor lookups
+pub async fn arp_scan_subnet(cidr: &str, interface: Option<&str>, oui_map: Option<&OuiMap>) -> Vec<ArpScanResult> {
     let mut cmd = Command::new("sudo");
     cmd.arg("arp-scan");
 
@@ -129,7 +105,7 @@ pub async fn arp_scan_subnet(cidr: &str, interface: Option<&str>) -> Vec<ArpScan
         if parts.len() >= 2 {
             if let Ok(ip) = parts[0].parse::<Ipv4Addr>() {
                 let mac = parts[1].to_uppercase();
-                let vendor = lookup_oui(&mac);
+                let vendor = lookup_oui(&mac, oui_map);
                 results.push(ArpScanResult {
                     ip: IpAddr::V4(ip),
                     mac,
@@ -148,77 +124,53 @@ pub async fn arp_scan_subnet(cidr: &str, interface: Option<&str>) -> Vec<ArpScan
     results
 }
 
-/// Score thresholds
-/// Low threshold to capture potential cameras that need credentials
-/// 443/8443 only = 20 points, so 15 captures these
-pub const SCORE_THRESHOLD_VERIFY: u32 = 15;
+// Note: HostResult, DiscoveryMethod, PortScanResult, ProbeResult are defined in network.rs
+// SCORE_THRESHOLD_VERIFY is also defined in network.rs
 
-/// Host discovery result
-#[derive(Debug, Clone)]
-pub struct HostResult {
-    pub ip: IpAddr,
-    pub alive: bool,
-    pub method: DiscoveryMethod,
-}
-
-/// Discovery method used
-#[derive(Debug, Clone, Copy)]
-pub enum DiscoveryMethod {
-    TcpConnect,
-    Known,
-    Timeout,
-}
-
-/// Port scan result
-#[derive(Debug, Clone)]
-pub struct PortScanResult {
-    pub ip: IpAddr,
-    pub port: u16,
-    pub open: bool,
-    pub latency_ms: Option<u64>,
-}
-
-/// Probe result with detailed status
-#[derive(Debug, Clone, Copy, Default)]
-pub enum ProbeResult {
-    #[default]
-    NotTested,           // 未試行
-    Success,             // 応答あり
-    AuthRequired,        // 認証が必要（401等）
-    Timeout,             // タイムアウト
-    Refused,             // 接続拒否
-    NoResponse,          // 接続はできたが応答なし
-    Error,               // その他エラー
-}
-
-/// Lookup OUI vendor from MAC address
-pub fn lookup_oui(mac: &str) -> Option<String> {
+/// Extract OUI prefix from MAC address
+/// Returns OUI in format "XX:XX:XX" (uppercase)
+pub fn extract_oui_prefix(mac: &str) -> Option<String> {
     let mac_upper = mac.to_uppercase().replace(['-', ':'], "");
-    let oui = if mac_upper.len() >= 6 {
-        format!(
+    if mac_upper.len() >= 6 {
+        Some(format!(
             "{}:{}:{}",
             &mac_upper[0..2],
             &mac_upper[2..4],
             &mac_upper[4..6]
-        )
+        ))
     } else {
-        return None;
-    };
+        None
+    }
+}
 
-    // Check for Locally Administered Address (LLA)
-    // Second bit of first byte = 1 means locally administered
-    // Common patterns: 02:xx:xx, 06:xx:xx, 0A:xx:xx, 0E:xx:xx, etc.
+/// Check if MAC is Locally Administered Address (LLA)
+/// Second bit of first byte = 1 means locally administered
+/// Common patterns: 02:xx:xx, 06:xx:xx, 0A:xx:xx, 0E:xx:xx, etc.
+pub fn is_locally_administered(mac: &str) -> bool {
+    let mac_upper = mac.to_uppercase().replace(['-', ':'], "");
     if mac_upper.len() >= 2 {
         if let Ok(first_byte) = u8::from_str_radix(&mac_upper[0..2], 16) {
-            if (first_byte & 0x02) != 0 {
-                return Some("LLA:モバイルデバイス".to_string());
-            }
+            return (first_byte & 0x02) != 0;
         }
     }
+    false
+}
 
-    for &(prefix, vendor, _) in OUI_CAMERA_VENDORS {
-        if oui == prefix {
-            return Some(vendor.to_string());
+/// Lookup OUI vendor from MAC address using provided OUI map
+/// Falls back to LLA detection if OUI not found
+pub fn lookup_oui(mac: &str, oui_map: Option<&OuiMap>) -> Option<String> {
+    // Check for Locally Administered Address first
+    if is_locally_administered(mac) {
+        return Some("LLA:モバイルデバイス".to_string());
+    }
+
+    // Extract OUI prefix
+    let oui = extract_oui_prefix(mac)?;
+
+    // Lookup in provided map
+    if let Some(map) = oui_map {
+        if let Some(vendor) = map.get(&oui) {
+            return Some(vendor.clone());
         }
     }
 

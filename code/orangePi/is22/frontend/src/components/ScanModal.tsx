@@ -462,16 +462,18 @@ function PhaseIndicator({
   progress?: number
 }) {
   const phases = [
-    { id: "arp", label: "ARP Scan", weight: 15 },
-    { id: "port", label: "Port Scan", weight: 25 },
-    { id: "oui", label: "OUI Check", weight: 5 },
-    { id: "onvif", label: "ONVIF", weight: 20 },
-    { id: "rtsp", label: "RTSP", weight: 30 },
-    { id: "match", label: "照合", weight: 5 },
+    { id: "arp", label: "ARP Scan", weight: 15, backendNames: ["hostdiscovery", "arp", "stage 0", "stage 1"] },
+    { id: "port", label: "Port Scan", weight: 25, backendNames: ["portscan", "port", "stage 2", "stage 3"] },
+    { id: "oui", label: "OUI Check", weight: 5, backendNames: ["ouilookup", "oui", "stage 4"] },
+    { id: "onvif", label: "ONVIF", weight: 20, backendNames: ["onvifprobe", "onvif", "stage 5"] },
+    { id: "rtsp", label: "RTSP", weight: 30, backendNames: ["rtspauth", "rtsp", "stage 6", "credential", "認証"] },
+    { id: "match", label: "照合", weight: 5, backendNames: ["cameramatching", "match", "stage 7", "db"] },
   ]
 
+  // バックエンドからの current_phase を正しくマッピング
+  const normalizedPhase = currentPhase.toLowerCase().replace(/[_\s-]/g, '')
   const currentIndex = phases.findIndex((p) =>
-    currentPhase.toLowerCase().includes(p.id)
+    p.backendNames.some(name => normalizedPhase.includes(name.replace(/[_\s-]/g, '')))
   )
 
   // Calculate cumulative progress based on weights
@@ -484,7 +486,7 @@ function PhaseIndicator({
       {/* Phase pills */}
       <div className="flex items-center justify-center gap-1 flex-wrap">
         {phases.map((p, i) => {
-          const isActive = currentPhase.toLowerCase().includes(p.id)
+          const isActive = i === currentIndex
           const isPast = i < currentIndex
           const isFuture = i > currentIndex
 
@@ -526,7 +528,7 @@ function PhaseIndicator({
           <div className="h-full flex">
             {phases.map((p, i) => {
               const isPast = i < currentIndex
-              const isActive = currentPhase.toLowerCase().includes(p.id)
+              const isActive = i === currentIndex
               const widthPercent = p.weight
 
               return (
@@ -605,6 +607,7 @@ function DeviceCard({
   const categorizedDevice = device as CategorizedDevice
   const isLostConnection = categorizedDevice.category === 'f'
   const isStrayChild = device.ip_changed === true
+  const isRegisteredCamera = categorizedDevice.category === 'a'  // RT-05: カテゴリA判定
 
   return (
     <Card
@@ -619,21 +622,35 @@ function DeviceCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
+          {/* RT-05: 登録済みカメラ名表示（カテゴリA） */}
+          {isRegisteredCamera && device.registered_camera_name && (
+            <p className="text-base font-bold text-green-700 dark:text-green-300 mb-1">
+              {device.registered_camera_name}
+            </p>
+          )}
           {/* IP + Status Badge */}
           <div className="flex items-center gap-2 flex-wrap">
             <Wifi className={cn(
               "h-4 w-4 flex-shrink-0",
-              isLostConnection ? "text-red-500" : "text-muted-foreground"
+              isLostConnection ? "text-red-500" :
+              isRegisteredCamera ? "text-green-500" : "text-muted-foreground"
             )} />
             <span className={cn(
               "font-mono text-sm font-medium",
-              isLostConnection && "text-red-700"
+              isLostConnection && "text-red-700",
+              isRegisteredCamera && "text-green-700 dark:text-green-300"
             )}>
               {device.ip}
             </span>
             <DeviceStatusBadge device={device} />
+            {/* RT-05: カテゴリAバッジ */}
+            {isRegisteredCamera && (
+              <Badge variant="default" className="text-xs bg-green-600">
+                登録済
+              </Badge>
+            )}
             {/* Credential success indicator */}
-            {device.credential_status === 'success' && (
+            {device.credential_status === 'success' && !isRegisteredCamera && (
               <Badge variant="default" className="text-xs bg-green-600">
                 認証済
               </Badge>
@@ -677,6 +694,22 @@ function DeviceCard({
           {device.subnet && (
             <p className="mt-0.5 text-xs text-muted-foreground">
               Subnet: {device.subnet}
+            </p>
+          )}
+          {/* RT-06: タイムスタンプ表示 */}
+          {device.last_seen && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              最終検出: {new Date(device.last_seen).toLocaleString('ja-JP', {
+                month: 'numeric',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+              {device.first_seen && device.first_seen !== device.last_seen && (
+                <span className="ml-2 text-gray-400">
+                  (初回: {new Date(device.first_seen).toLocaleDateString('ja-JP')})
+                </span>
+              )}
             </p>
           )}
           {/* Model info - 強調表示（カテゴリb） */}
@@ -773,6 +806,7 @@ function DeviceCard({
 }
 
 // Category section component with collapsible
+// RT-09: 説明文と推奨アクションを表示
 function CategorySection({
   category,
   devices,
@@ -791,48 +825,67 @@ function CategorySection({
   if (devices.length === 0) return null
 
   const isCollapsible = category.id === 'd' || category.id === 'e'
+  const isCategoryA = category.id === 'a'
   const isCategoryF = category.id === 'f'
   const isCategoryB = category.id === 'b'
+  const isCategoryC = category.id === 'c'
 
   return (
     <div className="space-y-2">
       {/* Section header */}
       <div
         className={cn(
-          "flex items-center gap-2 px-2 py-1.5 rounded-lg",
+          "flex flex-col gap-1 px-3 py-2 rounded-lg",
           isCollapsible && "cursor-pointer hover:bg-muted/50",
-          isCategoryB && "font-semibold bg-blue-50 dark:bg-blue-900/20",
-          isCategoryF && "font-semibold bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"
+          isCategoryA && "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800",
+          isCategoryB && "bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500",
+          isCategoryC && "bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300",
+          isCategoryF && "bg-red-50 dark:bg-red-900/20 border-2 border-red-400"
         )}
         onClick={isCollapsible ? onToggleCollapse : undefined}
       >
-        {isCollapsible && (
-          collapsed ? (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          )
-        )}
-        {isCategoryF && <AlertCircle className="h-4 w-4 text-red-500" />}
-        <span className={cn(
-          "text-sm font-medium",
-          isCategoryB && "text-blue-700 dark:text-blue-300",
-          isCategoryF && "text-red-700 dark:text-red-300"
-        )}>
-          {isCategoryB && '★ '}
-          {isCategoryF && '⚠ '}
-          カテゴリ {category.id.toUpperCase()}: {category.label}
-        </span>
-        <Badge
-          variant={isCategoryF ? "destructive" : "secondary"}
-          className="ml-1"
-        >
-          {devices.length}台
-        </Badge>
-        {isCategoryF && (
-          <span className="text-xs text-red-600 dark:text-red-400 ml-2">
-            確認が必要です
+        <div className="flex items-center gap-2">
+          {isCollapsible && (
+            collapsed ? (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            )
+          )}
+          {isCategoryA && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+          {isCategoryB && <Plus className="h-4 w-4 text-blue-600" />}
+          {isCategoryC && <Key className="h-4 w-4 text-yellow-600" />}
+          {isCategoryF && <AlertCircle className="h-4 w-4 text-red-500" />}
+          <span className={cn(
+            "text-sm font-semibold",
+            isCategoryA && "text-green-700 dark:text-green-300",
+            isCategoryB && "text-blue-700 dark:text-blue-300",
+            isCategoryC && "text-yellow-700 dark:text-yellow-300",
+            isCategoryF && "text-red-700 dark:text-red-300"
+          )}>
+            {category.label}
           </span>
+          <Badge
+            variant={isCategoryF ? "destructive" : isCategoryB ? "default" : "secondary"}
+            className={cn("ml-1", isCategoryB && "bg-blue-600")}
+          >
+            {devices.length}台
+          </Badge>
+        </div>
+        {/* RT-09: 説明文 */}
+        <p className="text-xs text-muted-foreground ml-6">
+          {category.description}
+        </p>
+        {/* RT-09: 推奨アクション */}
+        {category.userAction && (isCategoryB || isCategoryC || isCategoryF) && (
+          <p className={cn(
+            "text-xs font-medium ml-6 mt-1",
+            isCategoryB && "text-blue-600 dark:text-blue-400",
+            isCategoryC && "text-yellow-600 dark:text-yellow-400",
+            isCategoryF && "text-red-600 dark:text-red-400"
+          )}>
+            → {category.userAction}
+          </p>
         )}
       </div>
 
@@ -866,6 +919,13 @@ export function ScanModal({
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)  // IS22_UI_DETAILED_SPEC Section 3.4
   const [registering, setRegistering] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ===== Brute Force Mode (Camscan_designers_review.md Item 4) =====
+  // デフォルトOFF: カメラの可能性が低いデバイスにはクレデンシャル試行をスキップ
+  const [bruteForceMode, setBruteForceMode] = useState(false)
+
+  // ===== スキャン中止処理用 =====
+  const [aborting, setAborting] = useState(false)
 
   // ===== スキャン完了フロー状態 (is22_14_UI改善設計_v1.1.md Section 5) =====
   // 'idle' | 'scanning' | 'complete_display' | 'summary_display' | 'registration'
@@ -979,13 +1039,16 @@ export function ScanModal({
     setCachedResult(null)            // 前回結果を非表示
 
     try {
-      console.log("[ScanModal] POST /api/ipcamscan/jobs")
+      console.log("[ScanModal] POST /api/ipcamscan/jobs, bruteForceMode:", bruteForceMode)
       const response = await fetch(
         `${API_BASE_URL}/api/ipcamscan/jobs`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ targets: selectedSubnets }),
+          body: JSON.stringify({
+            targets: selectedSubnets,
+            brute_force: bruteForceMode,  // Camscan_designers_review.md Item 4
+          }),
         }
       )
 
@@ -1185,29 +1248,42 @@ export function ScanModal({
   }
 
   // サブネット削除 (DELETE /api/subnets/:id)
-  const deleteSubnet = async (subnetId: string) => {
-    if (!confirm("このサブネットを削除しますか？")) {
-      return
+  // RT-08: サブネット削除確認状態
+  const [deletingSubnet, setDeletingSubnet] = useState<Subnet | null>(null)
+
+  // RT-08: サブネット削除（確認後実行）
+  const confirmDeleteSubnet = (subnetId: string) => {
+    const subnet = subnets.find((s) => s.subnet_id === subnetId)
+    if (subnet) {
+      setDeletingSubnet(subnet)
     }
+  }
+
+  const executeDeleteSubnet = async () => {
+    if (!deletingSubnet) return
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/subnets/${subnetId}`, {
-        method: "DELETE",
-      })
+      // RT-08: cleanup_scan_results=true パラメータでスキャン結果も削除
+      const response = await fetch(
+        `${API_BASE_URL}/api/subnets/${deletingSubnet.subnet_id}?cleanup_scan_results=true`,
+        { method: "DELETE" }
+      )
 
       if (!response.ok) {
         throw new Error("Failed to delete subnet")
       }
 
       // ローカル状態から削除
-      setSubnets((prev) => prev.filter((s) => s.subnet_id !== subnetId))
+      setSubnets((prev) => prev.filter((s) => s.subnet_id !== deletingSubnet.subnet_id))
       setSelectedSubnetIds((prev) => {
         const next = new Set(prev)
-        next.delete(subnetId)
+        next.delete(deletingSubnet.subnet_id)
         return next
       })
+      setDeletingSubnet(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "サブネット削除に失敗しました")
+      setDeletingSubnet(null)
     }
   }
 
@@ -1230,12 +1306,24 @@ export function ScanModal({
     setSelectedIds(new Set(registerableDevices.map((d) => d.ip)))
   }
 
+  // RT-07: カテゴリCも含めて全選択
+  const selectAllIncludingPending = () => {
+    const devices = [...devicesByCategory.b, ...devicesByCategory.c]
+    setSelectedIds(new Set(devices.map((d) => d.ip)))
+  }
+
   const selectNone = () => {
     setSelectedIds(new Set())
   }
 
-  // 登録可能デバイス数（カテゴリb）
+  // 登録可能デバイス数（カテゴリb + c）
   const registerableCount = devicesByCategory.b.length
+  const pendingAuthCount = devicesByCategory.c.length
+
+  // RT-07: 選択中のカテゴリCデバイス数（強制登録対象）
+  const selectedCategoryC = useMemo(() => {
+    return devicesByCategory.c.filter((d) => selectedIds.has(d.ip))
+  }, [devicesByCategory.c, selectedIds])
 
   const handleRegister = async () => {
     if (selectedIds.size === 0) return
@@ -1243,16 +1331,19 @@ export function ScanModal({
     setRegistering(true)
 
     try {
-      // 選択されたIPに対応するデバイス情報を取得
-      const selectedDevices = devicesByCategory.b.filter((d) => selectedIds.has(d.ip))
+      // RT-07: カテゴリB + カテゴリC（強制登録）の両方から選択デバイスを取得
+      const selectedFromB = devicesByCategory.b.filter((d) => selectedIds.has(d.ip))
+      const selectedFromC = devicesByCategory.c.filter((d) => selectedIds.has(d.ip))
+      const allSelectedDevices = [...selectedFromB, ...selectedFromC]
 
       // バックエンドが期待する形式に変換
-      const devices = selectedDevices.map((device) => {
+      const devices = allSelectedDevices.map((device) => {
         // デバイスのサブネットからfidを取得
         const subnet = subnets.find((s) => s.cidr === device.subnet)
         const fid = subnet?.fid || "0000"
 
-        // スキャン時に取得したクレデンシャルを使用
+        // カテゴリBならクレデンシャルあり、カテゴリCならなし
+        const isFromCategoryC = devicesByCategory.c.some((d) => d.ip === device.ip)
         const credentials =
           device.credential_status === "success" && device.credential_username
             ? {
@@ -1267,6 +1358,10 @@ export function ScanModal({
           location: device.subnet,
           fid,
           credentials,
+          // RT-07: 強制登録フラグ（カテゴリCの場合）
+          force_register: isFromCategoryC,
+          // RT-07: pending_auth ステータスで登録（カテゴリCの場合）
+          initial_status: isFromCategoryC ? 'pending_auth' : 'active',
         }
       })
 
@@ -1293,6 +1388,48 @@ export function ScanModal({
   }
 
   const isScanning = scanJob?.status === "running" || scanJob?.status === "queued" || completionPhase === 'scanning'
+
+  // ===== スキャン中止 (Camscan_designers_review.md Item 3) =====
+  const abortScan = useCallback(async () => {
+    if (!scanJob) return
+
+    setAborting(true)
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/ipcamscan/jobs/${scanJob.job_id}/abort`,
+        { method: "POST" }
+      )
+
+      if (!response.ok) {
+        // Fallback to DELETE if POST abort not supported
+        const deleteResponse = await fetch(
+          `${API_BASE_URL}/api/ipcamscan/jobs/${scanJob.job_id}`,
+          { method: "DELETE" }
+        )
+        if (!deleteResponse.ok) {
+          throw new Error("Failed to abort scan")
+        }
+      }
+
+      // Fetch whatever devices were found so far
+      const devicesResponse = await fetch(`${API_BASE_URL}/api/ipcamscan/devices`)
+      if (devicesResponse.ok) {
+        const devicesData = await devicesResponse.json()
+        const devicesList = devicesData.devices || devicesData.data || devicesData
+        if (Array.isArray(devicesList)) {
+          setDevices(devicesList)
+        }
+      }
+
+      setScanJob(null)
+      setCompletionPhase('registration')
+    } catch (err) {
+      console.error("[ScanModal] abortScan error:", err)
+      setError(err instanceof Error ? err.message : "スキャン中止に失敗しました")
+    } finally {
+      setAborting(false)
+    }
+  }, [scanJob])
 
   // 前回結果を読み込む
   const loadCachedResult = useCallback(() => {
@@ -1474,7 +1611,7 @@ export function ScanModal({
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation()
-                              deleteSubnet(subnet.subnet_id)
+                              confirmDeleteSubnet(subnet.subnet_id)
                             }}
                             title="サブネット削除"
                             className="text-red-500 hover:text-red-700 hover:bg-red-50"
@@ -1526,6 +1663,32 @@ export function ScanModal({
                       </Button>
                     )}
                   </div>
+                </div>
+
+                {/* ===== Brute Force Mode トグル (Camscan_designers_review.md Item 4) ===== */}
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-amber-400"
+                      checked={bruteForceMode}
+                      onChange={(e) => setBruteForceMode(e.target.checked)}
+                    />
+                    <div className="flex-1">
+                      <span className="font-medium text-amber-900 dark:text-amber-100">
+                        Brute Force Mode
+                      </span>
+                      <p className="text-sm text-amber-700 dark:text-amber-300 mt-0.5">
+                        カメラの可能性が低い検出対象にも全認証を試行します。
+                        非常に時間がかかります。
+                      </p>
+                      {!bruteForceMode && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          OFF: ONVIF/RTSP応答のないデバイスはクレデンシャル試行をスキップ
+                        </p>
+                      )}
+                    </div>
+                  </label>
                 </div>
 
                 {/* エラー表示 */}
@@ -1583,6 +1746,28 @@ export function ScanModal({
                     currentPhase={scanJob?.current_phase}
                     progress={scanJob?.progress_percent}
                   />
+                </div>
+
+                {/* ===== スキャン中止ボタン (Camscan_designers_review.md Item 3) ===== */}
+                <div className="flex justify-center mt-4">
+                  <Button
+                    variant="destructive"
+                    size="lg"
+                    onClick={abortScan}
+                    disabled={aborting}
+                  >
+                    {aborting ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        中止処理中...
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="mr-2 h-4 w-4" />
+                        スキャンを中止して結果表示
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
             )}
@@ -1692,10 +1877,21 @@ export function ScanModal({
                       })}
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  {/* RT-07: 選択ボタン群 */}
+                  <div className="flex gap-2 flex-wrap">
                     <Button variant="outline" size="sm" onClick={selectAll}>
-                      カメラを全選択
+                      認証済カメラを選択 ({registerableCount})
                     </Button>
+                    {pendingAuthCount > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={selectAllIncludingPending}
+                        className="border-yellow-400 text-yellow-700 hover:bg-yellow-50"
+                      >
+                        認証待ちも含めて選択 (+{pendingAuthCount})
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={selectNone}>
                       選択解除
                     </Button>
@@ -1745,9 +1941,15 @@ export function ScanModal({
           {/* Footer */}
           {completionPhase === 'registration' && devices.length > 0 && (
             <div className="flex items-center justify-between border-t pt-4 mt-4">
-              <span className="text-sm text-muted-foreground">
-                {selectedIds.size}台選択中
-              </span>
+              <div className="text-sm text-muted-foreground">
+                <span>{selectedIds.size}台選択中</span>
+                {/* RT-07: 強制登録デバイス数の表示 */}
+                {selectedCategoryC.length > 0 && (
+                  <span className="ml-2 text-yellow-600">
+                    (うち{selectedCategoryC.length}台は認証待ち)
+                  </span>
+                )}
+              </div>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -1771,7 +1973,11 @@ export function ScanModal({
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="カメラを登録しますか？"
-        description={`${selectedIds.size}台のデバイスをカメラとして登録します。登録後、ストリーム設定が必要な場合があります。`}
+        description={
+          selectedCategoryC.length > 0
+            ? `${selectedIds.size}台のデバイスをカメラとして登録します。\n\n⚠️ ${selectedCategoryC.length}台は認証情報が未設定のため「認証待ち」ステータスで登録されます。後から認証情報を設定してください。`
+            : `${selectedIds.size}台のデバイスをカメラとして登録します。登録後、ストリーム設定が必要な場合があります。`
+        }
         type="info"
         confirmLabel="登録する"
         onConfirm={handleRegister}
@@ -1792,6 +1998,25 @@ export function ScanModal({
         confirmLabel="終了する"
         cancelLabel="キャンセル"
         onConfirm={handleConfirmClose}
+      />
+
+      {/* RT-08: サブネット削除確認ダイアログ */}
+      <ConfirmDialog
+        open={!!deletingSubnet}
+        onOpenChange={(open) => !open && setDeletingSubnet(null)}
+        title="サブネットを削除しますか？"
+        description={
+          deletingSubnet
+            ? `サブネット ${deletingSubnet.cidr} を削除します。\n\n` +
+              `• このサブネットのスキャン結果は削除されます\n` +
+              `• 既に登録済みのカメラは影響を受けません\n\n` +
+              `この操作は取り消せません。続行しますか？`
+            : ""
+        }
+        type="warning"
+        confirmLabel="削除する"
+        cancelLabel="キャンセル"
+        onConfirm={executeDeleteSubnet}
       />
 
       {/* Subnet credential editor modal (is22_ScanModal_Credential_Trial_Spec.md Section 6) */}

@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use super::lookup_oui;
+use super::{lookup_oui, OuiMap};
 use super::PORT_WEIGHTS;
 
 /// ARP scan result
@@ -71,7 +71,8 @@ pub async fn get_local_ip() -> Option<String> {
 
 /// Perform ARP scan on a subnet (requires root/sudo)
 /// Returns list of (IP, MAC) pairs for responsive hosts
-pub async fn arp_scan_subnet(cidr: &str, interface: Option<&str>) -> Vec<ArpScanResult> {
+/// Use oui_map from CameraBrandService for vendor lookups
+pub async fn arp_scan_subnet(cidr: &str, interface: Option<&str>, oui_map: Option<&OuiMap>) -> Vec<ArpScanResult> {
     let mut cmd = Command::new("sudo");
     cmd.arg("arp-scan");
 
@@ -105,7 +106,7 @@ pub async fn arp_scan_subnet(cidr: &str, interface: Option<&str>) -> Vec<ArpScan
         if parts.len() >= 2 {
             if let Ok(ip) = parts[0].parse::<Ipv4Addr>() {
                 let mac = parts[1].to_uppercase();
-                let vendor = lookup_oui(&mac);
+                let vendor = lookup_oui(&mac, oui_map);
                 results.push(ArpScanResult {
                     ip: IpAddr::V4(ip),
                     mac,

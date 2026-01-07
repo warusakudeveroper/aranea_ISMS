@@ -13,46 +13,47 @@ describe('DEVICE_CATEGORIES', () => {
     expect(DEVICE_CATEGORIES).toHaveLength(6)
   })
 
-  it('カテゴリ a (登録済み) が含まれる', () => {
+  // RT-09: ユーザーフレンドリーな文言に改善
+  it('カテゴリ a (登録済みカメラ) が含まれる', () => {
     const categoryA = DEVICE_CATEGORIES.find(c => c.id === 'a')
     expect(categoryA).toBeDefined()
-    expect(categoryA?.label).toBe('登録済み')
+    expect(categoryA?.label).toBe('登録済みカメラ')
     expect(categoryA?.collapsed).toBe(false)
   })
 
-  it('カテゴリ b (登録可能) が含まれる', () => {
+  it('カテゴリ b (新規登録可能) が含まれる', () => {
     const categoryB = DEVICE_CATEGORIES.find(c => c.id === 'b')
     expect(categoryB).toBeDefined()
-    expect(categoryB?.label).toBe('登録可能')
+    expect(categoryB?.label).toBe('新規登録可能')
     expect(categoryB?.collapsed).toBe(false)
   })
 
-  it('カテゴリ c (認証必要) が含まれる', () => {
+  it('カテゴリ c (認証情報の設定が必要) が含まれる', () => {
     const categoryC = DEVICE_CATEGORIES.find(c => c.id === 'c')
     expect(categoryC).toBeDefined()
-    expect(categoryC?.label).toBe('認証必要')
+    expect(categoryC?.label).toBe('認証情報の設定が必要')
     expect(categoryC?.collapsed).toBe(false)
   })
 
-  it('カテゴリ d (その他カメラ) が含まれる - デフォルト折りたたみ', () => {
+  it('カテゴリ d (ネットワーク機器) が含まれる - デフォルト折りたたみ', () => {
     const categoryD = DEVICE_CATEGORIES.find(c => c.id === 'd')
     expect(categoryD).toBeDefined()
-    expect(categoryD?.label).toBe('その他カメラ')
+    expect(categoryD?.label).toBe('ネットワーク機器')
     expect(categoryD?.collapsed).toBe(true)
   })
 
-  it('カテゴリ e (非カメラ) が含まれる - デフォルト折りたたみ', () => {
+  it('カテゴリ e (その他のデバイス) が含まれる - デフォルト折りたたみ', () => {
     const categoryE = DEVICE_CATEGORIES.find(c => c.id === 'e')
     expect(categoryE).toBeDefined()
-    expect(categoryE?.label).toBe('非カメラ')
+    expect(categoryE?.label).toBe('その他のデバイス')
     expect(categoryE?.collapsed).toBe(true)
   })
 
-  it('カテゴリ f (通信断・迷子) が含まれる - T3-8 新規追加', () => {
+  it('カテゴリ f (要確認: 通信できません) が含まれる - T3-8 新規追加', () => {
     const categoryF = DEVICE_CATEGORIES.find(c => c.id === 'f')
     expect(categoryF).toBeDefined()
-    expect(categoryF?.label).toBe('通信断・迷子')
-    expect(categoryF?.description).toContain('IP変更検出')
+    expect(categoryF?.label).toBe('要確認: 通信できません')
+    expect(categoryF?.description).toContain('通信できません')
     expect(categoryF?.bgClass).toContain('bg-red')
     expect(categoryF?.collapsed).toBe(false) // 重要なので折りたたまない
   })

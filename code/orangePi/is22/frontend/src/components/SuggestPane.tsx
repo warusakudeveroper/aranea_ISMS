@@ -179,10 +179,25 @@ export function SuggestPane({
     })
   }, [findCamera])
 
-  // Remove camera immediately on stream error (no animation, no onairtime wait)
+  // Remove camera on stream error with slide-out animation (no onairtime wait)
   const removeCamera = useCallback((cameraId: string) => {
     console.log("[SuggestPane] Removing camera due to stream error:", cameraId)
-    setOnAirCameras(prev => prev.filter(c => c.cameraId !== cameraId))
+    setOnAirCameras(prev => {
+      const target = prev.find(c => c.cameraId === cameraId)
+      if (!target || target.isExiting) return prev
+
+      // Mark for exit animation
+      const updated = prev.map(c =>
+        c.cameraId === cameraId ? { ...c, isExiting: true } : c
+      )
+
+      // Remove after animation completes
+      setTimeout(() => {
+        setOnAirCameras(current => current.filter(c => c.cameraId !== cameraId))
+      }, ANIMATION_DURATION)
+
+      return updated
+    })
   }, [])
 
   // Handle new detection events

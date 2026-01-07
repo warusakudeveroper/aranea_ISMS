@@ -493,16 +493,61 @@ export interface CategoryMeta {
   description: string;
   bgClass: string;       // Tailwind background class
   collapsed: boolean;    // Default collapsed state
+  userAction?: string;   // RT-09: ユーザーへの推奨アクション
 }
 
 // All category definitions
+// Camscan_designers_review.md Item 2: カテゴリD は "その他ネットワークデバイス" に変更
+// RT-09: ユーザーフレンドリーな文言に改善
 export const DEVICE_CATEGORIES: CategoryMeta[] = [
-  { id: 'a', label: '登録済み', description: 'camerasテーブルに存在', bgClass: 'bg-green-100', collapsed: false },
-  { id: 'b', label: '登録可能', description: 'カメラ確認済み + 認証OK + 未登録', bgClass: 'bg-blue-200 border-2 border-blue-500', collapsed: false },
-  { id: 'c', label: '認証必要', description: 'カメラ検出 + 認証未実施/失敗', bgClass: 'bg-yellow-100', collapsed: false },
-  { id: 'd', label: 'その他カメラ', description: 'カメラ可能性あり + 条件不足', bgClass: 'bg-gray-100', collapsed: true },
-  { id: 'e', label: '非カメラ', description: 'カメラでないデバイス', bgClass: 'bg-gray-100', collapsed: true },
-  { id: 'f', label: '通信断・迷子', description: '登録済みだが応答なし / IP変更検出', bgClass: 'bg-red-100 border-2 border-red-400', collapsed: false },
+  {
+    id: 'a',
+    label: '登録済みカメラ',
+    description: '既にシステムに登録されているカメラです。正常に動作しています。',
+    bgClass: 'bg-green-100',
+    collapsed: false,
+    userAction: '操作不要: 登録済みカメラは管理画面から確認・編集できます'
+  },
+  {
+    id: 'b',
+    label: '新規登録可能',
+    description: 'カメラとして認識され、認証にも成功しました。すぐに登録できます。',
+    bgClass: 'bg-blue-200 border-2 border-blue-500',
+    collapsed: false,
+    userAction: '推奨: チェックを入れて「登録」ボタンを押してください'
+  },
+  {
+    id: 'c',
+    label: '認証情報の設定が必要',
+    description: 'カメラの可能性がありますが、ユーザー名・パスワードが必要です。',
+    bgClass: 'bg-yellow-100',
+    collapsed: false,
+    userAction: '対応: サブネット設定でクレデンシャルを追加し、再スキャンしてください'
+  },
+  {
+    id: 'd',
+    label: 'ネットワーク機器',
+    description: 'ルーターやスイッチなど、カメラ以外のネットワーク機器です。',
+    bgClass: 'bg-gray-100',
+    collapsed: true,
+    userAction: '通常は無視: カメラでない場合は登録不要です'
+  },
+  {
+    id: 'e',
+    label: 'その他のデバイス',
+    description: 'PCやスマートフォンなど、ネットワークに接続されているデバイスです。',
+    bgClass: 'bg-gray-100',
+    collapsed: true,
+    userAction: '操作不要: カメラではないため登録対象外です'
+  },
+  {
+    id: 'f',
+    label: '要確認: 通信できません',
+    description: '登録済みカメラですが、現在通信できません。電源やケーブルを確認してください。',
+    bgClass: 'bg-red-100 border-2 border-red-400',
+    collapsed: false,
+    userAction: '要確認: 電源・ネットワークケーブル・IPアドレス設定を確認してください'
+  },
 ];
 
 // ScannedDevice with category (Frontend enriched)

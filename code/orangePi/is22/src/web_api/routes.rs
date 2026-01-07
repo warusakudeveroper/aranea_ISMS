@@ -101,6 +101,8 @@ pub fn create_router(state: AppState) -> Router {
         // IpcamScan
         .route("/api/ipcamscan/jobs", post(create_scan_job))
         .route("/api/ipcamscan/jobs/:id", get(get_scan_job))
+        .route("/api/ipcamscan/jobs/:id/abort", post(abort_scan_job))
+        .route("/api/ipcamscan/status", get(get_scan_status))
         .route("/api/ipcamscan/devices", get(list_scanned_devices))
         .route("/api/ipcamscan/devices-with-categories", get(list_devices_with_categories))
         .route("/api/ipcamscan/devices/cidr/count", post(count_devices_by_cidr))
@@ -2227,7 +2229,11 @@ async fn create_scan_job(
     State(state): State<AppState>,
     Json(req): Json<crate::ipcam_scan::ScanJobRequest>,
 ) -> impl IntoResponse {
-    let job = state.ipcam_scan.create_job(req).await;
+    // create_job now returns Result<ScanJob> (single execution guard)
+    let job = match state.ipcam_scan.create_job(req).await {
+        Ok(job) => job,
+        Err(e) => return e.into_response(),
+    };
     let job_id = job.job_id;
 
     // Spawn background task to run the scan
@@ -2238,7 +2244,42 @@ async fn create_scan_job(
         }
     });
 
-    (StatusCode::CREATED, Json(ApiResponse::success(job)))
+    (StatusCode::CREATED, Json(ApiResponse::success(job))).into_response()
+}
+
+/// Abort a running scan job
+async fn abort_scan_job(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let job_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid UUID"}))).into_response(),
+    };
+
+    if state.ipcam_scan.abort_job(&job_id).await {
+        Json(ApiResponse::success(serde_json::json!({
+            "message": "スキャン中止リクエストを受け付けました",
+            "job_id": job_id.to_string()
+        }))).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "error": "指定されたジョブは実行中ではありません"
+        }))).into_response()
+    }
+}
+
+/// Check if a scan is currently running
+async fn get_scan_status(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let is_running = state.ipcam_scan.is_scan_running().await;
+    let running_job_id = state.ipcam_scan.get_running_job_id().await;
+
+    Json(ApiResponse::success(serde_json::json!({
+        "is_running": is_running,
+        "running_job_id": running_job_id.map(|id| id.to_string())
+    })))
 }
 
 async fn get_scan_job(
@@ -2988,10 +3029,67 @@ async fn update_subnet(
     }
 }
 
+/// Query parameters for subnet deletion
+#[derive(Deserialize)]
+struct DeleteSubnetQuery {
+    /// If true, also delete scan results (ipcamscan_devices) for this subnet
+    cleanup_scan_results: Option<bool>,
+}
+
 async fn delete_subnet(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<DeleteSubnetQuery>,
 ) -> impl IntoResponse {
+    // If cleanup_scan_results is requested, first get the CIDR and delete scan results
+    if query.cleanup_scan_results.unwrap_or(false) {
+        // Get the CIDR for this subnet
+        let cidr_result: Result<Option<String>, _> = sqlx::query_scalar(
+            "SELECT cidr FROM scan_subnets WHERE subnet_id = ?"
+        )
+            .bind(&id)
+            .fetch_optional(&state.pool)
+            .await;
+
+        match cidr_result {
+            Ok(Some(cidr)) => {
+                // Delete scan devices for this subnet (evidence will cascade delete)
+                let delete_devices = sqlx::query(
+                    "DELETE FROM ipcamscan_devices WHERE subnet = ?"
+                )
+                    .bind(&cidr)
+                    .execute(&state.pool)
+                    .await;
+
+                if let Err(e) = delete_devices {
+                    tracing::warn!(
+                        subnet_id = %id,
+                        cidr = %cidr,
+                        error = %e,
+                        "Failed to delete scan results for subnet"
+                    );
+                } else if let Ok(result) = delete_devices {
+                    tracing::info!(
+                        subnet_id = %id,
+                        cidr = %cidr,
+                        deleted_devices = result.rows_affected(),
+                        "Cleaned up scan results for subnet"
+                    );
+                }
+            }
+            Ok(None) => {
+                // Subnet not found, will be handled below
+            }
+            Err(e) => {
+                tracing::warn!(
+                    subnet_id = %id,
+                    error = %e,
+                    "Failed to get CIDR for subnet cleanup"
+                );
+            }
+        }
+    }
+
     let result = sqlx::query("DELETE FROM scan_subnets WHERE subnet_id = ?")
         .bind(&id)
         .execute(&state.pool)
@@ -3047,7 +3145,11 @@ async fn scan_selected_subnets(
         concurrency: None,
     };
 
-    let job = state.ipcam_scan.create_job(scan_req).await;
+    // create_job now returns Result<ScanJob> (single execution guard)
+    let job = match state.ipcam_scan.create_job(scan_req).await {
+        Ok(job) => job,
+        Err(e) => return e.into_response(),
+    };
     let job_id = job.job_id;
 
     // Update last_scanned_at for selected subnets

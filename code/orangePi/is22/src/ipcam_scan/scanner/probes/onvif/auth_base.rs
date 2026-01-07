@@ -8,7 +8,7 @@ use super::types::OnvifDeviceInfo;
 use super::xml::extract_xml_value;
 
 /// Generate WS-Security UsernameToken Digest header for ONVIF authentication
-pub(super) fn generate_ws_security_header(username: &str, password: &str) -> String {
+pub fn generate_ws_security_header(username: &str, password: &str) -> String {
     // 1. Generate nonce (16 random bytes)
     let mut rng = rand::thread_rng();
     let nonce_bytes: [u8; 16] = rng.gen();

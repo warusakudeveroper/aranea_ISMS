@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { categorizeDevice, categorizeAndSortDevices } from './deviceCategorization'
-import type { ScannedDevice, DeviceCategory } from '@/types/api'
+import type { ScannedDevice } from '@/types/api'
 
 // Helper to create a minimal ScannedDevice for testing
 function createMockDevice(overrides: Partial<ScannedDevice> = {}): ScannedDevice {

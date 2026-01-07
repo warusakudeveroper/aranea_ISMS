@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
 import type { ScannedDevice, CategorizedDevice, DeviceCategoryDetail } from '@/types/api'
 import { DEVICE_CATEGORIES } from '@/types/api'
 
@@ -33,28 +32,30 @@ function createMockDevice(overrides: Partial<ScannedDevice> = {}): ScannedDevice
 }
 
 function createCategorizedDevice(
-  overrides: Partial<ScannedDevice & { category: string; registeredCameraName?: string; ipChanged?: boolean }> = {}
+  overrides: Partial<ScannedDevice & { category: string; registeredCameraName?: string; ipChanged?: boolean; isRegistered?: boolean }> = {}
 ): CategorizedDevice {
   const base = createMockDevice(overrides)
   return {
     ...base,
     category: (overrides.category || 'e') as CategorizedDevice['category'],
+    isRegistered: overrides.isRegistered ?? false,
     registeredCameraName: overrides.registeredCameraName,
     ipChanged: overrides.ipChanged,
   }
 }
 
 describe('DEVICE_CATEGORIES', () => {
+  // RT-09: ユーザーフレンドリーな文言に改善
   it('カテゴリFが正しく定義されている', () => {
     const categoryF = DEVICE_CATEGORIES.find(c => c.id === 'f')
     expect(categoryF).toBeDefined()
-    expect(categoryF?.label).toBe('通信断・迷子')
-    expect(categoryF?.description).toContain('IP変更検出')
+    expect(categoryF?.label).toBe('要確認: 通信できません')
+    expect(categoryF?.description).toContain('通信できません')
     expect(categoryF?.bgClass).toContain('bg-red')
     expect(categoryF?.collapsed).toBe(false)
   })
 
-  it('カテゴリの表示順序が正しい（a, f, b, c, d, e）', () => {
+  it('カテゴリの表示順序が正しい（a, b, c, d, e, f）', () => {
     // DEVICE_CATEGORIES の順序確認
     const ids = DEVICE_CATEGORIES.map(c => c.id)
     expect(ids).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
@@ -113,9 +114,9 @@ describe('Category F device display (T3-8)', () => {
     expect(device.ipChanged).toBe(true)
   })
 
-  it('カテゴリFの説明文に「IP変更検出」が含まれる', () => {
+  it('カテゴリFの説明文に通信状態に関する説明が含まれる', () => {
     const categoryF = DEVICE_CATEGORIES.find(c => c.id === 'f')
-    expect(categoryF?.description).toContain('IP変更検出')
+    expect(categoryF?.description).toContain('通信できません')
   })
 })
 
