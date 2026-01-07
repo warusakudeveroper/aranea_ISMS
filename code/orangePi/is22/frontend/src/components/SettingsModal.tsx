@@ -106,13 +106,38 @@ interface PerformanceLog {
 }
 
 interface PollingLog {
-  timestamp: string
+  polling_id: string
   subnet: string
+  subnet_octet3: number
+  started_at: string
+  completed_at: string | null
+  cycle_number: number
   camera_count: number
-  cycle_duration_ms: number
   success_count: number
-  error_count: number
-  slow_count: number
+  failed_count: number
+  timeout_count: number
+  duration_ms: number | null
+  avg_processing_ms: number | null
+  status: string
+}
+
+// Storage settings (AIEventlog.md T1-6)
+interface StorageSettings {
+  config: {
+    max_images_per_camera: number
+    max_bytes_per_camera: number
+    max_bytes_per_camera_mb: number
+    max_total_bytes: number
+    max_total_bytes_gb: number
+  }
+  usage: {
+    total_bytes: number
+    total_mb: number
+    total_logs: number
+    unknown_logs: number
+    camera_count: number
+    usage_percent: number
+  }
 }
 
 export function SettingsModal({
@@ -135,6 +160,14 @@ export function SettingsModal({
   const [timeoutMainSec, setTimeoutMainSec] = useState<number>(10)
   const [timeoutSubSec, setTimeoutSubSec] = useState<number>(20)
   const [savingTimeouts, setSavingTimeouts] = useState(false)
+
+  // Storage settings (AIEventlog.md T1-6)
+  const [storageSettings, setStorageSettings] = useState<StorageSettings | null>(null)
+  const [storageMaxImages, setStorageMaxImages] = useState<number>(1000)
+  const [storageMaxMb, setStorageMaxMb] = useState<number>(500)
+  const [storageMaxTotalGb, setStorageMaxTotalGb] = useState<number>(10)
+  const [savingStorage, setSavingStorage] = useState(false)
+  const [cleaningStorage, setCleaningStorage] = useState(false)
 
   // Fetch IS21 status
   const fetchIS21Status = useCallback(async () => {
@@ -212,6 +245,112 @@ export function SettingsModal({
     }
   }, [])
 
+  // Fetch storage settings (AIEventlog.md T1-6)
+  const fetchStorageSettings = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/settings/storage`)
+      if (resp.ok) {
+        const json = await resp.json()
+        if (json.ok) {
+          setStorageSettings({ config: json.config, usage: json.usage })
+          setStorageMaxImages(json.config.max_images_per_camera)
+          setStorageMaxMb(json.config.max_bytes_per_camera_mb)
+          setStorageMaxTotalGb(json.config.max_total_bytes_gb)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch storage settings:", error)
+    }
+  }, [])
+
+  // Save storage settings
+  const handleSaveStorage = async () => {
+    setSavingStorage(true)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/settings/storage`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          max_images_per_camera: storageMaxImages,
+          max_bytes_per_camera: storageMaxMb * 1024 * 1024,
+          max_total_bytes: storageMaxTotalGb * 1024 * 1024 * 1024,
+        }),
+      })
+      if (resp.ok) {
+        await fetchStorageSettings()
+      }
+    } catch (error) {
+      console.error("Failed to save storage settings:", error)
+    } finally {
+      setSavingStorage(false)
+    }
+  }
+
+  // Trigger storage cleanup
+  const handleStorageCleanup = async () => {
+    setCleaningStorage(true)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/settings/storage/cleanup`, {
+        method: "POST",
+      })
+      if (resp.ok) {
+        await fetchStorageSettings()
+      }
+    } catch (error) {
+      console.error("Failed to cleanup storage:", error)
+    } finally {
+      setCleaningStorage(false)
+    }
+  }
+
+  // Unknown cleanup preview data (v5: Rule 5準拠 - プレビュー→確認→実行フロー)
+  const [cleanupPreview, setCleanupPreview] = useState<{
+    total: number
+    to_delete: number
+    to_keep: number
+  } | null>(null)
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false)
+
+  // Step 1: Get cleanup preview (confirmed=false)
+  const handleUnknownCleanupPreview = async () => {
+    setCleaningStorage(true)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/settings/storage/cleanup-unknown?confirmed=false`, {
+        method: "POST",
+      })
+      if (resp.ok) {
+        const json = await resp.json()
+        if (json.preview) {
+          setCleanupPreview(json.preview)
+          setShowCleanupConfirm(true)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to get cleanup preview:", error)
+    } finally {
+      setCleaningStorage(false)
+    }
+  }
+
+  // Step 2: Execute cleanup after confirmation (confirmed=true)
+  const handleUnknownCleanupExecute = async () => {
+    setShowCleanupConfirm(false)
+    setCleaningStorage(true)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/settings/storage/cleanup-unknown?confirmed=true`, {
+        method: "POST",
+      })
+      if (resp.ok) {
+        await fetchStorageSettings()
+        setCleanupPreview(null)
+      }
+    } catch (error) {
+      console.error("Failed to cleanup unknown images:", error)
+    } finally {
+      setCleaningStorage(false)
+    }
+  }
+
   // Save IS21 URL
   const handleSaveIS21 = async () => {
     setSaving(true)
@@ -287,6 +426,9 @@ export function SettingsModal({
           case "system":
             await fetchSystemInfo()
             break
+          case "storage":
+            await fetchStorageSettings()
+            break
           case "performance":
             await fetchPerformanceLogs()
             break
@@ -300,7 +442,7 @@ export function SettingsModal({
     }
 
     fetchData()
-  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings])
+  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings])
 
   // Auto-refresh for active tabs
   useEffect(() => {
@@ -317,6 +459,9 @@ export function SettingsModal({
         case "system":
           fetchSystemInfo()
           break
+        case "storage":
+          fetchStorageSettings()
+          break
         case "performance":
           fetchPerformanceLogs()
           break
@@ -327,7 +472,7 @@ export function SettingsModal({
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings])
+  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -340,7 +485,7 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-8">
+          <TabsList className="grid w-full grid-cols-9">
             <TabsTrigger value="display" className="flex items-center gap-1 text-xs">
               <Video className="h-4 w-4" />
               表示
@@ -356,6 +501,10 @@ export function SettingsModal({
             <TabsTrigger value="system" className="flex items-center gap-1 text-xs">
               <Cpu className="h-4 w-4" />
               システム
+            </TabsTrigger>
+            <TabsTrigger value="storage" className="flex items-center gap-1 text-xs">
+              <HardDrive className="h-4 w-4" />
+              保存
             </TabsTrigger>
             <TabsTrigger value="performance" className="flex items-center gap-1 text-xs">
               <TrendingUp className="h-4 w-4" />
@@ -721,6 +870,211 @@ export function SettingsModal({
             </div>
           </TabsContent>
 
+          {/* Storage Settings Tab (AIEventlog.md T1-6) */}
+          <TabsContent value="storage" className="flex-1 overflow-auto mt-4">
+            <div className="space-y-4">
+              {/* Storage Usage Card */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <HardDrive className="h-4 w-4" />
+                    ストレージ使用状況
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {storageSettings ? (
+                    <div className="space-y-4">
+                      {/* Usage Progress */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>使用量</span>
+                          <span className="font-mono">
+                            {storageSettings.usage.total_mb} MB / {storageSettings.config.max_total_bytes_gb} GB
+                            ({storageSettings.usage.usage_percent}%)
+                          </span>
+                        </div>
+                        <div className="w-full bg-secondary rounded-full h-2">
+                          <div
+                            className={`h-2 rounded-full ${
+                              storageSettings.usage.usage_percent > 90
+                                ? "bg-red-500"
+                                : storageSettings.usage.usage_percent > 70
+                                ? "bg-yellow-500"
+                                : "bg-green-500"
+                            }`}
+                            style={{ width: `${Math.min(storageSettings.usage.usage_percent, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-3 gap-4 pt-2">
+                        <div className="space-y-1">
+                          <p className="text-xs text-muted-foreground uppercase">総ログ数</p>
+                          <p className="text-lg font-bold">{storageSettings.usage.total_logs}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-muted-foreground uppercase">unknown画像</p>
+                          <p className="text-lg font-bold text-amber-600">{storageSettings.usage.unknown_logs}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-muted-foreground uppercase">カメラ数</p>
+                          <p className="text-lg font-bold">{storageSettings.usage.camera_count}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">読み込み中...</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Storage Quota Settings Card */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Database className="h-4 w-4" />
+                    保存制限設定
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="maxImages">カメラ毎の最大枚数</Label>
+                      <Input
+                        id="maxImages"
+                        type="number"
+                        min={10}
+                        max={100000}
+                        value={storageMaxImages}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const v = parseInt(e.target.value, 10)
+                          if (!isNaN(v)) setStorageMaxImages(v)
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="maxMb">カメラ毎の最大MB</Label>
+                      <Input
+                        id="maxMb"
+                        type="number"
+                        min={10}
+                        max={100000}
+                        value={storageMaxMb}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const v = parseInt(e.target.value, 10)
+                          if (!isNaN(v)) setStorageMaxMb(v)
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="maxTotalGb">全体の最大GB</Label>
+                      <Input
+                        id="maxTotalGb"
+                        type="number"
+                        min={1}
+                        max={1000}
+                        value={storageMaxTotalGb}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const v = parseInt(e.target.value, 10)
+                          if (!isNaN(v)) setStorageMaxTotalGb(v)
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button onClick={handleSaveStorage} disabled={savingStorage}>
+                      {savingStorage ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                      )}
+                      保存
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Cleanup Actions Card */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    手動クリーンアップ
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    古い画像を削除してストレージを解放します。
+                  </p>
+                  <div className="flex gap-4">
+                    <Button
+                      variant="outline"
+                      onClick={handleStorageCleanup}
+                      disabled={cleaningStorage}
+                    >
+                      {cleaningStorage ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <HardDrive className="h-4 w-4 mr-2" />
+                      )}
+                      クォータ強制
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleUnknownCleanupPreview}
+                      disabled={cleaningStorage}
+                    >
+                      {cleaningStorage ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <XCircle className="h-4 w-4 mr-2" />
+                      )}
+                      unknown画像削除（要確認）
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    「unknown画像削除」は最新10%を保持し、古い90%を削除します。削除前に確認ダイアログが表示されます。
+                  </p>
+
+                  {/* Cleanup Confirmation Dialog (v5: Rule 5準拠) */}
+                  {showCleanupConfirm && cleanupPreview && (
+                    <div className="mt-4 p-4 border border-destructive rounded-lg bg-destructive/10">
+                      <h4 className="font-bold text-destructive mb-2">削除確認</h4>
+                      <p className="text-sm mb-2">
+                        以下のunknown画像を削除しますか？この操作は取り消せません。
+                      </p>
+                      <ul className="text-sm space-y-1 mb-4">
+                        <li>対象画像数: <strong>{cleanupPreview.total}</strong> 枚</li>
+                        <li>削除予定: <strong className="text-destructive">{cleanupPreview.to_delete}</strong> 枚 (古い90%)</li>
+                        <li>保持予定: <strong className="text-green-600">{cleanupPreview.to_keep}</strong> 枚 (最新10%)</li>
+                      </ul>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={handleUnknownCleanupExecute}
+                        >
+                          削除を実行
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setShowCleanupConfirm(false)
+                            setCleanupPreview(null)
+                          }}
+                        >
+                          キャンセル
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
           {/* Performance Logs Tab */}
           <TabsContent value="performance" className="flex-1 overflow-hidden mt-4">
             <Card className="h-full flex flex-col">
@@ -861,27 +1215,31 @@ export function SettingsModal({
                     {/* Rows */}
                     {pollingLogs.map((log, i) => (
                       <div
-                        key={i}
+                        key={log.polling_id || i}
                         className="grid grid-cols-6 gap-2 text-sm py-2 border-b border-muted/30 hover:bg-muted/30"
                       >
                         <div className="text-muted-foreground">
-                          {new Date(log.timestamp).toLocaleTimeString("ja-JP")}
+                          {new Date(log.started_at).toLocaleTimeString("ja-JP")}
                         </div>
                         <div className="font-mono text-xs">{log.subnet}</div>
                         <div className="text-right">{log.camera_count}</div>
                         <div className="text-right font-mono">
-                          <span className={log.cycle_duration_ms > 60000 ? "text-yellow-500" : ""}>
-                            {(log.cycle_duration_ms / 1000).toFixed(1)}s
-                          </span>
+                          {log.duration_ms != null ? (
+                            <span className={log.duration_ms > 60000 ? "text-yellow-500" : ""}>
+                              {(log.duration_ms / 1000).toFixed(1)}s
+                            </span>
+                          ) : (
+                            <span className="text-blue-500 text-xs">running</span>
+                          )}
                         </div>
                         <div className="text-right">
                           <span className="text-green-600">{log.success_count}</span>
                         </div>
                         <div className="text-right">
-                          {log.error_count > 0 ? (
+                          {log.failed_count > 0 ? (
                             <span className="text-red-500 flex items-center justify-end gap-1">
                               <AlertTriangle className="h-3 w-3" />
-                              {log.error_count}
+                              {log.failed_count}
                             </span>
                           ) : (
                             <span className="text-muted-foreground">0</span>

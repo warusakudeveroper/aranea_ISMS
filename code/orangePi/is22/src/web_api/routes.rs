@@ -68,6 +68,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/settings/polling/logs", get(get_polling_logs))
         .route("/api/settings/timeouts", get(get_global_timeouts))
         .route("/api/settings/timeouts", put(update_global_timeouts))
+        // Storage Management (AIEventlog.md T1-5)
+        .route("/api/settings/storage", get(get_storage_settings))
+        .route("/api/settings/storage", put(update_storage_settings))
+        .route("/api/settings/storage/cleanup", post(trigger_storage_cleanup))
+        .route("/api/settings/storage/cleanup-unknown", post(trigger_unknown_cleanup))
         // Camera Brands (OUI/RTSP SSoT)
         .route("/api/settings/camera-brands", get(list_camera_brands))
         .route("/api/settings/camera-brands", post(create_camera_brand))
@@ -1027,6 +1032,8 @@ struct SystemInfoResponse {
     lacis_id: Option<String>,
     version: String,
     uptime_seconds: u64,
+    /// Formatted uptime string (e.g., "2d 5h 30m")
+    uptime: String,
     cpu_percent: f32,
     memory_percent: f32,
     memory_used_mb: u64,
@@ -1035,6 +1042,12 @@ struct SystemInfoResponse {
     disk_used_gb: f32,
     disk_total_gb: f32,
     temperature_c: Option<f32>,
+    /// Frontend-compatible temperature field
+    temperature: Option<f32>,
+    /// Number of registered cameras
+    camera_count: i64,
+    /// IS21 server URL
+    is21_url: String,
     rust_version: String,
     build_time: String,
 }
@@ -1098,12 +1111,36 @@ async fn get_system_info(State(state): State<AppState>) -> impl IntoResponse {
     // Uptime
     let uptime_seconds = System::uptime();
 
+    // Format uptime as human-readable string
+    let uptime = {
+        let days = uptime_seconds / 86400;
+        let hours = (uptime_seconds % 86400) / 3600;
+        let minutes = (uptime_seconds % 3600) / 60;
+        if days > 0 {
+            format!("{}d {}h {}m", days, hours, minutes)
+        } else if hours > 0 {
+            format!("{}h {}m", hours, minutes)
+        } else {
+            format!("{}m", minutes)
+        }
+    };
+
+    // Get camera count from database
+    let camera_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM cameras")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(0);
+
+    // Get IS21 URL from config
+    let is21_url = state.config.is21_url.clone();
+
     Json(ApiResponse::success(SystemInfoResponse {
         hostname,
         device_type: "is22".to_string(),
         lacis_id: None, // IS22 doesn't have its own lacisID
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_seconds,
+        uptime,
         cpu_percent,
         memory_percent,
         memory_used_mb: memory_used / 1024 / 1024,
@@ -1112,6 +1149,9 @@ async fn get_system_info(State(state): State<AppState>) -> impl IntoResponse {
         disk_used_gb: disk_used as f32 / 1024.0 / 1024.0 / 1024.0,
         disk_total_gb: disk_total as f32 / 1024.0 / 1024.0 / 1024.0,
         temperature_c: temperature,
+        temperature, // Frontend-compatible field
+        camera_count,
+        is21_url,
         rust_version: env!("CARGO_PKG_RUST_VERSION").to_string(),
         build_time: chrono::Utc::now().to_rfc3339(), // Placeholder - would be compile time
     }))
@@ -1735,6 +1775,287 @@ async fn update_global_timeouts(
             Json(json!({
                 "ok": false,
                 "error": "Failed to update settings"
+            }))
+        }
+    }
+}
+
+// ============================================================================
+// Storage Management API (AIEventlog.md T1-5)
+// ============================================================================
+
+/// Storage settings request/response
+#[derive(Debug, Deserialize)]
+struct UpdateStorageSettingsRequest {
+    max_images_per_camera: Option<usize>,
+    max_bytes_per_camera: Option<u64>,
+    max_total_bytes: Option<u64>,
+}
+
+/// GET /api/settings/storage - Get storage settings and current usage
+async fn get_storage_settings(State(state): State<AppState>) -> impl IntoResponse {
+    // Get current quota config from detection_log_service
+    let quota = &state.detection_log.config().await.quota;
+
+    // Get current storage usage
+    let total_bytes = match state.detection_log.get_total_storage_bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get total storage bytes");
+            0
+        }
+    };
+
+    // Get storage stats from database
+    let stats_result = sqlx::query(
+        r#"
+        SELECT
+            COUNT(*) as total_logs,
+            SUM(CASE WHEN unknown_flag = TRUE OR primary_event = 'unknown' THEN 1 ELSE 0 END) as unknown_count,
+            COUNT(DISTINCT camera_id) as camera_count
+        FROM detection_logs
+        WHERE image_path_local != ''
+        "#,
+    )
+    .fetch_one(&state.pool)
+    .await;
+
+    let (total_logs, unknown_count, camera_count) = match stats_result {
+        Ok(row) => {
+            let total: i64 = row.try_get("total_logs").unwrap_or(0);
+            let unknown: i64 = row.try_get("unknown_count").unwrap_or(0);
+            let cameras: i64 = row.try_get("camera_count").unwrap_or(0);
+            (total as u64, unknown as u64, cameras as u64)
+        }
+        Err(_) => (0, 0, 0),
+    };
+
+    Json(json!({
+        "ok": true,
+        "config": {
+            "max_images_per_camera": quota.max_images_per_camera,
+            "max_bytes_per_camera": quota.max_bytes_per_camera,
+            "max_bytes_per_camera_mb": quota.max_bytes_per_camera / (1024 * 1024),
+            "max_total_bytes": quota.max_total_bytes,
+            "max_total_bytes_gb": quota.max_total_bytes / (1024 * 1024 * 1024)
+        },
+        "usage": {
+            "total_bytes": total_bytes,
+            "total_mb": total_bytes / (1024 * 1024),
+            "total_logs": total_logs,
+            "unknown_logs": unknown_count,
+            "camera_count": camera_count,
+            "usage_percent": if quota.max_total_bytes > 0 {
+                (total_bytes as f64 / quota.max_total_bytes as f64 * 100.0).round()
+            } else {
+                0.0
+            }
+        }
+    }))
+}
+
+/// PUT /api/settings/storage - Update storage quota settings
+async fn update_storage_settings(
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateStorageSettingsRequest>,
+) -> impl IntoResponse {
+    // Validate input
+    if let Some(max_images) = payload.max_images_per_camera {
+        if max_images < 10 || max_images > 100000 {
+            return Json(json!({
+                "ok": false,
+                "error": "max_images_per_camera must be between 10 and 100000"
+            }));
+        }
+    }
+
+    if let Some(max_bytes) = payload.max_bytes_per_camera {
+        if max_bytes < 10 * 1024 * 1024 || max_bytes > 100 * 1024 * 1024 * 1024 {
+            return Json(json!({
+                "ok": false,
+                "error": "max_bytes_per_camera must be between 10MB and 100GB"
+            }));
+        }
+    }
+
+    if let Some(max_total) = payload.max_total_bytes {
+        if max_total < 100 * 1024 * 1024 || max_total > 1000 * 1024 * 1024 * 1024 {
+            return Json(json!({
+                "ok": false,
+                "error": "max_total_bytes must be between 100MB and 1TB"
+            }));
+        }
+    }
+
+    // Build settings JSON
+    let settings_json = serde_json::json!({
+        "max_images_per_camera": payload.max_images_per_camera,
+        "max_bytes_per_camera": payload.max_bytes_per_camera,
+        "max_total_bytes": payload.max_total_bytes
+    });
+
+    // Save to database (upsert)
+    let result = sqlx::query(
+        r#"
+        INSERT INTO settings (setting_key, setting_json, updated_at)
+        VALUES ('storage_quota', ?, NOW(3))
+        ON DUPLICATE KEY UPDATE
+            setting_json = VALUES(setting_json),
+            updated_at = NOW(3)
+        "#,
+    )
+    .bind(settings_json.to_string())
+    .execute(&state.pool)
+    .await;
+
+    match result {
+        Ok(_) => {
+            // Update runtime config
+            state.detection_log.update_quota(
+                payload.max_images_per_camera,
+                payload.max_bytes_per_camera,
+                payload.max_total_bytes,
+            ).await;
+
+            tracing::info!("Storage quota settings updated");
+            Json(json!({
+                "ok": true,
+                "message": "Storage quota settings updated"
+            }))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to update storage quota settings");
+            Json(json!({
+                "ok": false,
+                "error": "Failed to update settings"
+            }))
+        }
+    }
+}
+
+/// POST /api/settings/storage/cleanup - Trigger manual storage cleanup
+async fn trigger_storage_cleanup(State(state): State<AppState>) -> impl IntoResponse {
+    tracing::info!("Manual storage cleanup triggered");
+
+    // Enforce global quota
+    let global_stats = match state.detection_log.enforce_global_quota().await {
+        Ok(stats) => stats,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to enforce global quota");
+            return Json(json!({
+                "ok": false,
+                "error": "Failed to enforce global quota"
+            }));
+        }
+    };
+
+    // Enforce per-camera quota for all cameras
+    let cameras = state.config_store.get_cached_cameras().await;
+    let mut camera_stats = Vec::new();
+
+    for camera in &cameras {
+        match state.detection_log.enforce_storage_quota(&camera.camera_id).await {
+            Ok(stats) => {
+                if stats.deleted > 0 {
+                    camera_stats.push(json!({
+                        "camera_id": camera.camera_id,
+                        "total": stats.total,
+                        "deleted": stats.deleted,
+                        "kept": stats.kept,
+                        "bytes_freed": stats.bytes_freed
+                    }));
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    camera_id = %camera.camera_id,
+                    error = %e,
+                    "Failed to enforce quota for camera"
+                );
+            }
+        }
+    }
+
+    Json(json!({
+        "ok": true,
+        "message": "Storage cleanup completed",
+        "global": {
+            "total": global_stats.total,
+            "deleted": global_stats.deleted,
+            "kept": global_stats.kept,
+            "bytes_freed": global_stats.bytes_freed
+        },
+        "per_camera": camera_stats
+    }))
+}
+
+/// Query parameters for unknown cleanup
+#[derive(Debug, Deserialize)]
+struct UnknownCleanupQuery {
+    /// confirmed=true で実際に削除、confirmed=false でプレビューのみ
+    /// Rule 5準拠: デフォルトはfalse（プレビュー）
+    #[serde(default)]
+    confirmed: bool,
+}
+
+/// POST /api/settings/storage/cleanup-unknown - Manual unknown image cleanup
+///
+/// Rule 5準拠: 管理者の明示的操作のみ。自動実行禁止。
+///
+/// Query parameters:
+/// - confirmed=false (default): プレビューモード（削除対象件数を返却、実際の削除なし）
+/// - confirmed=true: 実行モード（最新10%保持、古い90%削除）
+///
+/// v5修正: 分散サンプリング → 最新10%保持
+async fn trigger_unknown_cleanup(
+    State(state): State<AppState>,
+    Query(query): Query<UnknownCleanupQuery>,
+) -> impl IntoResponse {
+    let confirmed = query.confirmed;
+
+    tracing::info!(
+        confirmed = confirmed,
+        "Manual unknown image cleanup triggered (Rule 5: administrator operation only)"
+    );
+
+    match state.detection_log.manual_cleanup_all_unknown_images(confirmed).await {
+        Ok(stats) => {
+            if confirmed {
+                // 実行モード: 実際に削除された
+                Json(json!({
+                    "ok": true,
+                    "mode": "execute",
+                    "message": "Unknown image cleanup completed (latest 10% kept)",
+                    "stats": {
+                        "total": stats.total,
+                        "deleted": stats.deleted,
+                        "kept": stats.kept,
+                        "bytes_freed": stats.bytes_freed,
+                        "bytes_freed_mb": stats.bytes_freed / (1024 * 1024)
+                    }
+                }))
+            } else {
+                // プレビューモード: 削除対象の件数を返却
+                let to_delete = stats.total.saturating_sub(stats.kept);
+                Json(json!({
+                    "ok": true,
+                    "mode": "preview",
+                    "message": "Preview only - no images deleted. Set confirmed=true to execute.",
+                    "warning": "この操作は取り消せません。確認後、confirmed=trueで再度リクエストしてください。",
+                    "preview": {
+                        "total": stats.total,
+                        "to_delete": to_delete,
+                        "to_keep": stats.kept,
+                        "keep_percentage": "10% (latest images)"
+                    }
+                }))
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to cleanup unknown images");
+            Json(json!({
+                "ok": false,
+                "error": "Failed to cleanup unknown images"
             }))
         }
     }

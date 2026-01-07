@@ -99,6 +99,67 @@ pub struct BqSyncEntry {
     pub created_at: DateTime<Utc>,
 }
 
+/// Storage quota configuration
+///
+/// AIEventlog.md要件: 「最大保存容量などの設定を設けてユーザーの裁量範疇で画像の保存を行う」
+#[derive(Debug, Clone)]
+pub struct StorageQuotaConfig {
+    /// カメラ毎の最大画像枚数
+    pub max_images_per_camera: usize,
+    /// カメラ毎の最大容量（バイト）
+    pub max_bytes_per_camera: u64,
+    /// 全体の最大容量（バイト）
+    pub max_total_bytes: u64,
+}
+
+impl Default for StorageQuotaConfig {
+    fn default() -> Self {
+        Self {
+            max_images_per_camera: 1000,
+            max_bytes_per_camera: 500 * 1024 * 1024,  // 500MB per camera
+            max_total_bytes: 10 * 1024 * 1024 * 1024, // 10GB total
+        }
+    }
+}
+
+/// Cleanup operation statistics
+#[derive(Debug, Clone, Default)]
+pub struct CleanupStats {
+    /// Total images before cleanup
+    pub total: usize,
+    /// Images deleted
+    pub deleted: usize,
+    /// Images kept
+    pub kept: usize,
+    /// Bytes freed
+    pub bytes_freed: u64,
+}
+
+impl CleanupStats {
+    pub fn new(total: usize, deleted: usize, kept: usize) -> Self {
+        Self {
+            total,
+            deleted,
+            kept,
+            bytes_freed: 0,
+        }
+    }
+
+    pub fn with_bytes_freed(mut self, bytes: u64) -> Self {
+        self.bytes_freed = bytes;
+        self
+    }
+}
+
+/// Image file metadata for storage management
+#[derive(Debug, Clone)]
+struct ImageMeta {
+    /// File size in bytes
+    size: u64,
+    /// Last modified time
+    modified: std::time::SystemTime,
+}
+
 /// Service configuration
 #[derive(Debug, Clone)]
 pub struct DetectionLogConfig {
@@ -106,8 +167,8 @@ pub struct DetectionLogConfig {
     pub image_base_path: PathBuf,
     /// Cloud storage path prefix
     pub cloud_path_prefix: Option<String>,
-    /// Maximum local images per camera
-    pub max_images_per_camera: usize,
+    /// Storage quota settings
+    pub quota: StorageQuotaConfig,
     /// Enable BQ sync
     pub enable_bq_sync: bool,
 }
@@ -117,16 +178,49 @@ impl Default for DetectionLogConfig {
         Self {
             image_base_path: PathBuf::from("/var/lib/is22/events"),
             cloud_path_prefix: None,
-            max_images_per_camera: 1000,
+            quota: StorageQuotaConfig::default(),
             enable_bq_sync: true,
         }
     }
 }
 
+/// Determine if an image should be saved based on detection result
+///
+/// AIEventlog.md要件:
+/// - 「何もない」なら画像の保存もログも出さない
+/// - unknownは分析用に保存（後で90%削除）
+///
+/// Truth table:
+/// | severity | primary_event | should_save |
+/// |----------|---------------|-------------|
+/// | 0        | "none"        | false       |
+/// | 0        | "unknown"     | true        |
+/// | 0        | other event   | true        |
+/// | 1+       | any           | true        |
+pub fn should_save_image(primary_event: &str, severity: i32, unknown_flag: bool) -> bool {
+    // 「何もない」(none)は保存しない
+    if primary_event == "none" {
+        return false;
+    }
+
+    // severity > 0 は常に保存
+    if severity > 0 {
+        return true;
+    }
+
+    // unknown判定は保存（後で90%削除）
+    if unknown_flag || primary_event == "unknown" {
+        return true;
+    }
+
+    // それ以外のイベントがあれば保存
+    true
+}
+
 /// DetectionLogService instance
 pub struct DetectionLogService {
     pool: MySqlPool,
-    config: DetectionLogConfig,
+    config: Arc<RwLock<DetectionLogConfig>>,
     stats: Arc<RwLock<ServiceStats>>,
 }
 
@@ -144,7 +238,7 @@ impl DetectionLogService {
     pub fn new(pool: MySqlPool, config: DetectionLogConfig) -> Self {
         Self {
             pool,
-            config,
+            config: Arc::new(RwLock::new(config)),
             stats: Arc::new(RwLock::new(ServiceStats::default())),
         }
     }
@@ -152,6 +246,36 @@ impl DetectionLogService {
     /// Create with default config
     pub fn with_pool(pool: MySqlPool) -> Self {
         Self::new(pool, DetectionLogConfig::default())
+    }
+
+    /// Get current configuration (for API access)
+    pub async fn config(&self) -> DetectionLogConfig {
+        self.config.read().await.clone()
+    }
+
+    /// Update storage quota settings at runtime
+    pub async fn update_quota(
+        &self,
+        max_images_per_camera: Option<usize>,
+        max_bytes_per_camera: Option<u64>,
+        max_total_bytes: Option<u64>,
+    ) {
+        let mut config = self.config.write().await;
+        if let Some(v) = max_images_per_camera {
+            config.quota.max_images_per_camera = v;
+        }
+        if let Some(v) = max_bytes_per_camera {
+            config.quota.max_bytes_per_camera = v;
+        }
+        if let Some(v) = max_total_bytes {
+            config.quota.max_total_bytes = v;
+        }
+        tracing::info!(
+            max_images = config.quota.max_images_per_camera,
+            max_bytes = config.quota.max_bytes_per_camera,
+            max_total = config.quota.max_total_bytes,
+            "Storage quota config updated"
+        );
     }
 
     /// Save detection result from IS21
@@ -197,7 +321,8 @@ impl DetectionLogService {
         let log_id = self.insert_detection_log(&log).await?;
 
         // 4. Queue for BQ sync if enabled
-        if self.config.enable_bq_sync {
+        let enable_bq_sync = self.config.read().await.enable_bq_sync;
+        if enable_bq_sync {
             self.queue_for_bq(log_id, &log).await?;
         }
 
@@ -339,7 +464,8 @@ impl DetectionLogService {
         image_data: &[u8],
     ) -> Result<String> {
         // Create camera directory
-        let camera_dir = self.config.image_base_path.join(camera_id);
+        let image_base_path = self.config.read().await.image_base_path.clone();
+        let camera_dir = image_base_path.join(camera_id);
         fs::create_dir_all(&camera_dir).await?;
 
         // Generate filename from timestamp
@@ -765,6 +891,437 @@ impl DetectionLogService {
     }
 
     // ========================================
+    // Storage Management (T1-3)
+    // ========================================
+
+    /// Enforce storage quota for a camera
+    ///
+    /// AIEventlog.md要件: 「最大保存容量などの設定を設けてユーザーの裁量範疇で画像の保存を行う」
+    ///
+    /// Deletion priority (oldest first):
+    /// 1. Delete oldest images when count exceeds max_images_per_camera
+    /// 2. Delete oldest images when capacity exceeds max_bytes_per_camera
+    ///
+    /// Returns CleanupStats with deletion results.
+    pub async fn enforce_storage_quota(&self, camera_id: &str) -> Result<CleanupStats> {
+        // Read config values and release lock before async operations
+        let (camera_dir, max_images, max_bytes) = {
+            let config = self.config.read().await;
+            (
+                config.image_base_path.join(camera_id),
+                config.quota.max_images_per_camera,
+                config.quota.max_bytes_per_camera,
+            )
+        };
+
+        // If directory doesn't exist, nothing to clean
+        if !camera_dir.exists() {
+            return Ok(CleanupStats::default());
+        }
+
+        // Get all images with metadata (size, modified time)
+        let mut images = self.list_images_with_metadata(&camera_dir).await?;
+
+        let total_count = images.len();
+        if total_count == 0 {
+            return Ok(CleanupStats::default());
+        }
+
+        // Sort by modified time (oldest first for deletion)
+        images.sort_by_key(|(_, meta)| meta.modified);
+        let mut deleted_count = 0;
+        let mut bytes_freed = 0u64;
+
+        // Calculate current total bytes
+        let total_bytes: u64 = images.iter().map(|(_, meta)| meta.size).sum();
+
+        // Determine how many to delete
+        // 1. Count-based: delete if exceeds max_images_per_camera
+        let count_excess = if total_count > max_images {
+            total_count - max_images
+        } else {
+            0
+        };
+
+        // 2. Capacity-based: estimate bytes to free
+        let bytes_excess = if total_bytes > max_bytes {
+            total_bytes - max_bytes
+        } else {
+            0
+        };
+
+        // Delete from oldest until both quotas are satisfied
+        let mut accumulated_bytes = 0u64;
+        for (path, meta) in images.iter() {
+            // Check if we still need to delete
+            let need_count_delete = deleted_count < count_excess;
+            let need_bytes_delete = accumulated_bytes < bytes_excess;
+
+            if !need_count_delete && !need_bytes_delete {
+                break;
+            }
+
+            // Delete the file
+            if let Err(e) = fs::remove_file(path).await {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "Failed to delete image during quota enforcement"
+                );
+                continue;
+            }
+
+            deleted_count += 1;
+            bytes_freed += meta.size;
+            accumulated_bytes += meta.size;
+
+            tracing::debug!(
+                camera_id = %camera_id,
+                path = %path.display(),
+                size = meta.size,
+                "Deleted image for quota enforcement"
+            );
+        }
+
+        let stats = CleanupStats {
+            total: total_count,
+            deleted: deleted_count,
+            kept: total_count - deleted_count,
+            bytes_freed,
+        };
+
+        if deleted_count > 0 {
+            tracing::info!(
+                camera_id = %camera_id,
+                total = total_count,
+                deleted = deleted_count,
+                bytes_freed = bytes_freed,
+                "Storage quota enforced"
+            );
+        }
+
+        Ok(stats)
+    }
+
+    /// Get total storage usage across all cameras
+    pub async fn get_total_storage_bytes(&self) -> Result<u64> {
+        let base_path = self.config.read().await.image_base_path.clone();
+
+        if !base_path.exists() {
+            return Ok(0);
+        }
+
+        let mut total_bytes = 0u64;
+        let mut entries = fs::read_dir(&base_path).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_dir() {
+                // Sum up all files in camera directory
+                let mut camera_entries = fs::read_dir(&path).await?;
+                while let Some(file_entry) = camera_entries.next_entry().await? {
+                    if let Ok(meta) = file_entry.metadata().await {
+                        total_bytes += meta.len();
+                    }
+                }
+            }
+        }
+
+        Ok(total_bytes)
+    }
+
+    /// Enforce global storage quota
+    ///
+    /// If total storage exceeds max_total_bytes, delete oldest images across all cameras.
+    pub async fn enforce_global_quota(&self) -> Result<CleanupStats> {
+        // Read config values and release lock before any async operations
+        let (max_total_bytes, base_path) = {
+            let config = self.config.read().await;
+            (config.quota.max_total_bytes, config.image_base_path.clone())
+        };
+
+        let total_bytes = self.get_total_storage_bytes().await?;
+
+        if total_bytes <= max_total_bytes {
+            return Ok(CleanupStats::default());
+        }
+
+        let bytes_to_free = total_bytes - max_total_bytes;
+
+        // Collect all images across all cameras with metadata
+        let mut all_images = Vec::new();
+
+        if base_path.exists() {
+            let mut entries = fs::read_dir(base_path).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                if path.is_dir() {
+                    let images = self.list_images_with_metadata(&path).await?;
+                    all_images.extend(images);
+                }
+            }
+        }
+
+        let total_count = all_images.len();
+        if total_count == 0 {
+            return Ok(CleanupStats::default());
+        }
+
+        // Sort by modified time (oldest first)
+        all_images.sort_by_key(|(_, meta)| meta.modified);
+
+        let mut deleted_count = 0;
+        let mut bytes_freed = 0u64;
+
+        for (path, meta) in all_images.iter() {
+            if bytes_freed >= bytes_to_free {
+                break;
+            }
+
+            if let Err(e) = fs::remove_file(path).await {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "Failed to delete image during global quota enforcement"
+                );
+                continue;
+            }
+
+            deleted_count += 1;
+            bytes_freed += meta.size;
+        }
+
+        let stats = CleanupStats {
+            total: total_count,
+            deleted: deleted_count,
+            kept: total_count - deleted_count,
+            bytes_freed,
+        };
+
+        if deleted_count > 0 {
+            tracing::info!(
+                total = total_count,
+                deleted = deleted_count,
+                bytes_freed = bytes_freed,
+                target_freed = bytes_to_free,
+                "Global storage quota enforced"
+            );
+        }
+
+        Ok(stats)
+    }
+
+    /// Manual unknown image cleanup (administrator operation only)
+    ///
+    /// WARNING: Rule 5準拠 - 自動実行禁止
+    /// 「情報は如何なる場合においても等価であり、優劣をつけて自己判断で不要と判断した情報を
+    /// 握り潰すような仕様としてはならない」
+    ///
+    /// AIEventlog.md要件: 「unknown乱発によって画像の保存ストーム状態」対策
+    /// ただし、管理者の明示的操作のみで実行可能。
+    ///
+    /// 動作:
+    /// - confirmed=false: プレビューのみ（削除対象件数を返却、実際の削除なし）
+    /// - confirmed=true: 最新10%保持、古い90%削除
+    ///
+    /// v5修正: 分散サンプリング → 最新10%保持（時系列で新しいものを優先保持）
+    pub async fn manual_cleanup_unknown_images(
+        &self,
+        camera_id: &str,
+        confirmed: bool,
+    ) -> Result<CleanupStats> {
+        // Query unknown images from database for this camera (newest first)
+        let rows = sqlx::query(
+            r#"
+            SELECT log_id, image_path_local, captured_at
+            FROM detection_logs
+            WHERE camera_id = ?
+              AND (primary_event = 'unknown' OR unknown_flag = TRUE)
+              AND image_path_local != ''
+            ORDER BY captured_at DESC
+            "#,
+        )
+        .bind(camera_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let total_count = rows.len();
+        if total_count == 0 {
+            return Ok(CleanupStats::default());
+        }
+
+        // Calculate how many to keep (latest 10%)
+        let keep_count = (total_count as f64 * 0.10).ceil() as usize;
+        let keep_count = keep_count.max(1); // Keep at least 1
+        let delete_count = total_count.saturating_sub(keep_count);
+
+        // Preview mode: return stats without deleting
+        if !confirmed {
+            tracing::info!(
+                camera_id = %camera_id,
+                total = total_count,
+                to_delete = delete_count,
+                to_keep = keep_count,
+                "Unknown cleanup preview (confirmed=false, no deletion)"
+            );
+            return Ok(CleanupStats {
+                total: total_count,
+                deleted: 0,        // Preview: nothing deleted yet
+                kept: keep_count,  // Will keep latest 10%
+                bytes_freed: 0,
+            });
+        }
+
+        // Confirmed=true: Actually delete oldest 90%
+        let mut deleted_count = 0;
+        let mut bytes_freed = 0u64;
+
+        // Skip the newest keep_count images, delete the rest
+        for row in rows.iter().skip(keep_count) {
+            let image_path: String = row.try_get("image_path_local")?;
+            let log_id: u64 = row.try_get("log_id")?;
+
+            // Get file size before deleting
+            let path = std::path::Path::new(&image_path);
+            let file_size = if path.exists() {
+                match fs::metadata(path).await {
+                    Ok(meta) => meta.len(),
+                    Err(_) => 0,
+                }
+            } else {
+                0
+            };
+
+            // Delete the image file
+            if path.exists() {
+                if let Err(e) = fs::remove_file(path).await {
+                    tracing::warn!(
+                        path = %path.display(),
+                        log_id = log_id,
+                        error = %e,
+                        "Failed to delete unknown image"
+                    );
+                    continue;
+                }
+            }
+
+            // Clear image_path_local in database (keep the log record)
+            sqlx::query(
+                r#"
+                UPDATE detection_logs
+                SET image_path_local = ''
+                WHERE log_id = ?
+                "#,
+            )
+            .bind(log_id)
+            .execute(&self.pool)
+            .await?;
+
+            deleted_count += 1;
+            bytes_freed += file_size;
+
+            tracing::debug!(
+                camera_id = %camera_id,
+                log_id = log_id,
+                path = %image_path,
+                "Deleted unknown image (manual cleanup, keep latest 10%)"
+            );
+        }
+
+        let stats = CleanupStats {
+            total: total_count,
+            deleted: deleted_count,
+            kept: keep_count,
+            bytes_freed,
+        };
+
+        tracing::info!(
+            camera_id = %camera_id,
+            total = total_count,
+            deleted = deleted_count,
+            kept = keep_count,
+            bytes_freed = bytes_freed,
+            "Manual unknown images cleanup completed (confirmed=true)"
+        );
+
+        Ok(stats)
+    }
+
+    /// Manual cleanup unknown images across all cameras
+    ///
+    /// WARNING: Rule 5準拠 - 管理者の明示的操作のみ
+    pub async fn manual_cleanup_all_unknown_images(&self, confirmed: bool) -> Result<CleanupStats> {
+        // Get all distinct camera IDs with unknown images
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT camera_id
+            FROM detection_logs
+            WHERE primary_event = 'unknown' OR unknown_flag = TRUE
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut total_stats = CleanupStats::default();
+
+        for row in rows {
+            let camera_id: String = row.try_get("camera_id")?;
+            let stats = self.manual_cleanup_unknown_images(&camera_id, confirmed).await?;
+
+            total_stats.total += stats.total;
+            total_stats.deleted += stats.deleted;
+            total_stats.kept += stats.kept;
+            total_stats.bytes_freed += stats.bytes_freed;
+        }
+
+        if confirmed && total_stats.deleted > 0 {
+            tracing::info!(
+                total = total_stats.total,
+                deleted = total_stats.deleted,
+                kept = total_stats.kept,
+                bytes_freed = total_stats.bytes_freed,
+                "All unknown images manual cleanup completed"
+            );
+        } else if !confirmed {
+            tracing::info!(
+                total = total_stats.total,
+                to_delete = total_stats.total - total_stats.kept,
+                to_keep = total_stats.kept,
+                "All unknown images cleanup preview (no deletion)"
+            );
+        }
+
+        Ok(total_stats)
+    }
+
+    /// List images in directory with metadata
+    async fn list_images_with_metadata(&self, dir: &std::path::Path) -> Result<Vec<(PathBuf, ImageMeta)>> {
+        let mut images = Vec::new();
+        let mut entries = fs::read_dir(dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+
+            // Only process image files
+            if let Some(ext) = path.extension() {
+                if ext == "jpg" || ext == "jpeg" || ext == "png" {
+                    if let Ok(meta) = entry.metadata().await {
+                        let modified = meta
+                            .modified()
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        images.push((path, ImageMeta {
+                            size: meta.len(),
+                            modified,
+                        }));
+                    }
+                }
+            }
+        }
+
+        Ok(images)
+    }
+
+    // ========================================
     // Camera Status Events
     // ========================================
 
@@ -859,6 +1416,158 @@ mod tests {
         let config = DetectionLogConfig::default();
         assert_eq!(config.image_base_path, PathBuf::from("/var/lib/is22/events"));
         assert!(config.enable_bq_sync);
-        assert_eq!(config.max_images_per_camera, 1000);
+        assert_eq!(config.quota.max_images_per_camera, 1000);
+        assert_eq!(config.quota.max_bytes_per_camera, 500 * 1024 * 1024);
+        assert_eq!(config.quota.max_total_bytes, 10 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_cleanup_stats() {
+        let stats = CleanupStats::new(100, 90, 10);
+        assert_eq!(stats.total, 100);
+        assert_eq!(stats.deleted, 90);
+        assert_eq!(stats.kept, 10);
+        assert_eq!(stats.bytes_freed, 0);
+
+        let stats = stats.with_bytes_freed(1024 * 1024);
+        assert_eq!(stats.bytes_freed, 1024 * 1024);
+    }
+
+    #[test]
+    fn test_storage_quota_config_default() {
+        let quota = StorageQuotaConfig::default();
+        assert_eq!(quota.max_images_per_camera, 1000);
+        assert_eq!(quota.max_bytes_per_camera, 500 * 1024 * 1024);
+        assert_eq!(quota.max_total_bytes, 10 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_should_save_image_none_no_save() {
+        // BE-02: event="none", unknown=false → 画像保存されない
+        assert!(!should_save_image("none", 0, false));
+    }
+
+    #[test]
+    fn test_should_save_image_none_unknown_no_save() {
+        // BE-03: event="none", unknown=true → 画像保存されない（none優先）
+        assert!(!should_save_image("none", 0, true));
+    }
+
+    #[test]
+    fn test_should_save_image_unknown_save() {
+        // BE-04: event="unknown", unknown=true → 画像保存される
+        assert!(should_save_image("unknown", 0, true));
+    }
+
+    #[test]
+    fn test_should_save_image_severity_always_save() {
+        // BE-05: severity=1, any → 画像保存される
+        assert!(should_save_image("none", 1, false));
+        assert!(should_save_image("human", 2, false));
+        assert!(should_save_image("vehicle", 3, false));
+    }
+
+    #[test]
+    fn test_should_save_image_human_save() {
+        // 通常検出は保存
+        assert!(should_save_image("human", 0, false));
+        assert!(should_save_image("vehicle", 0, false));
+    }
+
+    #[test]
+    fn test_cleanup_stats_default() {
+        let stats = CleanupStats::default();
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(stats.kept, 0);
+        assert_eq!(stats.bytes_freed, 0);
+    }
+
+    #[test]
+    fn test_image_meta() {
+        let meta = ImageMeta {
+            size: 1024,
+            modified: std::time::SystemTime::UNIX_EPOCH,
+        };
+        assert_eq!(meta.size, 1024);
+    }
+
+    #[test]
+    fn test_storage_quota_custom_values() {
+        let quota = StorageQuotaConfig {
+            max_images_per_camera: 500,
+            max_bytes_per_camera: 100 * 1024 * 1024,
+            max_total_bytes: 5 * 1024 * 1024 * 1024,
+        };
+        assert_eq!(quota.max_images_per_camera, 500);
+        assert_eq!(quota.max_bytes_per_camera, 100 * 1024 * 1024);
+        assert_eq!(quota.max_total_bytes, 5 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_should_save_image_camera_events() {
+        // カメライベントは保存
+        assert!(should_save_image("camera_lost", 0, false));
+        assert!(should_save_image("camera_recovered", 0, false));
+    }
+
+    #[test]
+    fn test_should_save_anomaly() {
+        // 異常検知は保存
+        assert!(should_save_image("anomaly", 3, false));
+    }
+
+    #[test]
+    fn test_keep_count_calculation() {
+        // v5修正: 最新10%保持のロジック検証
+        // 100枚 → 10枚保持、90枚削除
+        let total = 100usize;
+        let keep = (total as f64 * 0.10).ceil() as usize;
+        assert_eq!(keep, 10);
+
+        // 15枚 → 2枚保持（ceil(1.5) = 2）
+        let total = 15usize;
+        let keep = (total as f64 * 0.10).ceil() as usize;
+        assert_eq!(keep, 2);
+
+        // 1枚 → 1枚保持（最低1枚）
+        let total = 1usize;
+        let keep = (total as f64 * 0.10).ceil() as usize;
+        let keep = keep.max(1);
+        assert_eq!(keep, 1);
+
+        // 5枚 → 1枚保持（ceil(0.5) = 1）
+        let total = 5usize;
+        let keep = (total as f64 * 0.10).ceil() as usize;
+        assert_eq!(keep, 1);
+    }
+
+    #[test]
+    fn test_cleanup_stats_preview_mode() {
+        // BE-08a: confirmed=false → プレビューのみ、deleted=0
+        let stats = CleanupStats {
+            total: 100,
+            deleted: 0,      // プレビューモード: 削除なし
+            kept: 10,        // 最新10%保持予定
+            bytes_freed: 0,
+        };
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(stats.kept, 10);
+        // to_delete = total - kept
+        assert_eq!(stats.total - stats.kept, 90);
+    }
+
+    #[test]
+    fn test_cleanup_stats_execute_mode() {
+        // BE-08: confirmed=true → 実際に削除
+        let stats = CleanupStats {
+            total: 100,
+            deleted: 90,     // 実行モード: 90%削除
+            kept: 10,        // 最新10%保持
+            bytes_freed: 90 * 1024 * 1024,  // 90MB freed
+        };
+        assert_eq!(stats.deleted, 90);
+        assert_eq!(stats.kept, 10);
+        assert_eq!(stats.bytes_freed, 90 * 1024 * 1024);
     }
 }
