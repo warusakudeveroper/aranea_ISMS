@@ -368,6 +368,14 @@ export interface ScannedDevice {
   credential_status: CredentialStatus;
   credential_username: string | null;  // 成功時のユーザー名
   credential_password: string | null;  // 成功時のパスワード
+  // Tried credentials list (for T3-10 plain-text display)
+  tried_credentials?: TriedCredentialResult[];
+  // Category detail from backend
+  category_detail?: DeviceCategoryDetail;
+  // For category F: registered camera info
+  registered_camera_id?: number;
+  registered_camera_name?: string;
+  ip_changed?: boolean;
 }
 
 // Scan log entry for detailed progress visibility (IS22_UI_DETAILED_SPEC Section 3.2)
@@ -461,7 +469,22 @@ export interface Subnet {
 // c: 認証必要 - カメラ検出 + 認証未実施/失敗
 // d: その他カメラ - カメラ可能性あり + 条件不足 (折りたたみ)
 // e: 非カメラ - カメラでないデバイス (折りたたみ)
-export type DeviceCategory = 'a' | 'b' | 'c' | 'd' | 'e';
+// f: 通信断・迷子カメラ - 登録済みだが応答なし / IPアドレス変更検出
+export type DeviceCategory = 'a' | 'b' | 'c' | 'd' | 'e' | 'f';
+
+// Device category detail (more specific classification)
+export type DeviceCategoryDetail =
+  | 'RegisteredAuthenticated'   // A: 登録済み・認証OK
+  | 'RegisteredAuthIssue'       // A: 登録済み・認証要確認
+  | 'Registrable'               // B: 登録可能
+  | 'AuthRequired'              // C: 認証待ち
+  | 'PossibleCamera'            // D: カメラ可能性あり（OUI一致）
+  | 'NetworkEquipment'          // D: ネットワーク機器
+  | 'IoTDevice'                 // D: IoTデバイス
+  | 'UnknownDevice'             // D: 不明
+  | 'NonCamera'                 // E: 非カメラ
+  | 'LostConnection'            // F: 通信断
+  | 'StrayChild';               // F: 迷子カメラ（IP変更検出）
 
 // Category metadata for UI display
 export interface CategoryMeta {
@@ -479,13 +502,62 @@ export const DEVICE_CATEGORIES: CategoryMeta[] = [
   { id: 'c', label: '認証必要', description: 'カメラ検出 + 認証未実施/失敗', bgClass: 'bg-yellow-100', collapsed: false },
   { id: 'd', label: 'その他カメラ', description: 'カメラ可能性あり + 条件不足', bgClass: 'bg-gray-100', collapsed: true },
   { id: 'e', label: '非カメラ', description: 'カメラでないデバイス', bgClass: 'bg-gray-100', collapsed: true },
+  { id: 'f', label: '通信断・迷子', description: '登録済みだが応答なし / IP変更検出', bgClass: 'bg-red-100 border-2 border-red-400', collapsed: false },
 ];
 
 // ScannedDevice with category (Frontend enriched)
 export interface CategorizedDevice extends ScannedDevice {
   category: DeviceCategory;
+  categoryDetail?: DeviceCategoryDetail;  // More specific category info
   isRegistered: boolean;  // cameras テーブルに存在するか
+  registeredCameraName?: string;  // For category F: name of registered camera
+  ipChanged?: boolean;  // For StrayChild detection
 }
+
+// =============================================================================
+// Scan Progress Types (DynamicProgressCalculator)
+// =============================================================================
+
+// Scan stage for progress calculation
+export type ScanStage =
+  | 'HostDiscovery'   // ARP/Ping スキャン
+  | 'PortScan'        // ポートスキャン
+  | 'OuiLookup'       // OUI判定
+  | 'OnvifProbe'      // ONVIF検出
+  | 'RtspAuth'        // RTSP認証試行
+  | 'CameraMatching'; // 登録済みカメラ照合
+
+// Stage progress info
+export interface StageProgress {
+  stage: ScanStage;
+  weight: number;         // Stage weight (0-100)
+  actualHosts?: number;   // Number of hosts to process
+  completedHosts: number; // Number of hosts completed
+}
+
+// Scan progress event from backend
+export interface ScanProgressEvent {
+  percent: number;
+  currentStage?: ScanStage;
+  stageDetails: StageProgress[];
+}
+
+// =============================================================================
+// Tried Credential Types (for T3-10 plain-text display)
+// =============================================================================
+
+// Result of credential trial
+export type CredentialResult = 'success' | 'failed' | 'timeout';
+
+// Tried credential with result
+export interface TriedCredentialResult {
+  username: string;
+  password: string;  // 平文表示（設計書 High #1 に準拠）
+  result: CredentialResult;
+}
+
+// Camera status including PendingAuth
+export type CameraStatus = 'active' | 'inactive' | 'pending_auth' | 'maintenance';
 
 // =============================================================================
 // AI Event Log (detection_logs) - MySQL永続化検知ログ

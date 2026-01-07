@@ -5,10 +5,40 @@ import type {
 } from "@/types/api"
 
 // credential_status ベースのカテゴリ判定（is22_ScanModal_Credential_Trial_Spec.md Section 4）
+// カテゴリF（LostConnection/StrayChild）対応追加（T3-8）
 export function categorizeDevice(
   device: ScannedDevice,
   registeredIPs: Set<string>
 ): DeviceCategory {
+  // バックエンドからカテゴリ情報が既に設定されている場合はそれを使用
+  // 特にカテゴリF（LostConnection/StrayChild）はバックエンドで判定される
+  const categoryDetail = device.category_detail
+  if (categoryDetail) {
+    if (categoryDetail === "LostConnection" || categoryDetail === "StrayChild") {
+      return "f"
+    }
+    if (categoryDetail === "RegisteredAuthenticated" || categoryDetail === "RegisteredAuthIssue") {
+      return "a"
+    }
+    if (categoryDetail === "Registrable") {
+      return "b"
+    }
+    if (categoryDetail === "AuthRequired") {
+      return "c"
+    }
+    if (
+      categoryDetail === "PossibleCamera" ||
+      categoryDetail === "NetworkEquipment" ||
+      categoryDetail === "IoTDevice" ||
+      categoryDetail === "UnknownDevice"
+    ) {
+      return "d"
+    }
+    if (categoryDetail === "NonCamera") {
+      return "e"
+    }
+  }
+
   // a: 登録済み - camerasテーブルに存在
   if (registeredIPs.has(device.ip)) {
     return "a"
@@ -66,14 +96,21 @@ export function categorizeAndSortDevices(
   devices: ScannedDevice[],
   registeredIPs: Set<string>
 ): CategorizedDevice[] {
-  const categorized = devices.map((device) => ({
-    ...device,
-    category: categorizeDevice(device, registeredIPs),
-    isRegistered: registeredIPs.has(device.ip),
-  }))
+  const categorized = devices.map((device) => {
+    const category = categorizeDevice(device, registeredIPs)
+    return {
+      ...device,
+      category,
+      categoryDetail: device.category_detail,
+      isRegistered: registeredIPs.has(device.ip),
+      registeredCameraName: device.registered_camera_name,
+      ipChanged: device.ip_changed,
+    }
+  })
 
   // ソート: カテゴリ順 → サブネット順 → IP順
-  const categoryOrder: Record<DeviceCategory, number> = { a: 0, b: 1, c: 2, d: 3, e: 4 }
+  // カテゴリFは重要なので先頭に表示（aの次）
+  const categoryOrder: Record<DeviceCategory, number> = { a: 0, f: 1, b: 2, c: 3, d: 4, e: 5 }
 
   return categorized.sort((a, b) => {
     // カテゴリ順

@@ -452,60 +452,102 @@ function ScanLogViewer({ logs, currentPhase, progress }: {
   )
 }
 
-// Phase progress indicator
+// Phase progress indicator with weighted progress display
+// Stage weights defined inline in PhaseIndicator (T3-7: DynamicProgressCalculator)
 function PhaseIndicator({
   currentPhase,
+  progress,
 }: {
   currentPhase: string
+  progress?: number
 }) {
   const phases = [
-    { id: "arp", label: "ARP Scan" },
-    { id: "port", label: "Port Scan" },
-    { id: "oui", label: "OUI Check" },
-    { id: "onvif", label: "ONVIF Probe" },
-    { id: "rtsp", label: "RTSP Probe" },
+    { id: "arp", label: "ARP Scan", weight: 15 },
+    { id: "port", label: "Port Scan", weight: 25 },
+    { id: "oui", label: "OUI Check", weight: 5 },
+    { id: "onvif", label: "ONVIF", weight: 20 },
+    { id: "rtsp", label: "RTSP", weight: 30 },
+    { id: "match", label: "照合", weight: 5 },
   ]
 
   const currentIndex = phases.findIndex((p) =>
     currentPhase.toLowerCase().includes(p.id)
   )
 
-  return (
-    <div className="flex items-center justify-center gap-1">
-      {phases.map((p, i) => {
-        const isActive = currentPhase.toLowerCase().includes(p.id)
-        const isPast = i < currentIndex
-        const isFuture = i > currentIndex
+  // Calculate cumulative progress based on weights
+  const calculateCumulativeWeight = (upToIndex: number): number => {
+    return phases.slice(0, upToIndex + 1).reduce((sum, p) => sum + p.weight, 0)
+  }
 
-        return (
-          <div key={p.id} className="flex items-center">
-            <div
-              className={cn(
-                "flex h-6 items-center justify-center rounded-full px-2 text-xs font-medium transition-all",
-                isActive &&
-                  "bg-primary text-primary-foreground ring-2 ring-primary/30",
-                isPast && "bg-green-500/20 text-green-600 dark:text-green-400",
-                isFuture && "bg-muted text-muted-foreground"
-              )}
-            >
-              {isPast ? (
-                <CheckCircle2 className="mr-1 h-3 w-3" />
-              ) : isActive ? (
-                <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
-              ) : null}
-              {p.label}
-            </div>
-            {i < phases.length - 1 && (
+  return (
+    <div className="space-y-2">
+      {/* Phase pills */}
+      <div className="flex items-center justify-center gap-1 flex-wrap">
+        {phases.map((p, i) => {
+          const isActive = currentPhase.toLowerCase().includes(p.id)
+          const isPast = i < currentIndex
+          const isFuture = i > currentIndex
+
+          return (
+            <div key={p.id} className="flex items-center">
               <div
                 className={cn(
-                  "mx-1 h-0.5 w-4",
-                  isPast ? "bg-green-500" : "bg-muted"
+                  "flex h-6 items-center justify-center rounded-full px-2 text-xs font-medium transition-all",
+                  isActive &&
+                    "bg-primary text-primary-foreground ring-2 ring-primary/30",
+                  isPast && "bg-green-500/20 text-green-600 dark:text-green-400",
+                  isFuture && "bg-muted text-muted-foreground"
                 )}
-              />
-            )}
+              >
+                {isPast ? (
+                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                ) : isActive ? (
+                  <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+                ) : null}
+                {p.label}
+                <span className="ml-1 text-[10px] opacity-60">({p.weight}%)</span>
+              </div>
+              {i < phases.length - 1 && (
+                <div
+                  className={cn(
+                    "mx-1 h-0.5 w-3",
+                    isPast ? "bg-green-500" : "bg-muted"
+                  )}
+                />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {/* Weighted progress bar */}
+      <div className="flex items-center gap-2 px-4">
+        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+          {/* Show completed stages as segments */}
+          <div className="h-full flex">
+            {phases.map((p, i) => {
+              const isPast = i < currentIndex
+              const isActive = currentPhase.toLowerCase().includes(p.id)
+              const widthPercent = p.weight
+
+              return (
+                <div
+                  key={p.id}
+                  className={cn(
+                    "h-full transition-all duration-300",
+                    isPast && "bg-green-500",
+                    isActive && "bg-primary animate-pulse",
+                    !isPast && !isActive && "bg-transparent"
+                  )}
+                  style={{ width: `${widthPercent}%` }}
+                />
+              )
+            })}
           </div>
-        )
-      })}
+        </div>
+        <span className="text-xs text-muted-foreground min-w-[3rem] text-right">
+          {progress !== undefined ? `${progress}%` : `${currentIndex >= 0 ? calculateCumulativeWeight(currentIndex - 1) : 0}%`}
+        </span>
+      </div>
     </div>
   )
 }
@@ -546,6 +588,7 @@ function DeviceStatusBadge({ device }: { device: ScannedDevice }) {
 
 // Scanned device card - Backend API応答に合わせて修正
 // カテゴリbデバイスは強調表示（モデル名・認証成功ユーザー名を表示）
+// カテゴリfデバイス（通信断・迷子）は警告表示
 function DeviceCard({
   device,
   selected,
@@ -559,6 +602,9 @@ function DeviceCard({
 }) {
   const detection = device.detection
   const isRegisterable = device.credential_status === 'success' && device.model
+  const categorizedDevice = device as CategorizedDevice
+  const isLostConnection = categorizedDevice.category === 'f'
+  const isStrayChild = device.ip_changed === true
 
   return (
     <Card
@@ -566,16 +612,23 @@ function DeviceCard({
         "cursor-pointer p-3 transition-all",
         categoryBgClass || "hover:bg-accent/50",
         selected && "ring-2 ring-primary",
-        isRegisterable && "shadow-md" // カテゴリb強調
+        isRegisterable && "shadow-md", // カテゴリb強調
+        isLostConnection && "border-l-4 border-l-red-500" // カテゴリf強調
       )}
       onClick={onToggle}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           {/* IP + Status Badge */}
-          <div className="flex items-center gap-2">
-            <Wifi className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-            <span className="font-mono text-sm font-medium">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Wifi className={cn(
+              "h-4 w-4 flex-shrink-0",
+              isLostConnection ? "text-red-500" : "text-muted-foreground"
+            )} />
+            <span className={cn(
+              "font-mono text-sm font-medium",
+              isLostConnection && "text-red-700"
+            )}>
               {device.ip}
             </span>
             <DeviceStatusBadge device={device} />
@@ -585,7 +638,24 @@ function DeviceCard({
                 認証済
               </Badge>
             )}
+            {/* Category F badges */}
+            {isLostConnection && !isStrayChild && (
+              <Badge variant="destructive" className="text-xs">
+                通信断
+              </Badge>
+            )}
+            {isStrayChild && (
+              <Badge variant="outline" className="text-xs border-orange-500 text-orange-600">
+                IP変更検出
+              </Badge>
+            )}
           </div>
+          {/* Registered camera name for category F */}
+          {isLostConnection && device.registered_camera_name && (
+            <p className="mt-1 text-sm font-medium text-red-700 dark:text-red-400">
+              登録名: {device.registered_camera_name}
+            </p>
+          )}
           {/* MAC + OUI Vendor */}
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             {device.mac && (
@@ -629,14 +699,51 @@ function DeviceCard({
               <span>認証: {device.credential_username}</span>
             </div>
           )}
+          {/* Tried credentials display (T3-10: 平文表示) */}
+          {device.tried_credentials && device.tried_credentials.length > 0 && (
+            <div className="mt-2 text-xs border-t pt-2">
+              <p className="text-muted-foreground mb-1 flex items-center gap-1">
+                <Key className="h-3 w-3" />
+                試行クレデンシャル:
+              </p>
+              <div className="space-y-0.5 font-mono text-[11px]">
+                {device.tried_credentials.map((cred, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <span className={cn(
+                      cred.result === 'success' ? 'text-green-600' :
+                      cred.result === 'timeout' ? 'text-amber-600' : 'text-red-500'
+                    )}>
+                      {cred.result === 'success' ? '✓' : cred.result === 'timeout' ? '⏱' : '×'}
+                    </span>
+                    <span>{cred.username} / {cred.password}</span>
+                    <span className="text-muted-foreground">
+                      → {cred.result === 'success' ? '成功' :
+                         cred.result === 'timeout' ? 'タイムアウト' : '失敗'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Category F help message */}
+          {isLostConnection && (
+            <div className="mt-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded p-2">
+              <p className="font-medium mb-1">考えられる原因:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li>電源が切れている</li>
+                <li>ネットワークケーブルが抜けている</li>
+                {isStrayChild && <li>IPアドレスが変更された（DHCPリース切れ）</li>}
+              </ul>
+            </div>
+          )}
           {/* Detection message */}
-          {detection && !isRegisterable && (
+          {detection && !isRegisterable && !isLostConnection && (
             <p className="mt-1 text-xs text-muted-foreground">
               {detection.user_message}
             </p>
           )}
           {/* Credential failed warning */}
-          {device.credential_status === 'failed' && (
+          {device.credential_status === 'failed' && !isLostConnection && (
             <div className="mt-1 flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
               <Key className="h-3 w-3" />
               <span>全クレデンシャル不一致 - 設定確認が必要</span>
@@ -684,6 +791,8 @@ function CategorySection({
   if (devices.length === 0) return null
 
   const isCollapsible = category.id === 'd' || category.id === 'e'
+  const isCategoryF = category.id === 'f'
+  const isCategoryB = category.id === 'b'
 
   return (
     <div className="space-y-2">
@@ -692,7 +801,8 @@ function CategorySection({
         className={cn(
           "flex items-center gap-2 px-2 py-1.5 rounded-lg",
           isCollapsible && "cursor-pointer hover:bg-muted/50",
-          category.id === 'b' && "font-semibold"
+          isCategoryB && "font-semibold bg-blue-50 dark:bg-blue-900/20",
+          isCategoryF && "font-semibold bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"
         )}
         onClick={isCollapsible ? onToggleCollapse : undefined}
       >
@@ -703,13 +813,27 @@ function CategorySection({
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           )
         )}
-        <span className={cn("text-sm font-medium", category.id === 'b' && "text-blue-700")}>
-          {category.id === 'b' && '★ '}
+        {isCategoryF && <AlertCircle className="h-4 w-4 text-red-500" />}
+        <span className={cn(
+          "text-sm font-medium",
+          isCategoryB && "text-blue-700 dark:text-blue-300",
+          isCategoryF && "text-red-700 dark:text-red-300"
+        )}>
+          {isCategoryB && '★ '}
+          {isCategoryF && '⚠ '}
           カテゴリ {category.id.toUpperCase()}: {category.label}
         </span>
-        <Badge variant="secondary" className="ml-1">
+        <Badge
+          variant={isCategoryF ? "destructive" : "secondary"}
+          className="ml-1"
+        >
           {devices.length}台
         </Badge>
+        {isCategoryF && (
+          <span className="text-xs text-red-600 dark:text-red-400 ml-2">
+            確認が必要です
+          </span>
+        )}
       </div>
 
       {/* Devices list */}
@@ -794,6 +918,7 @@ export function ScanModal({
       c: [],
       d: [],
       e: [],
+      f: [],
     }
     for (const device of categorizedDevices) {
       grouped[device.category].push(device)
@@ -1438,20 +1563,15 @@ export function ScanModal({
                     </p>
                     {scanJob && (
                       <>
-                        <PhaseIndicator currentPhase={scanJob.current_phase || "scanning"} />
-                        <div className="mt-3">
-                          <div className="h-2 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full bg-primary transition-all animate-pulse"
-                              style={{ width: scanJob.progress_percent ? `${scanJob.progress_percent}%` : "100%" }}
-                            />
-                          </div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {scanJob.summary
-                              ? `${scanJob.summary.hosts_alive}ホスト / ${scanJob.summary.cameras_found}カメラ検出`
-                              : "スキャン中..."}
-                          </p>
-                        </div>
+                        <PhaseIndicator
+                          currentPhase={scanJob.current_phase || "scanning"}
+                          progress={scanJob.progress_percent}
+                        />
+                        <p className="mt-3 text-sm text-muted-foreground text-center">
+                          {scanJob.summary
+                            ? `${scanJob.summary.hosts_alive}ホスト応答 / ${scanJob.summary.cameras_found}カメラ検出`
+                            : "ネットワークを探索中..."}
+                        </p>
                       </>
                     )}
                   </div>
@@ -1518,6 +1638,14 @@ export function ScanModal({
                             <div className="h-3 w-3 rounded-full bg-yellow-500" />
                             <span className="text-sm">認証必要: {devicesByCategory.c.length}台</span>
                           </div>
+                          {devicesByCategory.f.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <div className="h-3 w-3 rounded-full bg-red-500" />
+                              <span className="text-sm text-red-600 font-medium">
+                                通信断・迷子: {devicesByCategory.f.length}台
+                              </span>
+                            </div>
+                          )}
                           <div className="flex items-center gap-2">
                             <div className="h-3 w-3 rounded-full bg-gray-400" />
                             <span className="text-sm">その他: {devicesByCategory.d.length + devicesByCategory.e.length}台</span>
