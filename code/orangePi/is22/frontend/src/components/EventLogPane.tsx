@@ -41,6 +41,109 @@ import { DetectionDetailModal } from "./DetectionDetailModal"
 // Execution state for patrol ticker
 type ExecutionState = "idle" | "accessing" | "cooldown" | "waiting"
 
+// ============================================
+// Phase 2: 表示仕様準拠 (Issue #102)
+// AIEventLog_Redesign_v4.md Section 5.2 準拠
+// ============================================
+
+// T2-1: EVENT_COLORS定数（6色）- hex code完全一致
+const EVENT_COLORS = {
+  human: { bg: '#FFFF00', text: '#222222', border: '#B8B800' },
+  vehicle: { bg: '#6495ED', text: '#FFFFFF', border: '#4169E1' },
+  alert: { bg: '#FF0000', text: '#FFFF00', border: '#CC0000' },
+  unknown: { bg: '#D3D3D3', text: '#222222', border: '#A9A9A9' },
+  camera_lost: { bg: '#333333', text: '#FFFFFF', border: '#1A1A1A' },
+  camera_recovered: { bg: '#FFFFFF', text: '#444444', border: '#CCCCCC' },
+} as const
+
+type EventColorKey = keyof typeof EVENT_COLORS
+
+// T2-2: ICON_COLORS定数（6色）- 背景色に応じたコントラスト確保
+const ICON_COLORS: Record<EventColorKey, string> = {
+  human: '#222222',
+  vehicle: '#FFFFFF',
+  alert: '#FFFF00',
+  unknown: '#555555',
+  camera_lost: '#FFFFFF',
+  camera_recovered: '#444444',
+}
+
+// T2-5: EVENT_LABELS定数（22ラベル）- 日本語翻訳
+const EVENT_LABELS: Record<string, string> = {
+  'human': '人物検知',
+  'person': '人物検知',
+  'humans': '複数人検知',
+  'people': '複数人検知',
+  'crowd': '群衆検知',
+  'vehicle': '車両検知',
+  'car': '車両検知',
+  'truck': 'トラック検知',
+  'suspicious': '不審行動',
+  'alert': '警戒',
+  'intrusion': '侵入検知',
+  'fire': '火災検知',
+  'smoke': '煙検知',
+  'animal': '動物検知',
+  'dog': '犬検知',
+  'cat': '猫検知',
+  'package': '荷物検知',
+  'object': '物体検知',
+  'motion': '動体検知',
+  'movement': '動き検知',
+  'unknown': '不明',
+  'none': '検出なし',
+  'camera_lost': '接続ロスト',
+  'camera_recovered': '接続復帰',
+}
+
+// T2-7: SEVERITY_TOOLTIPS定数 - ホバー時の説明
+const SEVERITY_TOOLTIPS: Record<number, string> = {
+  0: '検出なし',
+  1: '低優先度 - 通常の検知',
+  2: '中優先度 - 注意が必要',
+  3: '高優先度 - 即時確認推奨',
+  4: '緊急 - 即時対応必要',
+}
+
+// T2-3: getEventStyle関数 - イベント種別に応じたスタイルを返す
+function getEventColorKey(primaryEvent: string): EventColorKey {
+  const event = primaryEvent.toLowerCase()
+
+  if (event === 'human' || event === 'person' || event === 'humans' || event === 'people') {
+    return 'human'
+  }
+  if (event === 'vehicle' || event === 'car' || event === 'truck') {
+    return 'vehicle'
+  }
+  if (['suspicious', 'alert', 'intrusion', 'fire', 'smoke'].includes(event)) {
+    return 'alert'
+  }
+  if (event === 'camera_lost') {
+    return 'camera_lost'
+  }
+  if (event === 'camera_recovered') {
+    return 'camera_recovered'
+  }
+  return 'unknown'
+}
+
+function getEventStyle(primaryEvent: string): React.CSSProperties {
+  const colorKey = getEventColorKey(primaryEvent)
+  const colors = EVENT_COLORS[colorKey]
+
+  return {
+    backgroundColor: colors.bg,
+    color: colors.text,
+    borderLeft: `3px solid ${colors.border}`,
+  }
+}
+
+// T2-4: getIconColor関数 - イベント種別に応じたアイコン色を返す
+function getIconColor(primaryEvent: string): string {
+  const colorKey = getEventColorKey(primaryEvent)
+  return ICON_COLORS[colorKey]
+}
+
 // Props
 interface EventLogPaneProps {
   cameras: Camera[]
@@ -51,39 +154,7 @@ interface EventLogPaneProps {
   executionState?: ExecutionState
 }
 
-// Event-type based color mapping
-function getEventTypeColor(primaryEvent: string, severity: number): string {
-  const event = primaryEvent.toLowerCase()
-
-  // Camera status events (subtle)
-  if (event === "camera_lost") {
-    return "bg-gray-700 text-white border-l-2 border-l-gray-500"
-  }
-  if (event === "camera_recovered") {
-    return "bg-white dark:bg-gray-100 text-gray-600 border-l-2 border-l-gray-300"
-  }
-
-  // Human detection - yellow (prominent)
-  if (event === "human" || event === "person" || event === "humans" || event === "people") {
-    return "bg-yellow-100 dark:bg-yellow-900/60 text-yellow-900 dark:text-yellow-100 border-l-2 border-l-yellow-500"
-  }
-
-  // Vehicle detection - blue (prominent)
-  if (event === "vehicle" || event === "car" || event === "truck") {
-    return "bg-blue-100 dark:bg-blue-900/60 text-blue-900 dark:text-blue-100 border-l-2 border-l-blue-500"
-  }
-
-  // Danger/alert - red (warning, strong)
-  if (event === "suspicious" || event === "alert" || event === "intrusion" ||
-      event === "fire" || event === "smoke" || severity >= 3) {
-    return "bg-red-500 text-white border-l-2 border-l-red-700"
-  }
-
-  // Default by severity
-  if (severity === 1) return "bg-blue-50 dark:bg-blue-900/40 border-l-2 border-l-blue-500"
-  if (severity === 2) return "bg-amber-50 dark:bg-amber-900/40 border-l-2 border-l-amber-500"
-  return "bg-red-50 dark:bg-red-900/50 border-l-2 border-l-red-500"
-}
+// [REMOVED] getEventTypeColor - replaced by getEventStyle() in Phase 2
 
 function getSeverityBadgeVariant(severity: number): "severity1" | "severity2" | "severity3" {
   if (severity === 1) return "severity1"
@@ -91,62 +162,59 @@ function getSeverityBadgeVariant(severity: number): "severity1" | "severity2" | 
   return "severity3"
 }
 
-// Get icon based on primary_event type - HIGH CONTRAST colors
+// Get icon based on primary_event type - T2-4: 背景色に応じたアイコン色使用
 function getEventIcon(primaryEvent: string): React.ReactNode {
   const iconClass = "h-3 w-3 flex-shrink-0"
+  const iconColor = getIconColor(primaryEvent)
+  const iconStyle = { color: iconColor }
 
   switch (primaryEvent.toLowerCase()) {
     case "camera_lost":
-      return <CameraOff className={cn(iconClass, "text-red-600 dark:text-red-400")} />
+      return <CameraOff className={iconClass} style={iconStyle} />
     case "camera_recovered":
-      return <CameraIcon className={cn(iconClass, "text-green-600 dark:text-green-400")} />
+      return <CameraIcon className={iconClass} style={iconStyle} />
     case "human":
     case "person":
-      return <User className={cn(iconClass, "text-amber-600 dark:text-amber-400")} />
+      return <User className={iconClass} style={iconStyle} />
     case "humans":
     case "people":
     case "crowd":
-      return <Users className={cn(iconClass, "text-amber-600 dark:text-amber-400")} />
+      return <Users className={iconClass} style={iconStyle} />
     case "vehicle":
     case "car":
     case "truck":
-      return <Car className={cn(iconClass, "text-blue-600 dark:text-blue-400")} />
+      return <Car className={iconClass} style={iconStyle} />
     case "animal":
     case "dog":
     case "cat":
-      return <Dog className={cn(iconClass, "text-orange-600 dark:text-orange-400")} />
+      return <Dog className={iconClass} style={iconStyle} />
     case "suspicious":
     case "alert":
     case "intrusion":
-      return <AlertTriangle className={cn(iconClass, "text-red-600 dark:text-red-400")} />
+      return <AlertTriangle className={iconClass} style={iconStyle} />
     case "fire":
     case "smoke":
-      return <Flame className={cn(iconClass, "text-red-700 dark:text-red-300")} />
+      return <Flame className={iconClass} style={iconStyle} />
     case "package":
     case "object":
-      return <Package className={cn(iconClass, "text-slate-700 dark:text-slate-300")} />
+      return <Package className={iconClass} style={iconStyle} />
     case "motion":
     case "movement":
-      return <Eye className={cn(iconClass, "text-cyan-600 dark:text-cyan-400")} />
+      return <Eye className={iconClass} style={iconStyle} />
     default:
-      return <HelpCircle className={cn(iconClass, "text-slate-600 dark:text-slate-400")} />
+      return <HelpCircle className={iconClass} style={iconStyle} />
   }
 }
 
-// Get display label for event type
+// T2-6: getEventLabel関数修正 - EVENT_LABELSを使用
 function getEventLabel(primaryEvent: string, countHint: number): string {
   const event = primaryEvent.toLowerCase()
+  const label = EVENT_LABELS[event] || primaryEvent
 
-  // Camera status events
-  if (event === "camera_lost") return "接続ロスト"
-  if (event === "camera_recovered") return "接続復帰"
-
-  // Detection events with count
-  if (countHint > 0) {
-    return `${primaryEvent} (${countHint})`
+  if (countHint > 1) {
+    return `${label} (${countHint})`
   }
-
-  return primaryEvent
+  return label
 }
 
 // Time formatting
@@ -165,7 +233,7 @@ function isDetectionEvent(primaryEvent: string): boolean {
   return event !== "camera_lost" && event !== "camera_recovered"
 }
 
-// Compact Detection Log Item with animation support
+// T2-10: Compact Detection Log Item with animation support - 統合修正
 function DetectionLogItem({
   log,
   cameraName,
@@ -177,7 +245,8 @@ function DetectionLogItem({
   onClick?: () => void
   isNew?: boolean
 }) {
-  const eventColor = getEventTypeColor(log.primary_event, log.severity)
+  // T2-3: getEventStyle使用（hex code直接指定）
+  const eventStyle = getEventStyle(log.primary_event)
   const badgeVariant = getSeverityBadgeVariant(log.severity)
   const shouldPulse = isNew && isDetectionEvent(log.primary_event)
 
@@ -185,10 +254,10 @@ function DetectionLogItem({
     <div
       className={cn(
         "px-1.5 py-1 rounded cursor-pointer transition-colors hover:opacity-80",
-        eventColor,
         isNew && "animate-event-slide-in",
         shouldPulse && "animate-detection-pulse"
       )}
+      style={eventStyle}
       onClick={(e) => {
         e.stopPropagation()
         onClick?.()
@@ -198,7 +267,11 @@ function DetectionLogItem({
         {/* Left: Icon + Camera + Event */}
         <div className="flex items-center gap-1 min-w-0 flex-1">
           {getEventIcon(log.primary_event)}
-          <span className="text-[10px] font-medium truncate max-w-[60px]">
+          {/* T2-9: カメラ名表示（min-w/max-w/title） */}
+          <span
+            className="text-[10px] font-medium truncate min-w-[40px] max-w-[120px] flex-shrink"
+            title={cameraName}
+          >
             {cameraName}
           </span>
           <span className="text-[9px] opacity-80 truncate">
@@ -211,10 +284,15 @@ function DetectionLogItem({
           <span className="text-[9px] opacity-70">
             {formatTime(log.captured_at)}
           </span>
-          <Badge variant={badgeVariant} className="text-[9px] px-1 py-0 h-4 min-w-[18px] justify-center">
+          {/* T2-8: Severityツールチップ適用 */}
+          <Badge
+            variant={badgeVariant}
+            className="text-[9px] px-1 py-0 h-4 min-w-[18px] justify-center cursor-help"
+            title={SEVERITY_TOOLTIPS[log.severity] ?? `重要度: ${log.severity}`}
+          >
             {log.severity}
           </Badge>
-          {log.confidence > 0 && (
+          {log.confidence != null && log.confidence > 0 && (
             <span className="text-[8px] opacity-70 w-[28px] text-right">
               {(log.confidence * 100).toFixed(0)}%
             </span>
