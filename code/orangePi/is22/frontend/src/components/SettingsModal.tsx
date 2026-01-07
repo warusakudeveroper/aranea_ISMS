@@ -46,10 +46,12 @@ import {
   Code,
   Video,
   Tags,
+  Bell,
 } from "lucide-react"
 import { API_BASE_URL } from "@/lib/config"
 import { PerformanceDashboard } from "@/components/PerformanceDashboard"
 import { CameraBrandsSettings } from "@/components/CameraBrandsSettings"
+import { SdmSettingsTab } from "@/components/SdmSettingsTab"
 
 interface SettingsModalProps {
   open: boolean
@@ -338,14 +340,18 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="display" className="flex items-center gap-1 text-xs">
               <Video className="h-4 w-4" />
               表示
             </TabsTrigger>
+            <TabsTrigger value="sdm" className="flex items-center gap-1 text-xs">
+              <Bell className="h-4 w-4" />
+              Nest
+            </TabsTrigger>
             <TabsTrigger value="is21" className="flex items-center gap-1 text-xs">
               <Server className="h-4 w-4" />
-              IS21接続
+              IS21
             </TabsTrigger>
             <TabsTrigger value="system" className="flex items-center gap-1 text-xs">
               <Cpu className="h-4 w-4" />
@@ -500,6 +506,11 @@ export function SettingsModal({
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* SDM (Google/Nest) Settings Tab */}
+          <TabsContent value="sdm" className="flex-1 overflow-hidden mt-4">
+            <SdmSettingsTab />
           </TabsContent>
 
           {/* IS21 Connection Tab */}

@@ -39,6 +39,7 @@ impl ConfigRepository {
         audio_input_supported, audio_output_supported, audio_codec,
         onvif_profiles, onvif_scopes, onvif_network_interfaces, onvif_capabilities,
         discovery_method, last_verified_at, last_rescan_at, deleted_at,
+        sdm_device_id, sdm_structure, sdm_traits,
         conf_override, nms_threshold, par_threshold,
         created_at, updated_at
     "#;
@@ -178,6 +179,10 @@ impl ConfigRepository {
         if req.codec_sub.is_some() { set_clauses.push("codec_sub = ?".to_string()); }
         if req.audio_codec.is_some() { set_clauses.push("audio_codec = ?".to_string()); }
         if req.discovery_method.is_some() { set_clauses.push("discovery_method = ?".to_string()); }
+        // SDM fields (migration 018)
+        if req.sdm_device_id.is_some() { set_clauses.push("sdm_device_id = ?".to_string()); }
+        if req.sdm_structure.is_some() { set_clauses.push("sdm_structure = ?".to_string()); }
+        if req.sdm_traits.is_some() { set_clauses.push("sdm_traits = ?".to_string()); }
 
         // Boolean fields
         if req.enabled.is_some() { set_clauses.push("enabled = ?".to_string()); }
@@ -270,6 +275,10 @@ impl ConfigRepository {
         if let Some(ref v) = req.codec_sub { q = q.bind(v); }
         if let Some(ref v) = req.audio_codec { q = q.bind(v); }
         if let Some(ref v) = req.discovery_method { q = q.bind(v); }
+        // SDM fields (migration 018)
+        if let Some(ref v) = req.sdm_device_id { q = q.bind(v); }
+        if let Some(ref v) = req.sdm_structure { q = q.bind(v); }
+        if let Some(ref v) = req.sdm_traits { q = q.bind(v); }
 
         // Boolean fields
         if let Some(v) = req.enabled { q = q.bind(v); }

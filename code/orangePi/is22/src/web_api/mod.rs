@@ -7,8 +7,10 @@
 //! - Response formatting
 
 mod routes;
+mod sdm_routes;
 
 pub use routes::create_router;
+pub use sdm_routes::sdm_routes;
 
 use axum::extract::State;
 use axum::response::IntoResponse;

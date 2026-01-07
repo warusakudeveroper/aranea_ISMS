@@ -137,6 +137,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/snapshots/:camera_id/latest.jpg", get(get_cached_snapshot))
         // WebSocket
         .route("/api/ws", get(websocket_handler))
+        // SDM (Google Nest Doorbell Integration)
+        .nest("/api/sdm", super::sdm_routes::sdm_routes())
         .with_state(state)
 }
 

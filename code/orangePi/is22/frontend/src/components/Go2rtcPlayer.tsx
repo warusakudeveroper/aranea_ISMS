@@ -167,14 +167,8 @@ export function Go2rtcPlayer({
     }
 
     // Append buffer helper
+    // Note: Do NOT cancel timeout here - wait for actual video playback (onplaying)
     const appendBuffer = (data: ArrayBuffer) => {
-      // Mark that we received video data - cancel timeout
-      if (!hasReceivedVideoRef.current) {
-        hasReceivedVideoRef.current = true
-        clearTimers()
-        setCountdown(0)
-      }
-
       const sb = sourceBufferRef.current
       if (!sb) {
         pendingBuffersRef.current.push(data)
@@ -374,6 +368,8 @@ export function Go2rtcPlayer({
 
       video.onplaying = () => {
         if (isStoppedRef.current) return
+        // Mark video as successfully playing - cancel timeout only here
+        hasReceivedVideoRef.current = true
         setState("playing")
         clearTimers()
         setCountdown(0)

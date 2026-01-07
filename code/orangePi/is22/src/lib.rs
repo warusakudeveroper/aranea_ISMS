@@ -24,6 +24,7 @@
 
 pub mod camera_brand;
 pub mod config_store;
+pub mod sdm_integration;
 pub mod admission_controller;
 pub mod ai_client;
 pub mod camera_status_tracker;

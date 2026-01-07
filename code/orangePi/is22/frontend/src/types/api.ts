@@ -724,3 +724,105 @@ export interface PatrolFeedback {
   severity: number | null;
   is_detection: boolean;
 }
+
+// =============================================================================
+// SDM (Google Nest Doorbell) Integration Types
+// =============================================================================
+
+// SDM configuration status
+export type SdmConfigStatus =
+  | 'not_configured'           // project_id/client_id 未登録
+  | 'configured_pending_auth'  // client_secret 保存済みだが refresh_token なし
+  | 'authorized'               // refresh_token 有効
+  | 'error';                   // エラー状態
+
+// SDM config response from GET /api/sdm/config
+export interface SdmConfigResponse {
+  configured: boolean;
+  project_id: string | null;
+  project_number: string | null;
+  enterprise_project_id: string | null;
+  client_id: string | null;
+  has_client_secret: boolean;
+  has_refresh_token: boolean;
+  status: SdmConfigStatus;
+  error_reason: string | null;
+  last_synced_at: string | null;
+}
+
+// SDM config save request for PUT /api/sdm/config
+export interface SdmConfigSaveRequest {
+  project_id: string;
+  project_number?: string;
+  enterprise_project_id: string;
+  client_id: string;
+  client_secret: string;
+  refresh_token?: string;
+}
+
+// Auth code exchange request for POST /api/sdm/exchange-code
+export interface SdmExchangeCodeRequest {
+  auth_code: string;
+}
+
+// SDM device from GET /api/sdm/devices
+export interface SdmDevice {
+  sdm_device_id: string;
+  name: string;
+  device_type: string;
+  traits_summary: string[];
+  structure: string | null;
+  room: string | null;
+}
+
+// SDM devices list response
+export interface SdmDevicesResponse {
+  devices: SdmDevice[];
+  total: number;
+}
+
+// Register SDM device request for POST /api/sdm/devices/:id/register
+export interface SdmRegisterDeviceRequest {
+  camera_id: string;
+  name: string;
+  location: string;
+  fid: string;
+  tid: string;
+  camera_context?: Record<string, unknown>;
+  snapshot_interval_sec?: number;
+}
+
+// go2rtc version check response
+export interface Go2rtcVersionResponse {
+  version: string;
+  compatible: boolean;
+}
+
+// SDM token test response
+export interface SdmTokenTestResponse {
+  ok: boolean;
+  error?: string;
+}
+
+// SDM device test response
+export interface SdmDeviceTestResponse {
+  ok: boolean;
+  traits_summary?: string[];
+  error?: string;
+}
+
+// Stream status response
+export interface StreamStatusResponse {
+  exists: boolean;
+  active: boolean;
+  producers: number;
+  consumers: number;
+  error?: string;
+}
+
+// SDM sync go2rtc response
+export interface SdmSyncGo2rtcResponse {
+  added: number;
+  skipped: number;
+  errors: string[];
+}

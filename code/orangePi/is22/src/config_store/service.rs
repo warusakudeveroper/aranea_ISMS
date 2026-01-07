@@ -175,6 +175,16 @@ impl ConfigService {
         self.repo.get_all_settings().await
     }
 
+    /// Get generic setting by key
+    pub async fn get_setting(&self, key: &str) -> Result<Option<serde_json::Value>> {
+        self.repo.get_setting(key).await
+    }
+
+    /// Set generic setting by key
+    pub async fn set_setting(&self, key: &str, value: serde_json::Value) -> Result<()> {
+        self.repo.set_setting(key, value).await
+    }
+
     /// Get polling policy
     pub async fn get_polling_policy(&self) -> Result<PollingPolicy> {
         let setting = self.repo.get_setting("polling").await?;

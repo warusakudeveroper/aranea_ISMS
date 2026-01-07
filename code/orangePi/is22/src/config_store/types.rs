@@ -100,6 +100,13 @@ pub struct Camera {
     pub last_verified_at: Option<DateTime<Utc>>,
     pub last_rescan_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,
+    // === SDM (Google Nest) 統合 (migration 018) ===
+    /// Google SDM device identifier (enterprises/.../devices/xxx)
+    pub sdm_device_id: Option<String>,
+    /// SDM structure/home identifier
+    pub sdm_structure: Option<String>,
+    /// SDM device traits summary (not for AI hints)
+    pub sdm_traits: Option<serde_json::Value>,
     // === 閾値オーバーライド (migration 014) ===
     /// YOLO confidence threshold override (0.20-0.80), None = use preset default
     pub conf_override: Option<f32>,
@@ -267,6 +274,10 @@ pub struct UpdateCameraRequest {
     pub onvif_capabilities: Option<serde_json::Value>,
     // === 検出メタ情報 ===
     pub discovery_method: Option<String>,
+    // === SDM (Google Nest) 統合 (migration 018) ===
+    pub sdm_device_id: Option<String>,
+    pub sdm_structure: Option<String>,
+    pub sdm_traits: Option<serde_json::Value>,
     // === 閾値オーバーライド (migration 014) ===
     /// YOLO confidence threshold override (0.20-0.80)
     /// Uses double option to distinguish: None=don't update, Some(None)=set to NULL, Some(Some(v))=set to v
