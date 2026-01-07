@@ -73,6 +73,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/settings/storage", put(update_storage_settings))
         .route("/api/settings/storage/cleanup", post(trigger_storage_cleanup))
         .route("/api/settings/storage/cleanup-unknown", post(trigger_unknown_cleanup))
+        // Image Diagnostics & Recovery (AIEventlog.md T3-1〜T3-5)
+        .route("/api/diagnostics/images/:camera_id", get(diagnose_camera_images))
+        .route("/api/recovery/images/:camera_id", post(recover_camera_images))
         // Camera Brands (OUI/RTSP SSoT)
         .route("/api/settings/camera-brands", get(list_camera_brands))
         .route("/api/settings/camera-brands", post(create_camera_brand))
@@ -2059,6 +2062,279 @@ async fn trigger_unknown_cleanup(
             }))
         }
     }
+}
+
+// ============================================================================
+// Image Diagnostics & Recovery API (Phase 3: T3-1〜T3-5)
+// AIEventLog_Redesign_v4.md Section 5.3 準拠
+// ============================================================================
+
+/// T3-1: DiagnosticsResult構造体
+#[derive(Debug, serde::Serialize)]
+struct DiagnosticsResult {
+    camera_id: String,
+    total_in_db: usize,
+    existing_on_disk: usize,
+    missing_on_disk: usize,
+    missing_paths: Vec<String>,
+    total_size_bytes: u64,
+    diagnosis: String,
+}
+
+/// T3-4: RecoveryMode enum（3種）
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RecoveryMode {
+    /// 現在のスナップショットで再保存
+    RefetchCurrent,
+    /// DBパスのみ修正（ファイル存在時）
+    FixPathOnly,
+    /// 欠損レコードをDB削除
+    PurgeOrphans,
+}
+
+/// Recovery request body
+#[derive(Debug, serde::Deserialize)]
+struct RecoveryRequest {
+    /// 復旧対象のlog_id（指定なしで全unknown対象）
+    log_ids: Option<Vec<i64>>,
+    /// 復旧モード
+    mode: RecoveryMode,
+}
+
+/// Recovery result
+#[derive(Debug, serde::Serialize)]
+struct RecoveryResult {
+    attempted: usize,
+    succeeded: usize,
+    failed: usize,
+    details: Vec<RecoveryDetail>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RecoveryDetail {
+    log_id: i64,
+    status: String,
+    new_path: Option<String>,
+    error: Option<String>,
+}
+
+/// T3-2: GET /api/diagnostics/images/{camera_id} - Unknown画像可視性診断
+///
+/// DBのunknown画像パスとファイルシステムの存在を照合し、
+/// 欠損ファイルを検出する診断機能。
+async fn diagnose_camera_images(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    tracing::info!(camera_id = %camera_id, "Starting image diagnostics");
+
+    // DBからunknown画像パスを取得
+    let db_paths = match sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT image_path_local FROM detection_logs
+        WHERE camera_id = ?
+          AND (primary_event = 'unknown' OR unknown_flag = 1)
+          AND image_path_local IS NOT NULL
+          AND image_path_local != ''
+        "#
+    )
+    .bind(&camera_id)
+    .fetch_all(&*state.detection_log.pool())
+    .await {
+        Ok(paths) => paths,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to query image paths");
+            return Json(json!({
+                "ok": false,
+                "error": format!("Database query failed: {}", e)
+            })).into_response();
+        }
+    };
+
+    // ファイルシステムの存在確認
+    let mut existing_files = Vec::new();
+    let mut missing_files = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for path in &db_paths {
+        let path_obj = std::path::Path::new(path);
+        if path_obj.exists() {
+            existing_files.push(path.clone());
+            if let Ok(metadata) = std::fs::metadata(path_obj) {
+                total_size += metadata.len();
+            }
+        } else {
+            missing_files.push(path.clone());
+        }
+    }
+
+    let diagnosis = if missing_files.is_empty() {
+        "OK: All images exist on disk".to_string()
+    } else {
+        format!("ERROR: {} images missing from disk", missing_files.len())
+    };
+
+    tracing::info!(
+        camera_id = %camera_id,
+        total = db_paths.len(),
+        existing = existing_files.len(),
+        missing = missing_files.len(),
+        "Image diagnostics completed"
+    );
+
+    let result = DiagnosticsResult {
+        camera_id,
+        total_in_db: db_paths.len(),
+        existing_on_disk: existing_files.len(),
+        missing_on_disk: missing_files.len(),
+        missing_paths: missing_files,
+        total_size_bytes: total_size,
+        diagnosis,
+    };
+
+    Json(json!({
+        "ok": true,
+        "diagnostics": result
+    })).into_response()
+}
+
+/// T3-5: POST /api/recovery/images/{camera_id} - Unknown画像復旧
+///
+/// 欠損画像の復旧を実行。3つのモードをサポート:
+/// - RefetchCurrent: 現在のスナップショットで再保存
+/// - FixPathOnly: DBパスのみ修正
+/// - PurgeOrphans: 欠損レコードをDB削除
+async fn recover_camera_images(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    Json(req): Json<RecoveryRequest>,
+) -> impl IntoResponse {
+    tracing::info!(
+        camera_id = %camera_id,
+        mode = ?req.mode,
+        "Starting image recovery"
+    );
+
+    // 復旧対象のログを取得
+    let target_logs: Vec<(i64, String)> = match &req.log_ids {
+        Some(ids) => {
+            // 指定されたIDのみ
+            let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let query = format!(
+                r#"
+                SELECT log_id, image_path_local FROM detection_logs
+                WHERE camera_id = ? AND log_id IN ({})
+                "#,
+                placeholders
+            );
+            let mut query_builder = sqlx::query_as::<_, (i64, String)>(&query);
+            query_builder = query_builder.bind(&camera_id);
+            for id in ids {
+                query_builder = query_builder.bind(*id);
+            }
+            match query_builder.fetch_all(&*state.detection_log.pool()).await {
+                Ok(logs) => logs,
+                Err(e) => {
+                    return Json(json!({
+                        "ok": false,
+                        "error": format!("Failed to fetch logs: {}", e)
+                    })).into_response();
+                }
+            }
+        }
+        None => {
+            // 欠損画像を持つログを全取得
+            match sqlx::query_as::<_, (i64, String)>(
+                r#"
+                SELECT log_id, image_path_local FROM detection_logs
+                WHERE camera_id = ?
+                  AND (primary_event = 'unknown' OR unknown_flag = 1)
+                  AND image_path_local IS NOT NULL
+                  AND image_path_local != ''
+                "#
+            )
+            .bind(&camera_id)
+            .fetch_all(&*state.detection_log.pool())
+            .await {
+                Ok(logs) => logs,
+                Err(e) => {
+                    return Json(json!({
+                        "ok": false,
+                        "error": format!("Failed to fetch logs: {}", e)
+                    })).into_response();
+                }
+            }
+        }
+    };
+
+    // 欠損ファイルのみをフィルタ
+    let missing_logs: Vec<_> = target_logs.into_iter()
+        .filter(|(_, path)| !std::path::Path::new(path).exists())
+        .collect();
+
+    let mut result = RecoveryResult {
+        attempted: missing_logs.len(),
+        succeeded: 0,
+        failed: 0,
+        details: Vec::new(),
+    };
+
+    for (log_id, _path) in missing_logs {
+        match &req.mode {
+            RecoveryMode::PurgeOrphans => {
+                // 欠損レコードをDB削除
+                match sqlx::query("UPDATE detection_logs SET image_path_local = '' WHERE log_id = ?")
+                    .bind(log_id)
+                    .execute(&*state.detection_log.pool())
+                    .await
+                {
+                    Ok(_) => {
+                        result.succeeded += 1;
+                        result.details.push(RecoveryDetail {
+                            log_id,
+                            status: "purged".to_string(),
+                            new_path: None,
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        result.failed += 1;
+                        result.details.push(RecoveryDetail {
+                            log_id,
+                            status: "failed".to_string(),
+                            new_path: None,
+                            error: Some(e.to_string()),
+                        });
+                    }
+                }
+            }
+            RecoveryMode::RefetchCurrent | RecoveryMode::FixPathOnly => {
+                // RefetchCurrentとFixPathOnlyは現時点では未実装
+                // 実際の実装にはsnapshot_serviceとの連携が必要
+                result.failed += 1;
+                result.details.push(RecoveryDetail {
+                    log_id,
+                    status: "not_implemented".to_string(),
+                    new_path: None,
+                    error: Some("RefetchCurrent and FixPathOnly modes require snapshot_service integration".to_string()),
+                });
+            }
+        }
+    }
+
+    tracing::info!(
+        camera_id = %camera_id,
+        attempted = result.attempted,
+        succeeded = result.succeeded,
+        failed = result.failed,
+        "Image recovery completed"
+    );
+
+    Json(json!({
+        "ok": true,
+        "recovery": result
+    })).into_response()
 }
 
 // ============================================================================

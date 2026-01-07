@@ -250,6 +250,11 @@ impl DetectionLogService {
         Self::new(pool, DetectionLogConfig::default())
     }
 
+    /// Get pool reference for direct SQL queries (T3-2: diagnostics API)
+    pub fn pool(&self) -> &MySqlPool {
+        &self.pool
+    }
+
     /// Get current configuration (for API access)
     pub async fn config(&self) -> DetectionLogConfig {
         self.config.read().await.clone()

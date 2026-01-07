@@ -47,11 +47,13 @@ import {
   Video,
   Tags,
   Bell,
+  Search,
 } from "lucide-react"
 import { API_BASE_URL } from "@/lib/config"
 import { PerformanceDashboard } from "@/components/PerformanceDashboard"
 import { CameraBrandsSettings } from "@/components/CameraBrandsSettings"
 import { SdmSettingsTab } from "@/components/SdmSettingsTab"
+import type { Camera as CameraType } from "@/types/api"
 
 interface SettingsModalProps {
   open: boolean
@@ -168,6 +170,23 @@ export function SettingsModal({
   const [storageMaxTotalGb, setStorageMaxTotalGb] = useState<number>(10)
   const [savingStorage, setSavingStorage] = useState(false)
   const [cleaningStorage, setCleaningStorage] = useState(false)
+
+  // Camera list for diagnostics (T3-3)
+  const [cameras, setCameras] = useState<CameraType[]>([])
+
+  // Fetch cameras list for diagnostics
+  const fetchCameras = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/cameras`)
+      if (resp.ok) {
+        const json = await resp.json()
+        const cameraList = json.data || json || []
+        setCameras(cameraList)
+      }
+    } catch (error) {
+      console.error("Failed to fetch cameras:", error)
+    }
+  }, [])
 
   // Fetch IS21 status
   const fetchIS21Status = useCallback(async () => {
@@ -351,6 +370,78 @@ export function SettingsModal({
     }
   }
 
+  // ============================================
+  // T3-3, T3-6: 診断・復旧UI (Phase 3)
+  // ============================================
+
+  // Diagnostics state
+  const [diagnostics, setDiagnostics] = useState<{
+    camera_id: string
+    total_in_db: number
+    existing_on_disk: number
+    missing_on_disk: number
+    missing_paths: string[]
+    total_size_bytes: number
+    diagnosis: string
+  } | null>(null)
+  const [diagLoading, setDiagLoading] = useState(false)
+  const [selectedCameraForDiag, setSelectedCameraForDiag] = useState<string>("")
+
+  // Recovery state
+  const [recoveryMode, setRecoveryMode] = useState<"purge_orphans" | "refetch_current" | "fix_path_only">("purge_orphans")
+  const [recoveryResult, setRecoveryResult] = useState<{
+    attempted: number
+    succeeded: number
+    failed: number
+  } | null>(null)
+  const [recovering, setRecovering] = useState(false)
+
+  // T3-3: Run diagnostics for a camera
+  const handleRunDiagnostics = async (cameraId: string) => {
+    if (!cameraId) return
+    setDiagLoading(true)
+    setDiagnostics(null)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/diagnostics/images/${encodeURIComponent(cameraId)}`)
+      if (resp.ok) {
+        const json = await resp.json()
+        if (json.ok && json.diagnostics) {
+          setDiagnostics(json.diagnostics)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to run diagnostics:", error)
+    } finally {
+      setDiagLoading(false)
+    }
+  }
+
+  // T3-6: Run recovery for a camera
+  const handleRunRecovery = async () => {
+    if (!diagnostics?.camera_id || diagnostics.missing_on_disk === 0) return
+    setRecovering(true)
+    setRecoveryResult(null)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/recovery/images/${encodeURIComponent(diagnostics.camera_id)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: recoveryMode }),
+      })
+      if (resp.ok) {
+        const json = await resp.json()
+        if (json.ok && json.recovery) {
+          setRecoveryResult(json.recovery)
+          // Re-run diagnostics to see updated state
+          await handleRunDiagnostics(diagnostics.camera_id)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to run recovery:", error)
+    } finally {
+      setRecovering(false)
+    }
+  }
+
   // Save IS21 URL
   const handleSaveIS21 = async () => {
     setSaving(true)
@@ -427,7 +518,7 @@ export function SettingsModal({
             await fetchSystemInfo()
             break
           case "storage":
-            await fetchStorageSettings()
+            await Promise.all([fetchStorageSettings(), fetchCameras()])
             break
           case "performance":
             await fetchPerformanceLogs()
@@ -442,7 +533,7 @@ export function SettingsModal({
     }
 
     fetchData()
-  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings])
+  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings, fetchCameras])
 
   // Auto-refresh for active tabs
   useEffect(() => {
@@ -1068,6 +1159,130 @@ export function SettingsModal({
                           キャンセル
                         </Button>
                       </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* T3-3, T3-6: Image Diagnostics & Recovery Card */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Database className="h-4 w-4" />
+                    画像診断・復旧
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    カメラごとのunknown画像の整合性を診断し、欠損ファイルを検出します。
+                  </p>
+
+                  {/* Camera Selection */}
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <Label htmlFor="diag-camera" className="text-xs">対象カメラ</Label>
+                      <select
+                        id="diag-camera"
+                        className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                        value={selectedCameraForDiag}
+                        onChange={(e) => setSelectedCameraForDiag(e.target.value)}
+                      >
+                        <option value="">カメラを選択...</option>
+                        {cameras.map((cam) => (
+                          <option key={cam.camera_id} value={cam.camera_id}>
+                            {cam.name || cam.camera_id}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRunDiagnostics(selectedCameraForDiag)}
+                      disabled={diagLoading || !selectedCameraForDiag}
+                    >
+                      {diagLoading ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Search className="h-4 w-4 mr-2" />
+                      )}
+                      診断実行
+                    </Button>
+                  </div>
+
+                  {/* Diagnostics Result */}
+                  {diagnostics && (
+                    <div className="p-3 rounded-lg bg-muted/50 space-y-2">
+                      <h4 className="font-medium text-sm">診断結果: {diagnostics.camera_id}</h4>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>DB登録数: <strong>{diagnostics.total_in_db}</strong></div>
+                        <div>ファイル存在: <strong className="text-green-600">{diagnostics.existing_on_disk}</strong></div>
+                        <div className={diagnostics.missing_on_disk > 0 ? "text-destructive" : ""}>
+                          欠損数: <strong>{diagnostics.missing_on_disk}</strong>
+                        </div>
+                        <div>合計サイズ: <strong>{(diagnostics.total_size_bytes / 1024 / 1024).toFixed(2)} MB</strong></div>
+                      </div>
+                      <div className={`text-xs ${diagnostics.missing_on_disk > 0 ? "text-destructive" : "text-green-600"}`}>
+                        {diagnostics.diagnosis}
+                      </div>
+
+                      {/* Recovery Options (only if missing files) */}
+                      {diagnostics.missing_on_disk > 0 && (
+                        <div className="mt-4 pt-4 border-t space-y-3">
+                          <h5 className="font-medium text-sm">復旧オプション</h5>
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                id="mode-purge"
+                                name="recovery-mode"
+                                value="purge_orphans"
+                                checked={recoveryMode === "purge_orphans"}
+                                onChange={() => setRecoveryMode("purge_orphans")}
+                              />
+                              <Label htmlFor="mode-purge" className="text-sm cursor-pointer">
+                                欠損レコードを削除（推奨）
+                              </Label>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                id="mode-refetch"
+                                name="recovery-mode"
+                                value="refetch_current"
+                                checked={recoveryMode === "refetch_current"}
+                                onChange={() => setRecoveryMode("refetch_current")}
+                                disabled
+                              />
+                              <Label htmlFor="mode-refetch" className="text-sm cursor-pointer text-muted-foreground">
+                                現在のスナップショットで再保存（未実装）
+                              </Label>
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleRunRecovery}
+                            disabled={recovering}
+                          >
+                            {recovering ? (
+                              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-4 w-4 mr-2" />
+                            )}
+                            復旧実行
+                          </Button>
+
+                          {/* Recovery Result */}
+                          {recoveryResult && (
+                            <div className="p-2 rounded bg-muted text-sm">
+                              <div>試行: {recoveryResult.attempted}</div>
+                              <div className="text-green-600">成功: {recoveryResult.succeeded}</div>
+                              <div className="text-destructive">失敗: {recoveryResult.failed}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>
