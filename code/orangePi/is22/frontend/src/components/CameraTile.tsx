@@ -4,19 +4,14 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Camera as CameraIcon, XCircle, Settings, Globe, Clock, WifiOff, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  getModelDisplayName,
+  getCameraStatus,
+  getStatusBadgeClass,
+  getStatusBadgeTitle,
+} from "@/utils/cameraTileHelpers"
 
-// Format timestamp as MM/DD HH:mm:ss (compact, no year)
-function formatTimestamp(timestamp: number): string {
-  const date = new Date(timestamp)
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  const seconds = String(date.getSeconds()).padStart(2, '0')
-  return `${month}/${day} ${hours}:${minutes}:${seconds}`
-}
-
-// Format relative time for error display (e.g., "5分前", "2時間前")
+// Format relative time for last update display (e.g., "5分前", "2時間前")
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now()
   const diffMs = now - timestamp
@@ -252,10 +247,24 @@ export function CameraTile({
             </div>
           )}
 
-          {/* Settings icon - top right (always with shadow bg) */}
+          {/* IMPL-T04: Status badge - top right (always visible) */}
+          {(() => {
+            const status = getCameraStatus(camera)
+            return (
+              <div
+                className={cn(
+                  "absolute top-1 right-1 w-3 h-3 rounded-full",
+                  getStatusBadgeClass(status)
+                )}
+                title={getStatusBadgeTitle(status)}
+              />
+            )
+          })()}
+
+          {/* Settings icon - top right, shifted left for status badge */}
           <button
             onClick={handleSettingsClick}
-            className="absolute top-1 right-1 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
+            className="absolute top-1 right-5 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
             title="カメラ設定"
           >
             <Settings className="h-4 w-4" />
@@ -271,27 +280,29 @@ export function CameraTile({
             </Badge>
           )}
 
-          {/* Overlay info - bottom gradient with text */}
+          {/* Overlay info - bottom gradient with 2-line display */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent p-2 pt-6">
-            {/* Camera name */}
+            {/* Line 1: Camera name (Model name) */}
             <div className="flex items-center gap-1.5 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
               <CameraIcon className="h-3.5 w-3.5 flex-shrink-0" />
               <span className="text-sm font-medium truncate">
                 {camera.name}
+                {getModelDisplayName(camera) !== 'Unknown' && (
+                  <span className="text-white/70 font-normal text-xs ml-1">
+                    ({getModelDisplayName(camera)})
+                  </span>
+                )}
               </span>
             </div>
-            {/* IP + FID + Timestamp row */}
+            {/* Line 2: IP address | Relative time (right-aligned) */}
             <div className="flex items-center justify-between text-[10px] text-white/80 mt-0.5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
               <div className="flex items-center gap-1 truncate">
                 <Globe className="h-2.5 w-2.5 flex-shrink-0" />
                 <span className="truncate">{camera.ip_address || '-'}</span>
-                {camera.fid && (
-                  <span className="text-white/60 ml-1">FID:{camera.fid}</span>
-                )}
               </div>
               <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
                 <Clock className="h-2.5 w-2.5" />
-                <span>{lastSnapshotAt ? formatTimestamp(lastSnapshotAt) : '--:--:--'}</span>
+                <span>{lastSnapshotAt ? `${formatRelativeTime(lastSnapshotAt)} 更新` : '--'}</span>
               </div>
             </div>
           </div>
@@ -371,10 +382,23 @@ export function CameraTile({
             <WifiOff className="h-4 w-4" />
           </div>
         )}
-        {/* Settings icon - top right */}
+        {/* IMPL-T05: Status badge - top right (always visible) */}
+        {(() => {
+          const status = getCameraStatus(camera)
+          return (
+            <div
+              className={cn(
+                "absolute top-1 right-1 w-3 h-3 rounded-full",
+                getStatusBadgeClass(status)
+              )}
+              title={getStatusBadgeTitle(status)}
+            />
+          )
+        })()}
+        {/* Settings icon - top right, shifted left for status badge */}
         <button
           onClick={handleSettingsClick}
-          className="absolute top-1 right-1 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
+          className="absolute top-1 right-5 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity"
           title="カメラ設定"
         >
           <Settings className="h-4 w-4" />
@@ -388,34 +412,28 @@ export function CameraTile({
           </Badge>
         )}
       </div>
-      <CardContent className="p-2 space-y-1">
-        {/* Camera name */}
+      <CardContent className="p-2 space-y-0.5">
+        {/* Line 1: Camera name (Model name) */}
         <div className="flex items-center gap-2">
           <CameraIcon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           <span className="text-sm font-medium truncate">
             {camera.name}
-          </span>
-        </div>
-        {/* IP address + model */}
-        <div className="flex items-center gap-1 text-xs text-muted-foreground pl-6">
-          <Globe className="h-3 w-3 flex-shrink-0" />
-          <span className="truncate">
-            {camera.ip_address || '-'}
-            {camera.model && (
-              <span className="text-muted-foreground/70"> · {camera.model}</span>
+            {getModelDisplayName(camera) !== 'Unknown' && (
+              <span className="text-muted-foreground/70 font-normal text-xs ml-1">
+                ({getModelDisplayName(camera)})
+              </span>
             )}
           </span>
         </div>
-        {/* FID + Last snapshot time */}
+        {/* Line 2: IP address | Relative time (right-aligned) */}
         <div className="flex items-center justify-between text-xs text-muted-foreground pl-6">
-          {camera.fid && (
-            <Badge variant="outline" className="text-[10px] px-1 h-4">
-              FID:{camera.fid}
-            </Badge>
-          )}
+          <div className="flex items-center gap-1 truncate">
+            <Globe className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{camera.ip_address || '-'}</span>
+          </div>
           <div className="flex items-center gap-1 ml-auto">
             <Clock className="h-3 w-3" />
-            <span>{lastSnapshotAt ? formatTimestamp(lastSnapshotAt) : '--/-- --:--:--'}</span>
+            <span>{lastSnapshotAt ? `${formatRelativeTime(lastSnapshotAt)} 更新` : '--'}</span>
           </div>
         </div>
       </CardContent>
