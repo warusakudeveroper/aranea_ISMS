@@ -76,6 +76,15 @@ pub fn create_router(state: AppState) -> Router {
         // Image Diagnostics & Recovery (AIEventlog.md T3-1〜T3-5)
         .route("/api/diagnostics/images/:camera_id", get(diagnose_camera_images))
         .route("/api/recovery/images/:camera_id", post(recover_camera_images))
+        // Inference Stats (AIEventlog.md T4-1〜T4-2)
+        .route("/api/stats/inference", get(get_inference_stats))
+        // Misdetection Feedback (AIEventlog.md T4-6〜T4-10)
+        .route("/api/feedback/misdetection", post(create_misdetection_feedback))
+        .route("/api/feedback/misdetection/:camera_id", get(get_misdetection_feedback))
+        .route("/api/feedback/stats/:camera_id", get(get_feedback_stats))
+        // Threshold Management (AIEventlog.md T4-11〜T4-15)
+        .route("/api/cameras/:id/threshold", get(get_camera_threshold))
+        .route("/api/cameras/:id/threshold", put(update_camera_threshold))
         // Camera Brands (OUI/RTSP SSoT)
         .route("/api/settings/camera-brands", get(list_camera_brands))
         .route("/api/settings/camera-brands", post(create_camera_brand))
@@ -2335,6 +2344,460 @@ async fn recover_camera_images(
         "ok": true,
         "recovery": result
     })).into_response()
+}
+
+// ============================================================================
+// Inference Stats API (T4-1〜T4-2)
+// ============================================================================
+
+/// T4-1: InferenceStats struct
+#[derive(Debug, serde::Serialize)]
+struct InferenceStats {
+    total_inferences: i64,
+    today_inferences: i64,
+    avg_processing_ms: f64,
+    by_event_type: std::collections::HashMap<String, i64>,
+    by_camera: Vec<CameraInferenceStats>,
+    errors_24h: i64,
+    success_rate: f64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct CameraInferenceStats {
+    camera_id: String,
+    camera_name: Option<String>,
+    total_count: i64,
+    avg_processing_ms: f64,
+    last_inference: Option<String>,
+}
+
+/// T4-2: GET /api/stats/inference - Inference statistics
+async fn get_inference_stats(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let pool = state.detection_log.pool();
+
+    // Total inferences
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM detection_logs")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+    // Today's inferences
+    let today: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM detection_logs WHERE DATE(captured_at) = CURDATE()"
+    )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+    // Average processing time
+    let avg_ms: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(AVG(processing_ms), 0) FROM detection_logs WHERE processing_ms IS NOT NULL"
+    )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0.0);
+
+    // By event type
+    let rows = sqlx::query(
+        "SELECT primary_event, COUNT(*) as cnt FROM detection_logs GROUP BY primary_event"
+    )
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+    let mut by_event_type = std::collections::HashMap::new();
+    for row in rows {
+        let event: String = row.get("primary_event");
+        let count: i64 = row.get("cnt");
+        by_event_type.insert(event, count);
+    }
+
+    // By camera
+    let camera_rows = sqlx::query(
+        r#"SELECT
+            dl.camera_id,
+            c.name as camera_name,
+            COUNT(*) as total_count,
+            COALESCE(AVG(dl.processing_ms), 0) as avg_ms,
+            MAX(dl.captured_at) as last_inference
+        FROM detection_logs dl
+        LEFT JOIN cameras c ON dl.camera_id = c.camera_id
+        GROUP BY dl.camera_id, c.name
+        ORDER BY total_count DESC
+        LIMIT 20"#
+    )
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+    let by_camera: Vec<CameraInferenceStats> = camera_rows.into_iter().map(|row| {
+        CameraInferenceStats {
+            camera_id: row.get("camera_id"),
+            camera_name: row.try_get("camera_name").ok(),
+            total_count: row.get("total_count"),
+            avg_processing_ms: row.get("avg_ms"),
+            last_inference: row.try_get::<chrono::NaiveDateTime, _>("last_inference")
+                .ok()
+                .map(|dt| dt.to_string()),
+        }
+    }).collect();
+
+    // Errors in last 24h (approximated by failed inferences - we don't track errors in DB)
+    let errors_24h: i64 = 0; // Would need separate error tracking
+
+    let success_rate = if total > 0 { 100.0 } else { 0.0 }; // All stored logs are successful
+
+    Json(json!({
+        "ok": true,
+        "stats": InferenceStats {
+            total_inferences: total,
+            today_inferences: today,
+            avg_processing_ms: avg_ms,
+            by_event_type,
+            by_camera,
+            errors_24h,
+            success_rate,
+        }
+    })).into_response()
+}
+
+// ============================================================================
+// Misdetection Feedback API (T4-6〜T4-10)
+// ============================================================================
+
+/// T4-6: MisdetectionFeedback struct
+#[derive(Debug, serde::Deserialize)]
+struct CreateMisdetectionFeedbackRequest {
+    log_id: i64,
+    camera_id: String,
+    reported_label: String,
+    correct_label: String,
+    comment: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct MisdetectionFeedback {
+    feedback_id: i64,
+    log_id: i64,
+    camera_id: String,
+    reported_label: String,
+    correct_label: String,
+    confidence: Option<f64>,
+    comment: Option<String>,
+    created_at: String,
+}
+
+/// T4-8: POST /api/feedback/misdetection - Report misdetection
+async fn create_misdetection_feedback(
+    State(state): State<AppState>,
+    Json(req): Json<CreateMisdetectionFeedbackRequest>,
+) -> impl IntoResponse {
+    let pool = state.detection_log.pool();
+
+    // Get confidence from detection log
+    let confidence: Option<f64> = sqlx::query_scalar(
+        "SELECT CAST(confidence AS DOUBLE) FROM detection_logs WHERE log_id = ?"
+    )
+        .bind(req.log_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+
+    // Insert feedback
+    let result = sqlx::query(
+        r#"INSERT INTO misdetection_feedbacks
+           (log_id, camera_id, reported_label, correct_label, confidence, comment)
+           VALUES (?, ?, ?, ?, ?, ?)"#
+    )
+        .bind(req.log_id)
+        .bind(&req.camera_id)
+        .bind(&req.reported_label)
+        .bind(&req.correct_label)
+        .bind(confidence)
+        .bind(&req.comment)
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(r) => {
+            let feedback_id = r.last_insert_id() as i64;
+            tracing::info!(
+                feedback_id = feedback_id,
+                log_id = req.log_id,
+                camera_id = %req.camera_id,
+                reported = %req.reported_label,
+                correct = %req.correct_label,
+                "Misdetection feedback recorded"
+            );
+            Json(json!({
+                "ok": true,
+                "feedback_id": feedback_id
+            })).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create misdetection feedback");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// GET /api/feedback/misdetection/:camera_id - Get feedback for camera
+async fn get_misdetection_feedback(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = state.detection_log.pool();
+
+    let rows = sqlx::query(
+        r#"SELECT
+            feedback_id, log_id, camera_id, reported_label, correct_label,
+            confidence, comment, created_at
+        FROM misdetection_feedbacks
+        WHERE camera_id = ?
+        ORDER BY created_at DESC
+        LIMIT 100"#
+    )
+        .bind(&camera_id)
+        .fetch_all(pool)
+        .await;
+
+    match rows {
+        Ok(rows) => {
+            let feedbacks: Vec<MisdetectionFeedback> = rows.into_iter().map(|row| {
+                MisdetectionFeedback {
+                    feedback_id: row.get("feedback_id"),
+                    log_id: row.get("log_id"),
+                    camera_id: row.get("camera_id"),
+                    reported_label: row.get("reported_label"),
+                    correct_label: row.get("correct_label"),
+                    confidence: row.try_get("confidence").ok(),
+                    comment: row.try_get("comment").ok(),
+                    created_at: row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
+                }
+            }).collect();
+
+            Json(json!({
+                "ok": true,
+                "feedbacks": feedbacks
+            })).into_response()
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// T4-10: GET /api/feedback/stats/:camera_id - Misdetection statistics
+async fn get_feedback_stats(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = state.detection_log.pool();
+
+    // Count by label
+    let rows = sqlx::query(
+        r#"SELECT
+            reported_label,
+            correct_label,
+            COUNT(*) as cnt,
+            AVG(confidence) as avg_confidence
+        FROM misdetection_feedbacks
+        WHERE camera_id = ?
+        GROUP BY reported_label, correct_label
+        ORDER BY cnt DESC"#
+    )
+        .bind(&camera_id)
+        .fetch_all(pool)
+        .await;
+
+    match rows {
+        Ok(rows) => {
+            let stats: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+                json!({
+                    "reported_label": row.get::<String, _>("reported_label"),
+                    "correct_label": row.get::<String, _>("correct_label"),
+                    "count": row.get::<i64, _>("cnt"),
+                    "avg_confidence": row.try_get::<f64, _>("avg_confidence").ok()
+                })
+            }).collect();
+
+            // Total count
+            let total: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM misdetection_feedbacks WHERE camera_id = ?"
+            )
+                .bind(&camera_id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0);
+
+            Json(json!({
+                "ok": true,
+                "camera_id": camera_id,
+                "total_feedbacks": total,
+                "by_label": stats
+            })).into_response()
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+// ============================================================================
+// Threshold Management API (T4-11〜T4-15)
+// ============================================================================
+
+/// GET /api/cameras/:id/threshold - Get camera threshold settings
+async fn get_camera_threshold(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    let pool = state.detection_log.pool();
+
+    let row = sqlx::query(
+        r#"SELECT
+            camera_id, conf_threshold, min_threshold, max_threshold,
+            auto_adjust_enabled, created_at, updated_at
+        FROM camera_thresholds
+        WHERE camera_id = ?"#
+    )
+        .bind(&camera_id)
+        .fetch_optional(pool)
+        .await;
+
+    match row {
+        Ok(Some(row)) => {
+            Json(json!({
+                "ok": true,
+                "threshold": {
+                    "camera_id": row.get::<String, _>("camera_id"),
+                    "conf_threshold": row.get::<f64, _>("conf_threshold"),
+                    "min_threshold": row.get::<f64, _>("min_threshold"),
+                    "max_threshold": row.get::<f64, _>("max_threshold"),
+                    "auto_adjust_enabled": row.get::<bool, _>("auto_adjust_enabled"),
+                    "updated_at": row.get::<chrono::NaiveDateTime, _>("updated_at").to_string()
+                }
+            })).into_response()
+        }
+        Ok(None) => {
+            // Return default threshold
+            Json(json!({
+                "ok": true,
+                "threshold": {
+                    "camera_id": camera_id,
+                    "conf_threshold": 0.5,
+                    "min_threshold": 0.2,
+                    "max_threshold": 0.8,
+                    "auto_adjust_enabled": false,
+                    "updated_at": null
+                }
+            })).into_response()
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// T4-13: PUT /api/cameras/:id/threshold - Update camera threshold
+#[derive(Debug, serde::Deserialize)]
+struct UpdateThresholdRequest {
+    conf_threshold: f64,
+    auto_adjust_enabled: Option<bool>,
+}
+
+async fn update_camera_threshold(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    Json(req): Json<UpdateThresholdRequest>,
+) -> impl IntoResponse {
+    let pool = state.detection_log.pool();
+
+    // Validate range (0.2 - 0.8)
+    if req.conf_threshold < 0.2 || req.conf_threshold > 0.8 {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "ok": false,
+            "error": "conf_threshold must be between 0.2 and 0.8"
+        }))).into_response();
+    }
+
+    // Get current threshold for history
+    let current: Option<f64> = sqlx::query_scalar(
+        "SELECT conf_threshold FROM camera_thresholds WHERE camera_id = ?"
+    )
+        .bind(&camera_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+
+    let auto_adjust = req.auto_adjust_enabled.unwrap_or(false);
+
+    // Upsert threshold
+    let result = sqlx::query(
+        r#"INSERT INTO camera_thresholds (camera_id, conf_threshold, auto_adjust_enabled)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             conf_threshold = VALUES(conf_threshold),
+             auto_adjust_enabled = VALUES(auto_adjust_enabled),
+             updated_at = NOW()"#
+    )
+        .bind(&camera_id)
+        .bind(req.conf_threshold)
+        .bind(auto_adjust)
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(_) => {
+            // Record history
+            let _ = sqlx::query(
+                r#"INSERT INTO threshold_change_history
+                   (camera_id, old_threshold, new_threshold, change_reason)
+                   VALUES (?, ?, ?, ?)"#
+            )
+                .bind(&camera_id)
+                .bind(current)
+                .bind(req.conf_threshold)
+                .bind("manual")
+                .execute(pool)
+                .await;
+
+            tracing::info!(
+                camera_id = %camera_id,
+                old = ?current,
+                new = req.conf_threshold,
+                "Camera threshold updated"
+            );
+
+            Json(json!({
+                "ok": true,
+                "message": "Threshold updated successfully"
+            })).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to update threshold");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
 }
 
 // ============================================================================

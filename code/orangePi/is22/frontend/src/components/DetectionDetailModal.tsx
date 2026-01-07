@@ -7,7 +7,7 @@
  * - Detection metadata (timestamps, confidence, etc.)
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import type { DetectionLog } from "@/types/api"
 import {
   Dialog,
@@ -17,6 +17,9 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -29,6 +32,8 @@ import {
   Info,
   Code,
   Image as ImageIcon,
+  Flag,
+  Check,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { API_BASE_URL } from "@/lib/config"
@@ -101,6 +106,40 @@ export function DetectionDetailModal({
   // Check if this is a camera status event (no image)
   const isCameraStatusEvent = log?.primary_event === "camera_lost" || log?.primary_event === "camera_recovered"
 
+  // T4-9: Misdetection feedback state
+  const [correctLabel, setCorrectLabel] = useState("")
+  const [feedbackComment, setFeedbackComment] = useState("")
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false)
+
+  // T4-9: Submit misdetection feedback
+  const handleSubmitFeedback = async () => {
+    if (!log || !correctLabel.trim()) return
+    setFeedbackSubmitting(true)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/feedback/misdetection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          log_id: log.log_id,
+          camera_id: log.camera_id,
+          reported_label: log.primary_event,
+          correct_label: correctLabel.trim(),
+          comment: feedbackComment.trim() || null,
+        }),
+      })
+      if (resp.ok) {
+        setFeedbackSuccess(true)
+        setCorrectLabel("")
+        setFeedbackComment("")
+      }
+    } catch (error) {
+      console.error("Failed to submit feedback:", error)
+    } finally {
+      setFeedbackSubmitting(false)
+    }
+  }
+
   // Build image URL - the image_path_local is stored as local filesystem path
   // We need to construct API URL to serve it
   const imageUrl = useMemo(() => {
@@ -140,7 +179,7 @@ export function DetectionDetailModal({
         </DialogHeader>
 
         <Tabs defaultValue={isCameraStatusEvent ? "details" : "image"} className="flex-1 flex flex-col min-h-0">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="image" disabled={isCameraStatusEvent}>
               <ImageIcon className="h-3 w-3 mr-1" />
               画像
@@ -152,6 +191,10 @@ export function DetectionDetailModal({
             <TabsTrigger value="raw">
               <Code className="h-3 w-3 mr-1" />
               Raw
+            </TabsTrigger>
+            <TabsTrigger value="feedback" disabled={isCameraStatusEvent}>
+              <Flag className="h-3 w-3 mr-1" />
+              報告
             </TabsTrigger>
           </TabsList>
 
@@ -200,7 +243,7 @@ export function DetectionDetailModal({
                         }}
                       >
                         <span className="absolute -top-5 left-0 bg-green-500 text-white text-[10px] px-1 rounded">
-                          {bbox.label} {(bbox.confidence * 100).toFixed(0)}%
+                          {bbox.label} {bbox.confidence != null ? (bbox.confidence * 100).toFixed(0) : '-'}%
                         </span>
                       </div>
                     ))}
@@ -235,7 +278,7 @@ export function DetectionDetailModal({
                     </div>
                     <div className="bg-muted p-2 rounded">
                       <span className="text-muted-foreground">信頼度:</span>
-                      <span className="ml-2 font-medium">{(log.confidence * 100).toFixed(1)}%</span>
+                      <span className="ml-2 font-medium">{log.confidence != null ? (log.confidence * 100).toFixed(1) : '-'}%</span>
                     </div>
                     <div className="bg-muted p-2 rounded">
                       <span className="text-muted-foreground">検出数:</span>
@@ -313,7 +356,7 @@ export function DetectionDetailModal({
                       </div>
                       <div className="bg-muted p-2 rounded">
                         <span className="text-muted-foreground">変化率:</span>
-                        <span className="ml-2 font-medium">{log.frame_diff.change_percent.toFixed(1)}%</span>
+                        <span className="ml-2 font-medium">{log.frame_diff.change_percent != null ? log.frame_diff.change_percent.toFixed(1) : '-'}%</span>
                       </div>
                       <div className="bg-muted p-2 rounded">
                         <span className="text-muted-foreground">動体領域:</span>
@@ -356,6 +399,64 @@ export function DetectionDetailModal({
                 {JSON.stringify(log.is21_log, null, 2)}
               </pre>
             </ScrollArea>
+          </TabsContent>
+
+          {/* T4-9: Feedback Tab */}
+          <TabsContent value="feedback" className="flex-1 min-h-0 mt-2">
+            <div className="space-y-4 p-2">
+              <div className="text-sm text-muted-foreground">
+                この検知結果が誤りの場合、正しいラベルを報告してください。
+                報告された情報は今後の精度向上に使用されます。
+              </div>
+
+              {feedbackSuccess ? (
+                <div className="flex items-center gap-2 p-4 bg-green-50 text-green-700 rounded">
+                  <Check className="h-5 w-5" />
+                  <span>報告を受け付けました。ご協力ありがとうございます。</span>
+                </div>
+              ) : (
+                <>
+                  <div className="bg-muted p-3 rounded text-sm">
+                    <div className="text-muted-foreground">AI判定結果:</div>
+                    <div className="font-medium text-lg">{log.primary_event}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      信頼度: {log.confidence != null ? (log.confidence * 100).toFixed(1) : '-'}%
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="correct-label">正しいラベル *</Label>
+                    <Input
+                      id="correct-label"
+                      placeholder="例: human, vehicle, animal, none"
+                      value={correctLabel}
+                      onChange={(e) => setCorrectLabel(e.target.value)}
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      選択肢: human, vehicle, animal, none, unknown
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="feedback-comment">コメント（任意）</Label>
+                    <Input
+                      id="feedback-comment"
+                      placeholder="補足説明があれば入力"
+                      value={feedbackComment}
+                      onChange={(e) => setFeedbackComment(e.target.value)}
+                    />
+                  </div>
+
+                  <Button
+                    onClick={handleSubmitFeedback}
+                    disabled={feedbackSubmitting || !correctLabel.trim()}
+                    className="w-full"
+                  >
+                    {feedbackSubmitting ? "送信中..." : "誤検知を報告"}
+                  </Button>
+                </>
+              )}
+            </div>
           </TabsContent>
         </Tabs>
       </DialogContent>
