@@ -189,26 +189,28 @@ impl Default for DetectionLogConfig {
 /// AIEventlog.md要件:
 /// - 「何もない」なら画像の保存もログも出さない
 /// - unknownは分析用に保存（後で90%削除）
+/// - severity > 0 は常に保存（イベントタイプに関わらず）
 ///
-/// Truth table:
-/// | severity | primary_event | should_save |
-/// |----------|---------------|-------------|
-/// | 0        | "none"        | false       |
-/// | 0        | "unknown"     | true        |
-/// | 0        | other event   | true        |
-/// | 1+       | any           | true        |
+/// Truth table (v5):
+/// | severity | primary_event | unknown_flag | should_save | 理由 |
+/// |----------|---------------|--------------|-------------|------|
+/// | 1+       | any           | any          | true        | severity優先 |
+/// | 0        | "none"        | false        | false       | 何もない |
+/// | 0        | "none"        | true         | false       | none優先 |
+/// | 0        | "unknown"     | true         | true        | 不明だが何かある |
+/// | 0        | other         | any          | true        | イベントあり |
 pub fn should_save_image(primary_event: &str, severity: i32, unknown_flag: bool) -> bool {
-    // 「何もない」(none)は保存しない
-    if primary_event == "none" {
-        return false;
-    }
-
-    // severity > 0 は常に保存
+    // BE-05: severity > 0 は常に保存（最優先）
     if severity > 0 {
         return true;
     }
 
-    // unknown判定は保存（後で90%削除）
+    // BE-02, BE-03: 「何もない」(none)は保存しない（unknown_flagがtrueでも）
+    if primary_event == "none" {
+        return false;
+    }
+
+    // BE-04: unknown判定は保存（後で手動90%削除）
     if unknown_flag || primary_event == "unknown" {
         return true;
     }
