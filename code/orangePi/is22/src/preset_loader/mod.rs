@@ -383,6 +383,13 @@ impl Preset {
         if request.camera_context.is_none() {
             request.camera_context = self.to_camera_context();
         }
+
+        // TODO(autoAttunement): プリセット適用時に統計データを参照して閾値を動的調整
+        // 参照: Layout＆AIlog_Settings/AIEventLog_Redesign_v4.md Section 5.6
+        // 実装時: カメラの誤検知統計に基づいてconf_overrideを自動調整
+        // if let Some(adjusted) = stats_collector.get_adjusted_threshold(&request.camera_id) {
+        //     request.hints_json.conf_override = Some(adjusted);
+        // }
     }
 }
 

@@ -347,6 +347,10 @@ impl DetectionLogService {
             "Detection log saved"
         );
 
+        // TODO(autoAttunement): 保存完了後にStatsCollectorへイベント通知
+        // 参照: Layout＆AIlog_Settings/AIEventLog_Redesign_v4.md Section 5.6
+        // 実装時: stats_collector.notify_log_saved(log_id, &response.camera_id, &response.primary_event);
+
         Ok(log_id)
     }
 

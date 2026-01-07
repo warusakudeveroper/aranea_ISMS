@@ -22,7 +22,7 @@ use crate::ai_client::{AIClient, AnalyzeRequest, AnalyzeResponse, CameraContext}
 use crate::camera_status_tracker::{CameraStatusEvent, CameraStatusTracker};
 use crate::config_store::{Camera, ConfigStore};
 use crate::models::ProcessingTimings;
-use crate::detection_log_service::DetectionLogService;
+use crate::detection_log_service::{DetectionLogService, should_save_image};
 use crate::event_log_service::{DetectionEvent, EventLogService};
 use crate::prev_frame_cache::{FrameMeta, PrevFrameCache};
 use crate::preset_loader::PresetLoader;
@@ -36,7 +36,7 @@ use crate::realtime_hub::{
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use sqlx::MySqlPool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -63,6 +63,8 @@ pub struct PollingOrchestrator {
     camera_status_tracker: Arc<CameraStatusTracker>,
     stream_gateway: Arc<StreamGateway>,
     running: Arc<RwLock<bool>>,
+    /// Active subnet polling loops (to prevent duplicate spawns)
+    active_subnets: Arc<RwLock<HashSet<String>>>,
     /// Default TID (tenant ID) for logging
     default_tid: String,
     /// Default FID (facility ID) for logging
@@ -101,6 +103,7 @@ impl PollingOrchestrator {
             camera_status_tracker,
             stream_gateway,
             running: Arc::new(RwLock::new(false)),
+            active_subnets: Arc::new(RwLock::new(HashSet::new())),
             default_tid,
             default_fid,
         }
@@ -240,6 +243,12 @@ impl PollingOrchestrator {
 
         // Spawn a polling loop for each subnet
         for (subnet, cameras) in subnets {
+            // Register subnet as active
+            {
+                let mut active = self.active_subnets.write().await;
+                active.insert(subnet.clone());
+            }
+
             let pool = self.pool.clone();
             let config_store = self.config_store.clone();
             let snapshot_service = self.snapshot_service.clone();
@@ -253,10 +262,12 @@ impl PollingOrchestrator {
             let camera_status_tracker = self.camera_status_tracker.clone();
             let stream_gateway = self.stream_gateway.clone();
             let running = self.running.clone();
+            let active_subnets = self.active_subnets.clone();
             let default_tid = self.default_tid.clone();
             let default_fid = self.default_fid.clone();
 
             let initial_camera_count = cameras.len();
+            let subnet_clone = subnet.clone();
 
             tracing::info!(
                 subnet = %subnet,
@@ -267,7 +278,7 @@ impl PollingOrchestrator {
             tokio::spawn(async move {
                 Self::run_subnet_loop(
                     pool,
-                    subnet,
+                    subnet_clone.clone(),
                     config_store,
                     snapshot_service,
                     ai_client,
@@ -284,12 +295,108 @@ impl PollingOrchestrator {
                     default_fid,
                 )
                 .await;
+
+                // Remove from active subnets when loop exits
+                let mut active = active_subnets.write().await;
+                active.remove(&subnet_clone);
+                tracing::info!(subnet = %subnet_clone, "Subnet polling loop removed from active set");
             });
         }
     }
 
+    /// Spawn a polling loop for a new subnet if not already active
+    /// Call this when a camera is added on a potentially new subnet
+    pub async fn spawn_subnet_loop_if_needed(&self, ip_address: &str) {
+        let subnet = Self::extract_subnet(ip_address);
+
+        // Check if already active
+        {
+            let active = self.active_subnets.read().await;
+            if active.contains(&subnet) {
+                tracing::debug!(subnet = %subnet, "Subnet already has active polling loop");
+                return;
+            }
+        }
+
+        // Check if orchestrator is running
+        {
+            let running = self.running.read().await;
+            if !*running {
+                tracing::warn!(subnet = %subnet, "Orchestrator not running, cannot spawn subnet loop");
+                return;
+            }
+        }
+
+        // Register and spawn
+        {
+            let mut active = self.active_subnets.write().await;
+            // Double-check after acquiring write lock
+            if active.contains(&subnet) {
+                return;
+            }
+            active.insert(subnet.clone());
+        }
+
+        let pool = self.pool.clone();
+        let config_store = self.config_store.clone();
+        let snapshot_service = self.snapshot_service.clone();
+        let ai_client = self.ai_client.clone();
+        let event_log = self.event_log.clone();
+        let detection_log = self.detection_log.clone();
+        let prev_frame_cache = self.prev_frame_cache.clone();
+        let preset_loader = self.preset_loader.clone();
+        let suggest_engine = self.suggest_engine.clone();
+        let realtime_hub = self.realtime_hub.clone();
+        let camera_status_tracker = self.camera_status_tracker.clone();
+        let stream_gateway = self.stream_gateway.clone();
+        let running = self.running.clone();
+        let active_subnets = self.active_subnets.clone();
+        let default_tid = self.default_tid.clone();
+        let default_fid = self.default_fid.clone();
+
+        let subnet_clone = subnet.clone();
+
+        tracing::info!(
+            subnet = %subnet,
+            "Spawning NEW subnet polling loop for dynamically added camera"
+        );
+
+        tokio::spawn(async move {
+            Self::run_subnet_loop(
+                pool,
+                subnet_clone.clone(),
+                config_store,
+                snapshot_service,
+                ai_client,
+                event_log,
+                detection_log,
+                prev_frame_cache,
+                preset_loader,
+                suggest_engine,
+                realtime_hub,
+                camera_status_tracker,
+                stream_gateway,
+                running,
+                default_tid,
+                default_fid,
+            )
+            .await;
+
+            // Remove from active subnets when loop exits
+            let mut active = active_subnets.write().await;
+            active.remove(&subnet_clone);
+            tracing::info!(subnet = %subnet_clone, "Subnet polling loop removed from active set");
+        });
+    }
+
+    /// Get list of active subnets
+    pub async fn get_active_subnets(&self) -> Vec<String> {
+        let active = self.active_subnets.read().await;
+        active.iter().cloned().collect()
+    }
+
     /// Extract subnet from IP address (first 3 octets)
-    fn extract_subnet(ip: &str) -> String {
+    pub fn extract_subnet(ip: &str) -> String {
         let parts: Vec<&str> = ip.split('.').collect();
         if parts.len() >= 3 {
             format!("{}.{}.{}", parts[0], parts[1], parts[2])
@@ -888,7 +995,7 @@ impl PollingOrchestrator {
             }))
             .await;
 
-        // === Phase 3: Database save ===
+        // === Phase 3: Database save (conditional) ===
         let save_start = Instant::now();
 
         // Get TID/FID from defaults
@@ -912,19 +1019,30 @@ impl PollingOrchestrator {
             snapshot_source: Some(snapshot_source.as_str().to_string()),
         };
 
-        let log_id = detection_log
-            .save_detection(
-                tid,
-                fid,
-                lacis_id,
-                &result,
-                &image_data,
-                camera_context.as_ref(),
-                Some(processing_ms),
-                Some(&timings),
-                polling_cycle_id,
-            )
-            .await?;
+        // AIEventlog.md要件: 「何もない」なら画像の保存もログも出さない
+        let log_id = if should_save_image(&result.primary_event, result.severity, result.unknown_flag) {
+            detection_log
+                .save_detection(
+                    tid,
+                    fid,
+                    lacis_id,
+                    &result,
+                    &image_data,
+                    camera_context.as_ref(),
+                    Some(processing_ms),
+                    Some(&timings),
+                    polling_cycle_id,
+                )
+                .await?
+        } else {
+            tracing::debug!(
+                camera_id = %camera.camera_id,
+                primary_event = %result.primary_event,
+                severity = result.severity,
+                "Skipping image save - no detection (none)"
+            );
+            0 // No log_id when not saved
+        };
 
         let save_ms = save_start.elapsed().as_millis() as i32;
         let total_ms = start_time.elapsed().as_millis() as i32;
@@ -996,6 +1114,10 @@ impl PollingOrchestrator {
                 "DETECTED: {}",
                 result.primary_event
             );
+
+            // TODO(autoAttunement): 検出結果をStatsCollectorに送信
+            // 参照: Layout＆AIlog_Settings/AIEventLog_Redesign_v4.md Section 5.6
+            // 実装時: stats_collector.record_detection(&camera.camera_id, &result);
         } else {
             // No detection - but still log with full detail for debugging "why none?"
             tracing::info!(
