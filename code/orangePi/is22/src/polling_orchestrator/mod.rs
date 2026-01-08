@@ -48,6 +48,52 @@ const SNAPSHOT_TIMEOUT_MS: u64 = 30000;
 /// Threshold for "slow camera" warning (10 seconds)
 const SLOW_CAMERA_THRESHOLD_MS: u64 = 10000;
 
+/// Filter excluded objects from IS21 response
+/// Issue #104: unknown乱発防止 - IS22側でexcluded_objectsをポストフィルタリング
+fn filter_excluded_objects(response: &mut AnalyzeResponse, excluded_objects: &[String]) {
+    if excluded_objects.is_empty() {
+        return;
+    }
+
+    // Convert to lowercase for case-insensitive comparison
+    let excluded_lower: Vec<String> = excluded_objects
+        .iter()
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    // Count original bboxes for logging
+    let original_count = response.bboxes.len();
+
+    // Filter out excluded labels from bboxes
+    response.bboxes.retain(|bbox| {
+        !excluded_lower.contains(&bbox.label.to_lowercase())
+    });
+
+    let filtered_count = original_count - response.bboxes.len();
+
+    // If all bboxes were filtered out and it was unknown, change to none
+    if response.bboxes.is_empty() && response.primary_event == "unknown" {
+        tracing::debug!(
+            camera_id = %response.camera_id,
+            filtered_count = filtered_count,
+            original_count = original_count,
+            "All bboxes filtered by excluded_objects, changing unknown -> none"
+        );
+        response.primary_event = "none".to_string();
+        response.unknown_flag = false;
+        response.detected = false;
+        response.confidence = 0.0;
+        response.count_hint = 0;
+    } else if filtered_count > 0 {
+        tracing::debug!(
+            camera_id = %response.camera_id,
+            filtered_count = filtered_count,
+            remaining_count = response.bboxes.len(),
+            "Filtered excluded objects from IS21 response"
+        );
+    }
+}
+
 /// PollingOrchestrator instance
 pub struct PollingOrchestrator {
     pool: MySqlPool,
@@ -959,10 +1005,17 @@ impl PollingOrchestrator {
 
         // === Phase 2: IS21 inference ===
         let is21_start = Instant::now();
-        let result = ai_client
+        let mut result = ai_client
             .analyze(image_data.clone(), prev_image_data, request)
             .await?;
         let is21_roundtrip_ms = is21_start.elapsed().as_millis() as i32;
+
+        // Issue #104: Filter excluded objects from IS21 response
+        // プリセットのexcluded_objectsに基づいてbboxesをフィルタリング
+        let preset = preset_loader.get_or_default(preset_id);
+        if !preset.excluded_objects.is_empty() {
+            filter_excluded_objects(&mut result, &preset.excluded_objects);
+        }
 
         // Extract IS21 internal timings
         let is21_inference_ms = result.performance.as_ref().map(|p| p.inference_ms as i32).unwrap_or(0);
