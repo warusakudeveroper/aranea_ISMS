@@ -53,6 +53,8 @@ import { API_BASE_URL } from "@/lib/config"
 import { PerformanceDashboard } from "@/components/PerformanceDashboard"
 import { CameraBrandsSettings } from "@/components/CameraBrandsSettings"
 import { SdmSettingsTab } from "@/components/SdmSettingsTab"
+import { InferenceStatsTab } from "@/components/InferenceStatsTab"
+import { PresetSelector } from "@/components/PresetSelector"
 import type { Camera as CameraType } from "@/types/api"
 
 interface SettingsModalProps {
@@ -576,10 +578,14 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-9">
+          <TabsList className="grid w-full grid-cols-10">
             <TabsTrigger value="display" className="flex items-center gap-1 text-xs">
               <Video className="h-4 w-4" />
               表示
+            </TabsTrigger>
+            <TabsTrigger value="preset" className="flex items-center gap-1 text-xs">
+              <Settings2 className="h-4 w-4" />
+              検出
             </TabsTrigger>
             <TabsTrigger value="sdm" className="flex items-center gap-1 text-xs">
               <Bell className="h-4 w-4" />
@@ -743,6 +749,38 @@ export function SettingsModal({
                     ) : null}
                     タイムアウト設定を保存
                   </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* Preset Graphical UI Tab (Issue #107) */}
+          <TabsContent value="preset" className="flex-1 overflow-auto mt-4">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Settings2 className="h-4 w-4" />
+                    プリセット設定・過剰検出分析
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    検出プリセットの選択と、過剰検出の傾向分析を行います。
+                    プリセット変更時はバランスがアニメーションで表示されます。
+                  </p>
+                  <PresetSelector
+                    cameraId="global"
+                    currentPresetId="balanced"
+                    onPresetChange={(presetId) => {
+                      console.log('Preset changed to:', presetId)
+                      // TODO: Apply preset change to cameras
+                    }}
+                    onOpenThresholdSettings={() => {
+                      setActiveTab('storage')
+                    }}
+                    apiBaseUrl={API_BASE_URL}
+                  />
                 </CardContent>
               </Card>
             </div>
@@ -1473,10 +1511,19 @@ export function SettingsModal({
             </Card>
           </TabsContent>
 
-          {/* Dashboard Tab - Performance Charts and Rankings */}
+          {/* Dashboard Tab - Inference Statistics and Performance Charts */}
           <TabsContent value="dashboard" className="flex-1 overflow-hidden mt-4">
-            <div className="h-full overflow-auto">
-              <PerformanceDashboard />
+            <div className="h-full overflow-auto space-y-6">
+              {/* Issue #106: 推論統計・分析タブ */}
+              <InferenceStatsTab />
+              {/* Performance Dashboard (既存) */}
+              <div className="border-t pt-6">
+                <h3 className="font-medium mb-4 flex items-center gap-2">
+                  <Gauge className="h-4 w-4" />
+                  パフォーマンスランキング
+                </h3>
+                <PerformanceDashboard />
+              </div>
             </div>
           </TabsContent>
 

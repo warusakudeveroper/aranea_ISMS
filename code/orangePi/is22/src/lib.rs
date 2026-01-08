@@ -41,6 +41,9 @@ pub mod preset_loader;
 pub mod polling_orchestrator;
 pub mod rtsp_manager;
 pub mod models;
+pub mod inference_stats_service;
+pub mod auto_attunement;
+pub mod overdetection_analyzer;
 pub mod error;
 pub mod state;
 

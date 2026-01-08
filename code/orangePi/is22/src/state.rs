@@ -4,11 +4,14 @@
 
 use crate::admission_controller::AdmissionController;
 use crate::ai_client::AIClient;
+use crate::auto_attunement::AutoAttunementService;
 use crate::camera_brand::CameraBrandService;
 use crate::config_store::ConfigStore;
 use crate::detection_log_service::DetectionLogService;
 use crate::event_log_service::EventLogService;
+use crate::inference_stats_service::InferenceStatsService;
 use crate::ipcam_scan::IpcamScan;
+use crate::overdetection_analyzer::OverdetectionAnalyzer;
 use crate::polling_orchestrator::PollingOrchestrator;
 use crate::prev_frame_cache::PrevFrameCache;
 use crate::preset_loader::PresetLoader;
@@ -102,6 +105,12 @@ pub struct AppState {
     pub system_health: Arc<RwLock<SystemHealth>>,
     /// PollingOrchestrator (camera polling)
     pub polling: Arc<PollingOrchestrator>,
+    /// InferenceStatsService (Issue #106: 推論統計・分析)
+    pub inference_stats: Arc<InferenceStatsService>,
+    /// AutoAttunementService (Issue #106: 自動閾値調整)
+    pub auto_attunement: Arc<AutoAttunementService>,
+    /// OverdetectionAnalyzer (Issue #107: 過剰検出分析)
+    pub overdetection_analyzer: Arc<OverdetectionAnalyzer>,
 }
 
 /// System health metrics

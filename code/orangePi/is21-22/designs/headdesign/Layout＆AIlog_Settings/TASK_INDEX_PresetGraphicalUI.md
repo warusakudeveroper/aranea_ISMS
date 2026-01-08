@@ -21,46 +21,46 @@
 
 | ID | タスク | ファイル | 状態 |
 |----|--------|----------|------|
-| T1-1 | OverdetectionAnalyzer構造体定義 | overdetection_analyzer/mod.rs | [ ] |
-| T1-2 | タグ固定化検出ロジック | overdetection_analyzer/tag_analyzer.rs | [ ] |
-| T1-3 | 固定物反応検出ロジック | overdetection_analyzer/static_detector.rs | [ ] |
-| T1-4 | lib.rs モジュール登録 | lib.rs | [ ] |
-| T1-5 | state.rs サービス追加 | state.rs | [ ] |
-| T1-6 | main.rs 初期化追加 | main.rs | [ ] |
+| T1-1 | OverdetectionAnalyzer構造体定義 | overdetection_analyzer/mod.rs | [x] |
+| T1-2 | タグ固定化検出ロジック | overdetection_analyzer/tag_analyzer.rs | [x] |
+| T1-3 | 固定物反応検出ロジック | overdetection_analyzer/static_detector.rs | [x] |
+| T1-4 | lib.rs モジュール登録 | lib.rs | [x] |
+| T1-5 | state.rs サービス追加 | state.rs | [x] |
+| T1-6 | main.rs 初期化追加 | main.rs | [x] |
 
 ### Phase 2: Backend - API エンドポイント
 
 | ID | タスク | ファイル | 状態 |
 |----|--------|----------|------|
-| T2-1 | GET /api/presets/balance エンドポイント | routes.rs | [ ] |
-| T2-2 | GET /api/stats/overdetection エンドポイント | routes.rs | [ ] |
-| T2-3 | GET /api/stats/tags/:camera_id エンドポイント | routes.rs | [ ] |
-| T2-4 | GET /api/stats/tags/summary エンドポイント | routes.rs | [ ] |
-| T2-5 | PUT /api/cameras/:id/tag-filter エンドポイント | routes.rs | [ ] |
+| T2-1 | GET /api/presets/balance エンドポイント | routes.rs | [x] |
+| T2-2 | GET /api/stats/overdetection エンドポイント | routes.rs | [x] |
+| T2-3 | GET /api/stats/tags/:camera_id エンドポイント | routes.rs | [x] |
+| T2-4 | GET /api/stats/tags/summary エンドポイント | routes.rs | [x] |
+| T2-5 | PUT /api/cameras/:id/tag-filter エンドポイント | routes.rs | [ ] (将来実装) |
 
 ### Phase 3: Frontend - プリセットセレクターUI
 
 | ID | タスク | ファイル | 状態 |
 |----|--------|----------|------|
-| T3-1 | PresetSelector基本構造 | components/PresetSelector/index.tsx | [ ] |
-| T3-2 | BalanceChart棒グラフ | components/PresetSelector/BalanceChart.tsx | [ ] |
-| T3-3 | usePresetAnimationフック | hooks/usePresetAnimation.ts | [ ] |
-| T3-4 | プリセット切替アニメーション | components/PresetSelector/index.tsx | [ ] |
+| T3-1 | PresetSelector基本構造 | components/PresetSelector/index.tsx | [x] |
+| T3-2 | BalanceChart棒グラフ | components/PresetSelector/BalanceChart.tsx | [x] |
+| T3-3 | usePresetAnimationフック | hooks/usePresetAnimation.ts | [x] |
+| T3-4 | プリセット切替アニメーション | components/PresetSelector/index.tsx | [x] |
 
 ### Phase 4: Frontend - 過剰検出表示
 
 | ID | タスク | ファイル | 状態 |
 |----|--------|----------|------|
-| T4-1 | OverdetectionAlert警告表示 | components/PresetSelector/OverdetectionAlert.tsx | [ ] |
-| T4-2 | TagDistribution分布グラフ | components/PresetSelector/TagDistribution.tsx | [ ] |
-| T4-3 | 調整導線ボタン | components/PresetSelector/OverdetectionAlert.tsx | [ ] |
+| T4-1 | OverdetectionAlert警告表示 | components/PresetSelector/OverdetectionAlert.tsx | [x] |
+| T4-2 | TagDistribution分布グラフ | components/PresetSelector/TagDistribution.tsx | [x] |
+| T4-3 | 調整導線ボタン | components/PresetSelector/OverdetectionAlert.tsx | [x] |
 
 ### Phase 5: Frontend - カスタムタグフィルター
 
 | ID | タスク | ファイル | 状態 |
 |----|--------|----------|------|
-| T5-1 | TagFilterModal | components/TagFilterModal.tsx | [ ] |
-| T5-2 | SettingsModal統合 | components/SettingsModal.tsx | [ ] |
+| T5-1 | TagFilterModal | components/TagFilterModal.tsx | [ ] (将来実装) |
+| T5-2 | SettingsModal統合 | components/SettingsModal.tsx | [x] |
 
 ### Phase 6: テスト
 
@@ -93,7 +93,7 @@
 
 ### Chrome UI
 
-- [ ] Settings Modal → プリセット選択タブ
+- [ ] Settings Modal → 検出タブ
 - [ ] 棒グラフがアニメーションで変化
 - [ ] 過剰検出警告がハイライト
 - [ ] タグ除外設定画面遷移
@@ -144,13 +144,13 @@ T1-1 ─┬─► T1-2 ─┬─► T1-4 ─► T1-5 ─► T1-6
 
 | Phase | 完了 | 合計 | 進捗率 |
 |-------|------|------|--------|
-| Phase 1 | 0 | 6 | 0% |
-| Phase 2 | 0 | 5 | 0% |
-| Phase 3 | 0 | 4 | 0% |
-| Phase 4 | 0 | 3 | 0% |
-| Phase 5 | 0 | 2 | 0% |
+| Phase 1 | 6 | 6 | 100% |
+| Phase 2 | 4 | 5 | 80% |
+| Phase 3 | 4 | 4 | 100% |
+| Phase 4 | 3 | 3 | 100% |
+| Phase 5 | 1 | 2 | 50% |
 | Phase 6 | 0 | 3 | 0% |
-| **合計** | **0** | **23** | **0%** |
+| **合計** | **18** | **23** | **78%** |
 
 ---
 
@@ -170,7 +170,6 @@ T1-1 ─┬─► T1-2 ─┬─► T1-4 ─► T1-5 ─► T1-6
 - `frontend/src/components/PresetSelector/BalanceChart.tsx` - BalanceChart (NEW)
 - `frontend/src/components/PresetSelector/OverdetectionAlert.tsx` - OverdetectionAlert (NEW)
 - `frontend/src/components/PresetSelector/TagDistribution.tsx` - TagDistribution (NEW)
-- `frontend/src/components/TagFilterModal.tsx` - TagFilterModal (NEW)
 - `frontend/src/hooks/usePresetAnimation.ts` - usePresetAnimation (NEW)
 - `frontend/src/components/SettingsModal.tsx` - PresetSelector統合
 

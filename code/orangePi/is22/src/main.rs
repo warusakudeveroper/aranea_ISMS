@@ -5,12 +5,15 @@
 use is22_camserver::{
     admission_controller::AdmissionController,
     ai_client::AIClient,
+    auto_attunement::AutoAttunementService,
     camera_brand::CameraBrandService,
     camera_status_tracker::CameraStatusTracker,
     config_store::ConfigStore,
     detection_log_service::DetectionLogService,
     event_log_service::EventLogService,
+    inference_stats_service::InferenceStatsService,
     ipcam_scan::IpcamScan,
+    overdetection_analyzer::OverdetectionAnalyzer,
     polling_orchestrator::PollingOrchestrator,
     prev_frame_cache::PrevFrameCache,
     preset_loader::PresetLoader,
@@ -124,7 +127,10 @@ async fn main() -> anyhow::Result<()> {
     let detection_log = Arc::new(DetectionLogService::with_pool(pool.clone()));
     let prev_frame_cache = Arc::new(PrevFrameCache::with_defaults());
     let preset_loader = Arc::new(PresetLoader::new());
-    tracing::info!("AI Event Log components initialized (DetectionLogService, PrevFrameCache, PresetLoader)");
+    let inference_stats = Arc::new(InferenceStatsService::new(pool.clone()));
+    let auto_attunement = Arc::new(AutoAttunementService::new(pool.clone(), inference_stats.clone()));
+    let overdetection_analyzer = Arc::new(OverdetectionAnalyzer::new(pool.clone()));
+    tracing::info!("AI Event Log components initialized (DetectionLogService, PrevFrameCache, PresetLoader, InferenceStatsService, AutoAttunementService, OverdetectionAnalyzer)");
 
     let suggest_policy = config_store.service().get_suggest_policy().await?;
     let suggest = Arc::new(SuggestEngine::new(suggest_policy));
@@ -210,6 +216,9 @@ async fn main() -> anyhow::Result<()> {
         snapshot_service,
         system_health,
         polling: polling.clone(),
+        inference_stats,
+        auto_attunement,
+        overdetection_analyzer,
     };
 
     // Create router

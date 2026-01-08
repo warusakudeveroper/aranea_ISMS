@@ -21,6 +21,7 @@ use crate::camera_brand::{
     UpdateBrandRequest, UpdateGenericPathRequest, UpdateOuiRequest, UpdateTemplateRequest,
 };
 use crate::config_store::{Camera, CreateCameraRequest, UpdateCameraRequest};
+use crate::inference_stats_service::StatsPeriod;
 use crate::models::ApiResponse;
 use crate::state::AppState;
 
@@ -56,6 +57,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/detection-logs/stats", get(detection_log_stats))
         .route("/api/detection-logs/camera/:camera_id", get(detection_logs_by_camera))
         .route("/api/detection-logs/severity/:threshold", get(detection_logs_by_severity))
+        // Event Images (serve saved detection images)
+        .route("/api/events/images/:camera_id/:filename", get(get_event_image))
         // System
         .route("/api/system/status", get(system_status))
         // Settings (Settings Modal APIs)
@@ -78,6 +81,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/recovery/images/:camera_id", post(recover_camera_images))
         // Inference Stats (AIEventlog.md T4-1〜T4-2)
         .route("/api/stats/inference", get(get_inference_stats))
+        // Extended Inference Stats (Issue #106: T1-1〜T1-5)
+        .route("/api/stats/cameras", get(get_camera_distribution))
+        .route("/api/stats/events", get(get_event_trends))
+        .route("/api/stats/presets", get(get_preset_effectiveness))
+        .route("/api/stats/storage", get(get_storage_stats))
+        .route("/api/stats/anomalies", get(get_anomaly_cameras))
         // Misdetection Feedback (AIEventlog.md T4-6〜T4-10)
         .route("/api/feedback/misdetection", post(create_misdetection_feedback))
         .route("/api/feedback/misdetection/:camera_id", get(get_misdetection_feedback))
@@ -85,6 +94,17 @@ pub fn create_router(state: AppState) -> Router {
         // Threshold Management (AIEventlog.md T4-11〜T4-15)
         .route("/api/cameras/:id/threshold", get(get_camera_threshold))
         .route("/api/cameras/:id/threshold", put(update_camera_threshold))
+        // Auto Attunement (Issue #106: T4-1〜T4-4)
+        .route("/api/attunement/status", get(get_attunement_status_all))
+        .route("/api/attunement/status/:camera_id", get(get_attunement_status))
+        .route("/api/attunement/calculate/:camera_id", post(calculate_attunement))
+        .route("/api/attunement/apply/:camera_id", post(apply_attunement))
+        .route("/api/attunement/auto-adjust", post(run_auto_adjustment))
+        // Preset Graphical UI (Issue #107: T2-1〜T2-4)
+        .route("/api/presets/balance", get(get_preset_balances))
+        .route("/api/stats/overdetection", get(get_overdetection))
+        .route("/api/stats/tags/:camera_id", get(get_tag_trends))
+        .route("/api/stats/tags/summary", get(get_tag_summary))
         // Camera Brands (OUI/RTSP SSoT)
         .route("/api/settings/camera-brands", get(list_camera_brands))
         .route("/api/settings/camera-brands", post(create_camera_brand))
@@ -2464,6 +2484,144 @@ async fn get_inference_stats(
 }
 
 // ============================================================================
+// Extended Inference Stats API (Issue #106: T1-1〜T1-5)
+// ============================================================================
+
+/// Query parameters for stats endpoints
+#[derive(Debug, Deserialize)]
+struct StatsQuery {
+    /// Period: 24h, 7d, 30d (default: 24h)
+    #[serde(default)]
+    period: Option<String>,
+    /// Optional camera_id filter
+    camera_id: Option<String>,
+}
+
+impl StatsQuery {
+    fn period(&self) -> StatsPeriod {
+        match self.period.as_deref() {
+            Some("7d") => StatsPeriod::Days7,
+            Some("30d") => StatsPeriod::Days30,
+            _ => StatsPeriod::Hours24,
+        }
+    }
+}
+
+/// T1-1: GET /api/stats/cameras - カメラ別分布統計
+async fn get_camera_distribution(
+    State(state): State<AppState>,
+    Query(query): Query<StatsQuery>,
+) -> impl IntoResponse {
+    let period = query.period();
+
+    match state.inference_stats
+        .get_camera_distribution(period, query.camera_id.as_deref())
+        .await
+    {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get camera distribution");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// T1-2: GET /api/stats/events - 時系列傾向
+async fn get_event_trends(
+    State(state): State<AppState>,
+    Query(query): Query<StatsQuery>,
+) -> impl IntoResponse {
+    let period = query.period();
+
+    match state.inference_stats.get_event_trends(period).await {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get event trends");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// T1-3: GET /api/stats/presets - プリセット効果分析
+async fn get_preset_effectiveness(
+    State(state): State<AppState>,
+    Query(query): Query<StatsQuery>,
+) -> impl IntoResponse {
+    let period = query.period();
+
+    match state.inference_stats.get_preset_effectiveness(period).await {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get preset effectiveness");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// T1-4: GET /api/stats/storage - ストレージ使用状況
+async fn get_storage_stats(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    // Get quota from detection_log config
+    let config = state.detection_log.config().await;
+    let quota_bytes = config.quota.max_total_bytes;
+
+    match state.inference_stats.get_storage_stats(quota_bytes).await {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get storage stats");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// T1-5: GET /api/stats/anomalies - 異常カメラ検出
+async fn get_anomaly_cameras(
+    State(state): State<AppState>,
+    Query(query): Query<StatsQuery>,
+) -> impl IntoResponse {
+    let period = query.period();
+
+    match state.inference_stats.get_anomaly_cameras(period).await {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get anomaly cameras");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+// ============================================================================
 // Misdetection Feedback API (T4-6〜T4-10)
 // ============================================================================
 
@@ -3854,6 +4012,73 @@ async fn get_cached_snapshot(
     }
 }
 
+/// Serve detection event images from /var/lib/is22/events/{camera_id}/{filename}
+async fn get_event_image(
+    Path((camera_id, filename)): Path<(String, String)>,
+) -> impl IntoResponse {
+    // Security: sanitize inputs to prevent path traversal
+    if camera_id.contains("..") || filename.contains("..") ||
+       camera_id.contains('/') || filename.contains('/') {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid path"}))
+        ).into_response();
+    }
+
+    // Only allow .jpg files
+    if !filename.ends_with(".jpg") && !filename.ends_with(".jpeg") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Only JPEG images supported"}))
+        ).into_response();
+    }
+
+    let image_path = std::path::PathBuf::from("/var/lib/is22/events")
+        .join(&camera_id)
+        .join(&filename);
+
+    match tokio::fs::read(&image_path).await {
+        Ok(bytes) => {
+            (
+                StatusCode::OK,
+                [
+                    ("content-type", "image/jpeg"),
+                    ("cache-control", "public, max-age=31536000"), // Images are immutable
+                ],
+                bytes,
+            ).into_response()
+        }
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::warn!(
+                camera_id = %camera_id,
+                filename = %filename,
+                "Event image not found"
+            );
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "Image not found",
+                    "camera_id": camera_id,
+                    "filename": filename
+                }))
+            ).into_response()
+        }
+        Err(e) => {
+            tracing::error!(
+                camera_id = %camera_id,
+                filename = %filename,
+                path = %image_path.display(),
+                error = %e,
+                "Failed to read event image"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()}))
+            ).into_response()
+        }
+    }
+}
+
 // ========================================
 // Subnet Management Handlers
 // ========================================
@@ -4791,4 +5016,226 @@ async fn delete_generic_rtsp_path(
 ) -> Result<impl IntoResponse, crate::Error> {
     state.camera_brand.delete_generic_path(id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ============================================================================
+// Auto Attunement API (Issue #106: T4-1〜T4-4)
+// ============================================================================
+
+/// GET /api/attunement/status - Get attunement status for all cameras
+async fn get_attunement_status_all(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.auto_attunement.get_all_attunement_status().await {
+        Ok(results) => Json(json!({
+            "ok": true,
+            "data": results
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get attunement status");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// GET /api/attunement/status/:camera_id - Get attunement status for specific camera
+async fn get_attunement_status(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    match state.auto_attunement.calculate_optimal_threshold(&camera_id).await {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(camera_id = %camera_id, error = %e, "Failed to get attunement status");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// POST /api/attunement/calculate/:camera_id - Calculate optimal threshold
+async fn calculate_attunement(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    match state.auto_attunement.calculate_optimal_threshold(&camera_id).await {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(camera_id = %camera_id, error = %e, "Failed to calculate attunement");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// Apply attunement request
+#[derive(Debug, serde::Deserialize)]
+struct ApplyAttunementRequest {
+    threshold: Option<f32>,
+}
+
+/// POST /api/attunement/apply/:camera_id - Apply calculated threshold
+async fn apply_attunement(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    Json(req): Json<ApplyAttunementRequest>,
+) -> impl IntoResponse {
+    // Calculate optimal threshold if not provided
+    let threshold = match req.threshold {
+        Some(t) => t,
+        None => {
+            match state.auto_attunement.calculate_optimal_threshold(&camera_id).await {
+                Ok(result) => result.recommended_threshold,
+                Err(e) => {
+                    tracing::error!(camera_id = %camera_id, error = %e, "Failed to calculate threshold");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                        "ok": false,
+                        "error": e.to_string()
+                    }))).into_response();
+                }
+            }
+        }
+    };
+
+    match state.auto_attunement.apply_threshold(&camera_id, threshold).await {
+        Ok(()) => Json(json!({
+            "ok": true,
+            "message": format!("Threshold updated to {:.3}", threshold),
+            "new_threshold": threshold
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(camera_id = %camera_id, error = %e, "Failed to apply threshold");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// POST /api/attunement/auto-adjust - Run auto adjustment for all enabled cameras
+async fn run_auto_adjustment(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.auto_attunement.run_auto_adjustment().await {
+        Ok(results) => {
+            let adjusted_count = results.iter().filter(|r| r.adjustment.abs() > 0.001).count();
+            Json(json!({
+                "ok": true,
+                "message": format!("Auto adjustment completed. {} cameras adjusted.", adjusted_count),
+                "results": results
+            })).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to run auto adjustment");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+// =============================================================================
+// Preset Graphical UI (Issue #107)
+// =============================================================================
+
+/// GET /api/presets/balance - Get all preset balance values
+async fn get_preset_balances(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let balances = state.overdetection_analyzer.get_all_preset_balances();
+    Json(json!({
+        "ok": true,
+        "presets": balances
+    }))
+}
+
+/// Query params for overdetection/tag endpoints
+#[derive(Debug, Deserialize)]
+struct OverdetectionQuery {
+    period: Option<String>,
+}
+
+/// GET /api/stats/overdetection - Get overdetection analysis results
+async fn get_overdetection(
+    State(state): State<AppState>,
+    Query(params): Query<OverdetectionQuery>,
+) -> impl IntoResponse {
+    let period = params.period.as_deref().unwrap_or("24h");
+
+    match state.overdetection_analyzer.analyze(period).await {
+        Ok(result) => Json(json!({
+            "ok": true,
+            "data": result
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to analyze overdetection");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// GET /api/stats/tags/:camera_id - Get tag trends for a camera
+async fn get_tag_trends(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    Query(params): Query<OverdetectionQuery>,
+) -> impl IntoResponse {
+    let period = params.period.as_deref().unwrap_or("24h");
+
+    match state.overdetection_analyzer.get_tag_trends(&camera_id, period).await {
+        Ok(trends) => Json(json!({
+            "ok": true,
+            "camera_id": camera_id,
+            "period": period,
+            "tags": trends
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(camera_id = %camera_id, error = %e, "Failed to get tag trends");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
+}
+
+/// GET /api/stats/tags/summary - Get overall tag summary
+async fn get_tag_summary(
+    State(state): State<AppState>,
+    Query(params): Query<OverdetectionQuery>,
+) -> impl IntoResponse {
+    let period = params.period.as_deref().unwrap_or("24h");
+
+    match state.overdetection_analyzer.get_tag_summary(period).await {
+        Ok(summary) => Json(json!({
+            "ok": true,
+            "period": period,
+            "tags": summary
+        })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get tag summary");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": e.to_string()
+            }))).into_response()
+        }
+    }
 }
