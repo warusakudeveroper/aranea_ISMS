@@ -35,6 +35,7 @@ import {
   Loader2
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { API_BASE_URL } from "@/lib/config"
 import { ChatInput } from "./ChatInput"
 import { DetectionDetailModal } from "./DetectionDetailModal"
 
@@ -152,6 +153,8 @@ interface EventLogPaneProps {
   cooldownSeconds?: number
   /** Execution state for patrol ticker (from App.tsx WebSocket) */
   executionState?: ExecutionState
+  /** Issue #108: モバイル表示モード */
+  isMobile?: boolean
 }
 
 // [REMOVED] getEventTypeColor - replaced by getEventStyle() in Phase 2
@@ -317,12 +320,84 @@ function DetectionLogItem({
   )
 }
 
-// Chat message type (stub for now)
+// Chat message type with action support
+interface ChatMessageAction {
+  label: string
+  variant: "primary" | "secondary"
+  onClick: () => void
+}
+
+// Action metadata for persistence (functions can't be serialized)
+interface ActionMeta {
+  type: "preset_change"
+  cameraId: string
+  presetId: string
+}
+
 interface ChatMessage {
   id: string
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "system"
   content: string
   timestamp: Date
+  actions?: ChatMessageAction[]
+  actionMeta?: ActionMeta  // Serializable action metadata
+  handled?: boolean  // For tracking if action was taken
+}
+
+// LocalStorage key for chat messages persistence
+const CHAT_STORAGE_KEY = 'is22_chat_messages'
+
+// Load chat messages from localStorage
+function loadChatMessages(): ChatMessage[] {
+  try {
+    const stored = localStorage.getItem(CHAT_STORAGE_KEY)
+    if (!stored) return []
+    const parsed = JSON.parse(stored)
+    // Convert timestamp strings back to Date objects
+    return parsed.map((msg: ChatMessage & { timestamp: string }) => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp),
+      // Restore actions for system messages (not persisted, will be re-created on next check)
+      actions: undefined,
+    }))
+  } catch {
+    return []
+  }
+}
+
+// Save chat messages to localStorage
+function saveChatMessages(messages: ChatMessage[]) {
+  try {
+    // Don't save action functions (they can't be serialized)
+    const toSave = messages.map(msg => ({
+      ...msg,
+      actions: undefined,
+    }))
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(toSave))
+  } catch (err) {
+    console.error('Failed to save chat messages:', err)
+  }
+}
+
+// Preset display names (v2.0)
+const PRESET_NAMES: Record<string, string> = {
+  person_priority: "人物優先",
+  balanced: "バランス",
+  parking: "駐車場",
+  entrance: "エントランス",
+  corridor: "廊下",
+  hotel_corridor: "ホテル廊下",  // v2.0 新規
+  outdoor: "屋外",
+  crowd: "群衆",
+  office: "オフィス",
+  restaurant: "飲食店ホール",   // v2.0 新規
+  security_zone: "警戒区域",    // v2.0 新規
+  object_focus: "対物検知",     // v2.0 新規
+  custom: "カスタム",
+  // v2.0 廃止（後方互換）
+  night_vision: "夜間（廃止）",
+  retail: "小売店（廃止）",
+  warehouse: "倉庫（廃止）",
 }
 
 // Patrol Status Ticker - Fixed frame, always visible
@@ -439,12 +514,23 @@ export function EventLogPane({
   cameras,
   cooldownSeconds = 0,
   executionState = "waiting",
+  isMobile: _isMobile = false,  // Reserved for future mobile-specific behavior
 }: EventLogPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
 
-  // Chat state (stub - will connect to mobes2.0 later)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  // Chat state with localStorage persistence
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => loadChatMessages())
+
+  // Overdetection suggestion tracking - initialize from persisted messages
+  const [checkedOverdetection, setCheckedOverdetection] = useState(false)
+  const [overdetectionCameras, setOverdetectionCameras] = useState<string[]>(() => {
+    // Extract camera IDs from existing overdetection messages
+    const stored = loadChatMessages()
+    return stored
+      .filter(msg => msg.id.startsWith('overdetection-'))
+      .map(msg => msg.id.replace('overdetection-', '').split('-')[0])
+  })
 
   // Detection detail modal state
   const [selectedLog, setSelectedLog] = useState<DetectionLog | null>(null)
@@ -555,6 +641,170 @@ export function EventLogPane({
     }
   }, [chatMessages])
 
+  // Save chat messages to localStorage
+  useEffect(() => {
+    saveChatMessages(chatMessages)
+  }, [chatMessages])
+
+  // Fetch overdetection analysis and create suggestion messages
+  useEffect(() => {
+    if (checkedOverdetection || cameras.length === 0) return
+
+    const checkOverdetection = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/stats/overdetection?period=24h`)
+        const data = await response.json()
+
+        if (!data.ok || !data.data?.cameras) return
+
+        const camerasWithIssues = data.data.cameras.filter(
+          (c: { camera_id: string; issues: { severity: string }[] }) =>
+            c.issues.some(i => i.severity === 'warning' || i.severity === 'critical')
+        )
+
+        if (camerasWithIssues.length === 0) {
+          setCheckedOverdetection(true)
+          return
+        }
+
+        // Create suggestion messages for each camera with issues
+        const newMessages: ChatMessage[] = []
+
+        for (const cam of camerasWithIssues) {
+          // Skip if already shown for this camera
+          if (overdetectionCameras.includes(cam.camera_id)) continue
+
+          // Find camera name
+          const camera = cameras.find(c => c.camera_id === cam.camera_id)
+          const cameraName = camera?.name || cam.camera_name || cam.camera_id.substring(0, 8)
+          const currentPreset = camera?.preset_id || 'balanced'
+
+          // Determine recommended preset based on issues
+          // Issue #107: Fix suggest logic - consider issue type and cause
+          let recommendedPreset = 'balanced'
+          let suggestionReason = ''
+
+          const hasUnknownFlood = cam.issues.some((i: { type: string }) => i.type === 'unknown_flood')
+          const hasHighFrequency = cam.issues.some((i: { type: string }) => i.type === 'high_frequency')
+          const hasStaticObject = cam.issues.some((i: { type: string }) => i.type === 'static_object')
+          const tagFixation = cam.issues.find((i: { type: string; tag?: string }) => i.type === 'tag_fixation')
+
+          // Office item labels that should be excluded
+          const officeItemLabels = ['mouse', 'keyboard', 'laptop', 'cell phone', 'tv', 'remote', 'book']
+
+          if (hasUnknownFlood) {
+            // Unknown flood → balanced has the most excluded_objects (14 items)
+            recommendedPreset = 'balanced'
+            suggestionReason = 'Unknown検出が多発しています。除外リストが充実した'
+          } else if (hasHighFrequency && hasStaticObject) {
+            // High frequency + static object → balanced to filter static office items
+            recommendedPreset = 'balanced'
+            suggestionReason = '静止物の繰り返し検出があります。除外リストが充実した'
+          } else if (tagFixation) {
+            // Tag fixation → check if it's an office item
+            if (officeItemLabels.includes(tagFixation.tag || '')) {
+              recommendedPreset = 'balanced'
+              suggestionReason = `${tagFixation.tag}の固定検出があります。除外リストが充実した`
+            } else {
+              recommendedPreset = 'person_priority'
+              suggestionReason = '特定タグの固定検出があります。人物検知に特化した'
+            }
+          } else if (hasHighFrequency) {
+            // High frequency without static object → might be busy area, try crowd mode
+            recommendedPreset = 'crowd'
+            suggestionReason = '検出頻度が高いです。群衆モードの'
+          }
+
+          // Skip if already using recommended preset
+          if (currentPreset === recommendedPreset) continue
+
+          const currentPresetName = PRESET_NAMES[currentPreset] || currentPreset
+          const recommendedPresetName = PRESET_NAMES[recommendedPreset] || recommendedPreset
+
+          const messageId = `overdetection-${cam.camera_id}-${Date.now()}`
+
+          newMessages.push({
+            id: messageId,
+            role: "system",
+            content: `${cameraName}の検出の調整が必要そうです。${suggestionReason}「${recommendedPresetName}」への変更をお勧めします。（現在: ${currentPresetName}）変更しますか？`,
+            timestamp: new Date(),
+            handled: false,
+            actionMeta: {
+              type: "preset_change",
+              cameraId: cam.camera_id,
+              presetId: recommendedPreset,
+            },
+          })
+        }
+
+        if (newMessages.length > 0) {
+          setChatMessages(prev => [...prev, ...newMessages])
+          setOverdetectionCameras(prev => [
+            ...prev,
+            ...camerasWithIssues.map((c: { camera_id: string }) => c.camera_id)
+          ])
+        }
+
+        setCheckedOverdetection(true)
+      } catch (err) {
+        console.error('Failed to check overdetection:', err)
+        setCheckedOverdetection(true)
+      }
+    }
+
+    // Delay check to allow cameras to load
+    const timer = setTimeout(checkOverdetection, 2000)
+    return () => clearTimeout(timer)
+  }, [cameras, checkedOverdetection, overdetectionCameras])
+
+  // Handle preset change from suggestion
+  const handlePresetChange = async (cameraId: string, presetId: string, messageId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/cameras/${cameraId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset_id: presetId }),
+      })
+
+      if (response.ok) {
+        const presetName = PRESET_NAMES[presetId] || presetId
+        // Mark message as handled and add confirmation
+        setChatMessages(prev => prev.map(msg =>
+          msg.id === messageId ? { ...msg, handled: true } : msg
+        ))
+        setChatMessages(prev => [...prev, {
+          id: `confirm-${Date.now()}`,
+          role: "assistant",
+          content: `プリセットを「${presetName}」に変更しました。`,
+          timestamp: new Date(),
+        }])
+      } else {
+        throw new Error('Failed to update preset')
+      }
+    } catch (err) {
+      console.error('Failed to change preset:', err)
+      setChatMessages(prev => [...prev, {
+        id: `error-${Date.now()}`,
+        role: "assistant",
+        content: "プリセットの変更に失敗しました。設定画面から手動で変更してください。",
+        timestamp: new Date(),
+      }])
+    }
+  }
+
+  // Handle dismiss suggestion
+  const handleDismissSuggestion = (messageId: string) => {
+    setChatMessages(prev => prev.map(msg =>
+      msg.id === messageId ? { ...msg, handled: true } : msg
+    ))
+    setChatMessages(prev => [...prev, {
+      id: `dismiss-${Date.now()}`,
+      role: "assistant",
+      content: "了解しました。現在の設定を維持します。",
+      timestamp: new Date(),
+    }])
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -630,13 +880,53 @@ export function EventLogPane({
                 <div
                   key={msg.id}
                   className={cn(
-                    "text-xs p-2 rounded",
-                    msg.role === "user"
-                      ? "bg-primary/10 ml-4"
-                      : "bg-muted mr-4"
+                    "flex",
+                    msg.role === "user" ? "justify-end" : "justify-start"
                   )}
                 >
-                  {msg.content}
+                  <div
+                    className={cn(
+                      "max-w-[85%] text-xs px-3 py-2 rounded-2xl",
+                      // User message: blue background, white text, right tail
+                      msg.role === "user" && "bg-blue-500 text-white rounded-br-sm",
+                      // System/Assistant message: light gray background, dark text, left tail
+                      (msg.role === "system" || msg.role === "assistant") && "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm"
+                    )}
+                  >
+                    {/* Message content */}
+                    <div className="leading-relaxed">{msg.content}</div>
+                    {/* Timestamp */}
+                    <div className={cn(
+                      "text-[9px] mt-1 opacity-60",
+                      msg.role === "user" ? "text-right text-blue-100" : "text-right text-gray-500 dark:text-gray-400"
+                    )}>
+                      {msg.timestamp.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                    {/* Action buttons for system messages with actionMeta */}
+                    {msg.role === "system" && msg.actionMeta && !msg.handled && (
+                      <div className="flex gap-2 mt-2 pt-2 border-t border-gray-300 dark:border-gray-600">
+                        <button
+                          onClick={() => handlePresetChange(msg.actionMeta!.cameraId, msg.actionMeta!.presetId, msg.id)}
+                          className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-blue-500 hover:bg-blue-600 text-white"
+                        >
+                          はい
+                        </button>
+                        <button
+                          onClick={() => handleDismissSuggestion(msg.id)}
+                          className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200"
+                        >
+                          いいえ
+                        </button>
+                      </div>
+                    )}
+                    {/* Handled indicator */}
+                    {msg.role === "system" && msg.handled && (
+                      <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                        <span>✓</span>
+                        <span>対応済み</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

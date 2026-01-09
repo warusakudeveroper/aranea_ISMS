@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import type { Camera } from "@/types/api"
-import { CameraTile, type AspectRatio } from "./CameraTile"
-import { cn } from "@/lib/utils"
+import { CameraTile } from "./CameraTile"
 import { API_BASE_URL } from "@/lib/config"
 import { Card } from "@/components/ui/card"
 import { Search, PlusCircle, GripVertical } from "lucide-react"
@@ -38,7 +37,7 @@ type ImageMode = "fit" | "trim"
 type DisplayMode = "footer" | "overlay"
 
 // Constants
-const COLUMNS = 4
+const DEFAULT_COLUMNS = 4
 const MAX_CAMERAS = 31 // 31 cameras + 1 add card = 32 tiles = 8 rows
 
 // Camera status from WebSocket (processing time, errors)
@@ -70,52 +69,89 @@ interface CameraGridProps {
   // Display settings
   imageMode?: ImageMode
   displayMode?: DisplayMode
-  // Container height for no-scroll layout (tiles compress to fit)
+  // Container dimensions for no-scroll layout (tiles compress to fit)
   containerHeight?: number
+  containerWidth?: number
   // On-air camera IDs for yellow highlight
   onAirCameraIds?: string[]
+  // Issue #108: モバイル対応
+  /** モバイル表示モード */
+  isMobile?: boolean
+  /** グリッド列数 (デフォルト4、モバイル時3) */
+  columns?: number
+  /** 縦スクロール許容 (デフォルトfalse、モバイル時true) */
+  allowScroll?: boolean
 }
 
-// Calculate aspect ratio based on tile count
-// - ≤16 tiles (4 rows): square (1:1)
-// - 17-24 tiles (5-6 rows): 4:3
-// - 25-32 tiles (7-8 rows): video (16:9)
-function calculateAspectRatio(tileCount: number): AspectRatio {
-  const rows = Math.ceil(tileCount / COLUMNS)
-  if (rows <= 4) return "square"
-  if (rows <= 6) return "4/3"
-  return "video"
-}
-
-// Get Tailwind aspect ratio class for AddCameraCard
-function getAspectClass(ratio: AspectRatio): string {
-  switch (ratio) {
-    case "square": return "aspect-square"
-    case "4/3": return "aspect-[4/3]"
-    case "video": return "aspect-video"
-    default: return "aspect-square"
-  }
-}
+// タイルは常に1:1（正方形）デフォルト
+// 画面下端に到達した場合のみmaxHeightで縦幅を調整
 
 // Threshold for slow camera warning (10 seconds)
 const SLOW_CAMERA_THRESHOLD_MS = 10000
 
-// Calculate max tile height to fit within container without scrolling
-function calculateMaxTileHeight(
+// Calculate tile height to fit within container
+// 左右・上・下のマージンを同一にする（p-4 = 16px）
+//
+// 仕様 (UI_Review1.md セクション1.3.2):
+// | 条件 | 縦横比 | 動作 |
+// | デフォルト | 1:1（正方形） | 上から順に配置 |
+// | 画面下端に未到達 | 1:1（正方形） | 正方形タイルで配置 |
+// | 画面下端に到達 | 縦幅のみ調整 | 全タイルの縦幅を動的に縮小し画面内に収める |
+//
+// 重要: 「縦幅のみ調整」= 縮小のみ。縦幅の拡大は仕様外。
+// タイル高さは最大でもタイル幅と同じ（正方形が上限）
+//
+// Issue #108: columns パラメータ追加でモバイル3列対応
+function calculateTileHeight(
   containerHeight: number | undefined,
-  tileCount: number
-): number | undefined {
-  if (!containerHeight || containerHeight <= 0) return undefined
+  tileCount: number,
+  containerWidth: number | undefined,
+  columns: number = DEFAULT_COLUMNS,
+  allowScroll: boolean = false
+): { tileHeight: number | undefined; isCompressed: boolean } {
+  // モバイルでスクロール許容の場合、縦幅計算をスキップして正方形固定
+  if (allowScroll) {
+    if (!containerWidth || containerWidth <= 0) {
+      return { tileHeight: undefined, isCompressed: false }
+    }
+    const padding = 8 // モバイル時はp-2 = 8px
+    const gap = 8 // gap-2 = 8px
+    const tileWidth = Math.floor((containerWidth - (padding * 2) - (gap * (columns - 1))) / columns)
+    return { tileHeight: tileWidth, isCompressed: false }
+  }
 
-  const rows = Math.ceil(tileCount / COLUMNS)
-  if (rows <= 0) return undefined
+  if (!containerHeight || containerHeight <= 0 || !containerWidth || containerWidth <= 0) {
+    return { tileHeight: undefined, isCompressed: false }
+  }
 
-  const padding = 0 // padding is on parent container
+  const rows = Math.ceil(tileCount / columns)
+  if (rows <= 0) return { tileHeight: undefined, isCompressed: false }
+
+  const padding = 16 // p-4 = 16px (top and bottom)
   const gap = 8 // gap-2 = 8px
-  const totalGap = (rows - 1) * gap
-  const availableHeight = containerHeight - padding - totalGap
+  const totalRowGap = (rows - 1) * gap
+  const availableHeight = containerHeight - (padding * 2) - totalRowGap
 
-  return Math.floor(availableHeight / rows)
+  // タイル幅を計算（動的列数）
+  const tileWidth = Math.floor((containerWidth - (padding * 2) - (gap * (columns - 1))) / columns)
+
+  // 正方形で配置した場合の必要高さ
+  const squareTotalHeight = tileWidth * rows
+
+  if (squareTotalHeight > availableHeight) {
+    // 画面下端に到達: 縦幅のみ縮小
+    const compressedHeight = Math.floor(availableHeight / rows)
+    return {
+      tileHeight: compressedHeight,
+      isCompressed: true
+    }
+  }
+
+  // 画面下端に未到達: 正方形で配置（タイル高さ = タイル幅）
+  return {
+    tileHeight: tileWidth,
+    isCompressed: false
+  }
 }
 
 // ============================================================================
@@ -132,11 +168,11 @@ interface SortableCameraTileProps {
   animationStyle?: AnimationStyle
   imageMode?: ImageMode
   displayMode?: DisplayMode
-  aspectRatio?: AspectRatio
   isSlowCamera?: boolean
   isTimeout?: boolean
   errorMessage?: string
-  maxHeight?: number
+  /** Tile height in pixels (calculated by grid) */
+  tileHeight?: number
   isOnAir?: boolean
   isDragging?: boolean
 }
@@ -184,20 +220,12 @@ function SortableCameraTile({
 
 function AddCameraCard({
   onClick,
-  aspectRatio,
-  maxHeight,
 }: {
   onClick?: () => void
-  aspectRatio: AspectRatio
-  maxHeight?: number
 }) {
   return (
     <Card
-      className={cn(
-        "cursor-pointer border-2 border-dashed border-muted-foreground/30 hover:border-primary/50 hover:bg-accent/30 transition-all flex flex-col items-center justify-center gap-2",
-        getAspectClass(aspectRatio)
-      )}
-      style={{ maxHeight: maxHeight ? `${maxHeight}px` : undefined }}
+      className="cursor-pointer border-2 border-dashed border-muted-foreground/30 hover:border-primary/50 hover:bg-accent/30 transition-all flex flex-col items-center justify-center gap-2 h-full"
       onClick={onClick}
     >
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
@@ -257,7 +285,12 @@ export function CameraGrid({
   imageMode = "trim",
   displayMode = "overlay",
   containerHeight,
+  containerWidth,
   onAirCameraIds = [],
+  // Issue #108: モバイル対応
+  isMobile: _isMobile = false,  // Reserved for future mobile-specific behavior
+  columns = DEFAULT_COLUMNS,
+  allowScroll = false,
 }: CameraGridProps) {
   // Fallback timestamp for cameras without WebSocket updates
   const [fallbackTimestamp, setFallbackTimestamp] = useState<number>(Date.now())
@@ -373,17 +406,18 @@ export function CameraGrid({
     })
   }, [onReorder])
 
-  // Calculate total tiles (cameras + add card) and determine aspect ratio
+  // Calculate total tiles (cameras + add card)
   // Limit to MAX_CAMERAS
   const displayedCameras = useMemo(() =>
     orderedCameras.slice(0, MAX_CAMERAS),
     [orderedCameras]
   )
   const tileCount = displayedCameras.length + 1 // +1 for add card
-  const aspectRatio = calculateAspectRatio(tileCount)
 
-  // Calculate max tile height to fit within container without scrolling
-  const maxTileHeight = calculateMaxTileHeight(containerHeight, tileCount)
+  // Calculate tile height for grid layout
+  // 仕様: デフォルト正方形、画面下端到達時のみ縦幅縮小
+  // Issue #108: モバイル時はallowScroll=trueで常に正方形、スクロール許容
+  const { tileHeight } = calculateTileHeight(containerHeight, tileCount, containerWidth, columns, allowScroll)
 
   // Camera IDs for SortableContext
   const cameraIds = useMemo(() =>
@@ -406,7 +440,16 @@ export function CameraGrid({
       onDragCancel={handleDragCancel}
     >
       <SortableContext items={cameraIds} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-4 gap-2 h-full">
+        {/* tileHeightが指定されている場合、gridAutoRowsで行高を固定 */}
+        {/* これにより正方形モードでも圧縮モードでも確実にタイル高さを制御 */}
+        {/* Issue #108: 動的列数対応 (PC:4列, モバイル:3列) */}
+        <div
+          className="grid gap-2"
+          style={{
+            gridTemplateColumns: `repeat(${columns}, 1fr)`,
+            ...(tileHeight ? { gridAutoRows: `${tileHeight}px` } : {})
+          }}
+        >
           {displayedCameras.map((camera) => {
             const timestamp = getTimestamp(camera.camera_id)
             const status = cameraStatuses[camera.camera_id]
@@ -427,18 +470,17 @@ export function CameraGrid({
                 animationStyle={animationStyle}
                 imageMode={imageMode}
                 displayMode={displayMode}
-                aspectRatio={aspectRatio}
                 isSlowCamera={isSlowCamera}
                 isTimeout={isTimeout}
                 errorMessage={status?.error}
-                maxHeight={maxTileHeight}
+                tileHeight={tileHeight}
                 isOnAir={isOnAir}
               />
             )
           })}
           {/* 末尾に追加カード (IS22_UI_DETAILED_SPEC Section 2.2 追加要件) */}
           {/* AddCameraCard is not draggable, always at the end */}
-          <AddCameraCard onClick={onAddClick} aspectRatio={aspectRatio} maxHeight={maxTileHeight} />
+          <AddCameraCard onClick={onAddClick} />
         </div>
       </SortableContext>
 
@@ -452,8 +494,7 @@ export function CameraGrid({
               lastSnapshotAt={snapshotTimestamps[activeCamera.camera_id]}
               imageMode={imageMode}
               displayMode={displayMode}
-              aspectRatio={aspectRatio}
-              maxHeight={maxTileHeight}
+              tileHeight={tileHeight}
             />
           </div>
         )}

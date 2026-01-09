@@ -86,6 +86,8 @@ export function DialogContent({
       className={cn(
         "relative z-50 w-full max-w-lg rounded-lg border bg-white p-6 shadow-lg",
         "animate-in fade-in-0 zoom-in-95",
+        // Issue #108: モバイル対応 - 画面幅95%、高さ90%以内に収める
+        "max-md:max-w-[95vw] max-md:max-h-[90vh] max-md:overflow-y-auto",
         className
       )}
       onClick={(e) => e.stopPropagation()}

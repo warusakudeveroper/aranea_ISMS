@@ -243,3 +243,139 @@
     100% { content: '-'; }
   }
 }
+
+/* =================================================================
+   Issue #108: モバイルビューUI拡張
+   ブレークポイント: 768px以下でモバイルレイアウト適用
+   ================================================================= */
+
+@layer utilities {
+  /* SuggestPane モバイル版アニメーション */
+  /* モバイル: 左からスライドイン */
+  @keyframes suggest-slide-in-mobile {
+    from {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  /* モバイル: 上にスライドアウト */
+  @keyframes suggest-slide-out-mobile {
+    from {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateY(-100%);
+      opacity: 0;
+    }
+  }
+
+  .animate-suggest-in-mobile {
+    animation: suggest-slide-in-mobile 0.5s ease-out forwards;
+  }
+
+  .animate-suggest-out-mobile {
+    animation: suggest-slide-out-mobile 0.5s ease-in forwards;
+  }
+
+  /* PC版アニメーション (既存と同じだが明示的に定義) */
+  .animate-suggest-in-pc {
+    animation: slide-in-from-top 0.5s ease-out forwards;
+  }
+
+  .animate-suggest-out-pc {
+    animation: slide-out-to-left 0.5s ease-in forwards;
+  }
+
+  /* モバイルドロワー アニメーション */
+  @keyframes drawer-slide-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes drawer-slide-out {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  .animate-drawer-in {
+    animation: drawer-slide-in 0.3s ease-out forwards;
+  }
+
+  .animate-drawer-out {
+    animation: drawer-slide-out 0.3s ease-in forwards;
+  }
+
+  /* フローティングボタン パルス強化 */
+  @keyframes pulse-strong {
+    0%, 100% {
+      transform: scale(1);
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    }
+    50% {
+      transform: scale(1.05);
+      box-shadow: 0 0 0 8px rgb(var(--primary) / 0.2);
+    }
+  }
+
+  .animate-pulse-strong {
+    animation: pulse-strong 2s infinite;
+  }
+
+  /* モバイル スクロールバー非表示 */
+  .mobile-scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .mobile-scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* タッチ操作用ハイライト */
+  .touch-highlight {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .touch-highlight:active {
+    background-color: hsl(var(--muted) / 0.5);
+  }
+}
+
+/* モバイル専用スタイル */
+@media (max-width: 768px) {
+  /* ベース調整 */
+  body {
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* モーダル最大幅調整 */
+  .dialog-content-mobile {
+    max-width: 95vw !important;
+    max-height: 90vh !important;
+  }
+
+  /* グリッド間隔調整 */
+  .mobile-grid-gap {
+    gap: 8px;
+  }
+
+  /* フォントサイズ調整 */
+  .mobile-text-adjust {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+}

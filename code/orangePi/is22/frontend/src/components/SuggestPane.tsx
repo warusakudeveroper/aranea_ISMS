@@ -49,6 +49,8 @@ interface SuggestPaneProps {
   onAirTimeSeconds?: number
   /** Callback when on-air cameras change (for tile highlighting) */
   onOnAirChange?: (cameraIds: string[]) => void
+  /** Issue #108: モバイル表示モード - アニメーション方向を変更 */
+  isMobile?: boolean
 }
 
 function getSeverityVariant(severity: number): "severity0" | "severity1" | "severity2" | "severity3" {
@@ -66,6 +68,7 @@ export function SuggestPane({
   cameras = [],
   onAirTimeSeconds = 180,
   onOnAirChange,
+  isMobile = false,
 }: SuggestPaneProps) {
   // On-air cameras (max 3)
   const [onAirCameras, setOnAirCameras] = useState<OnAirCamera[]>([])
@@ -279,9 +282,16 @@ export function SuggestPane({
             key={cam.lacisId}
             layout
             layoutId={cam.lacisId}
-            initial={{ opacity: 0, y: -50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, x: -100 }}
+            // Issue #108: PC=top-in/left-out, モバイル=left-in/top-out
+            initial={isMobile
+              ? { opacity: 0, x: -100 }   // モバイル: 左からスライドイン
+              : { opacity: 0, y: -50 }    // PC: 上からスライドイン
+            }
+            animate={{ opacity: 1, x: 0, y: 0 }}
+            exit={isMobile
+              ? { opacity: 0, y: -100 }   // モバイル: 上にスライドアウト
+              : { opacity: 0, x: -100 }   // PC: 左にスライドアウト
+            }
             transition={{
               layout: { type: "spring", stiffness: 300, damping: 30 },
               opacity: { duration: 0.2 }

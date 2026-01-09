@@ -8,8 +8,11 @@ import { ScanModal } from "@/components/ScanModal"
 import { CameraDetailModal } from "@/components/CameraDetailModal"
 import { LiveViewModal } from "@/components/LiveViewModal"
 import { SettingsModal } from "@/components/SettingsModal"
+import { FloatingAIButton } from "@/components/FloatingAIButton"
+import { MobileDrawer } from "@/components/MobileDrawer"
 import { useApi } from "@/hooks/useApi"
 import { useEventLogStore } from "@/stores/eventLogStore"
+import { useIsMobile } from "@/hooks/useMediaQuery"
 import { API_BASE_URL } from "@/lib/config"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -54,11 +57,17 @@ function BlankCard({ onScanClick }: { onScanClick: () => void }) {
 const DEFAULT_ONAIRTIME_SECONDS = 180
 
 function App() {
+  // Issue #108: モバイル判定
+  const isMobile = useIsMobile()
+
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null)
   const [cameraDetailOpen, setCameraDetailOpen] = useState(false)
   const [liveViewOpen, setLiveViewOpen] = useState(false)
   const [scanModalOpen, setScanModalOpen] = useState(false)
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+  // Issue #108: モバイルドロワー状態
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
+  const [hasUnreadEvents, setHasUnreadEvents] = useState(false)
   // Per-camera snapshot timestamps (from WebSocket notifications)
   // Key: camera_id, Value: Unix timestamp (ms)
   const [snapshotTimestamps, setSnapshotTimestamps] = useState<Record<string, number>>({})
@@ -88,20 +97,29 @@ function App() {
     localStorage.setItem("onairtime_seconds", String(onAirTimeSeconds))
   }, [onAirTimeSeconds])
 
-  // Grid container ref for measuring height (no-scroll layout)
+  // Issue #108: ドロワーが開いたら未読をクリア
+  useEffect(() => {
+    if (mobileDrawerOpen) {
+      setHasUnreadEvents(false)
+    }
+  }, [mobileDrawerOpen])
+
+  // Grid container ref for measuring dimensions (no-scroll layout)
   const gridContainerRef = useRef<HTMLDivElement>(null)
   const [gridContainerHeight, setGridContainerHeight] = useState<number>(0)
+  const [gridContainerWidth, setGridContainerWidth] = useState<number>(0)
 
-  // Measure grid container height for tile sizing
+  // Measure grid container dimensions for tile sizing
   useEffect(() => {
-    const updateHeight = () => {
+    const updateDimensions = () => {
       if (gridContainerRef.current) {
         setGridContainerHeight(gridContainerRef.current.clientHeight)
+        setGridContainerWidth(gridContainerRef.current.clientWidth)
       }
     }
-    updateHeight()
-    window.addEventListener('resize', updateHeight)
-    return () => window.removeEventListener('resize', updateHeight)
+    updateDimensions()
+    window.addEventListener('resize', updateDimensions)
+    return () => window.removeEventListener('resize', updateDimensions)
   }, [])
 
   // Event log store for patrol feedback and log fetching
@@ -124,7 +142,8 @@ function App() {
           return
         }
 
-        const logs = (await response.json()) as DetectionLog[]
+        const result = await response.json()
+        const logs = (result.data || result) as DetectionLog[]
 
         // Extract latest captured_at for each camera
         const latestTimestamps: Record<string, number> = {}
@@ -198,11 +217,16 @@ function App() {
         created_at: msg.timestamp,
       }
       setRealtimeEvent(realtimeLog)
+
+      // Issue #108: モバイルでドロワーが閉じている場合は未読フラグをセット
+      if (isMobile && !mobileDrawerOpen) {
+        setHasUnreadEvents(true)
+      }
     }
 
     // Also refetch logs for EventLogPane display (historical list)
     fetchLogs({ detected_only: true, severity_min: 1, limit: 100 })
-  }, [fetchLogs])  // BUG-001: Removed cameras dependency (lacis_id now from message)
+  }, [fetchLogs, isMobile, mobileDrawerOpen])  // BUG-001: Removed cameras dependency (lacis_id now from message)
 
   // Handle snapshot update notifications from WebSocket
   // Each camera is notified individually when its snapshot is updated
@@ -305,121 +329,78 @@ function App() {
     setCameraDetailOpen(false)
   }, [refetchCameras])
 
-  return (
-    <div className="h-screen flex flex-col">
-      {/* Header */}
-      <header className="h-14 border-b bg-card px-4 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <Video className="h-6 w-6 text-primary" />
-          <h1 className="text-lg font-semibold">mobes AI<span className="text-primary">cam</span> control Tower</h1>
-          <Badge variant="outline" className="text-xs">mAcT</Badge>
+  // Issue #108: ヘッダーコンポーネント（モバイル/デスクトップ共通）
+  const renderHeader = () => (
+    <header className="h-14 border-b bg-card px-4 flex items-center justify-between flex-shrink-0">
+      <div className="flex items-center gap-2">
+        <Video className="h-6 w-6 text-primary" />
+        {/* モバイルでは短縮タイトル */}
+        {isMobile ? (
+          <h1 className="text-lg font-semibold">mAcT</h1>
+        ) : (
+          <>
+            <h1 className="text-lg font-semibold">mobes AI<span className="text-primary">cam</span> control Tower</h1>
+            <Badge variant="outline" className="text-xs">mAcT</Badge>
+          </>
+        )}
+      </div>
+      <div className="flex items-center gap-4">
+        {/* WebSocket connection status + Polling cycle stats */}
+        <div className="flex items-center gap-2 text-sm">
+          {wsConnected ? (
+            <>
+              <Wifi className="h-4 w-4 text-green-500" />
+              <span className="text-green-500 text-xs">LIVE</span>
+              {/* Subnet-specific cycle times and camera counts - デスクトップのみ表示 */}
+              {!isMobile && Object.entries(cycleStats).length > 0 && (
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground text-xs">巡回</span>
+                  {Object.entries(cycleStats)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([subnet, stats], idx) => {
+                      // Format "192.168.125" -> "125.0/24"
+                      const shortSubnet = subnet.split('.')[2] + '.0/24'
+                      return (
+                        <span key={subnet} className="text-xs">
+                          {idx > 0 && <span className="text-muted-foreground mx-1">|</span>}
+                          {shortSubnet}: {stats.cycle_duration_formatted} ({stats.cameras_polled}台)
+                        </span>
+                      )
+                    })}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <WifiOff className="h-4 w-4 text-muted-foreground" />
+              <span className="text-muted-foreground text-xs">Offline</span>
+            </>
+          )}
         </div>
-        <div className="flex items-center gap-4">
-          {/* WebSocket connection status + Polling cycle stats */}
-          <div className="flex items-center gap-2 text-sm">
-            {wsConnected ? (
-              <>
-                <Wifi className="h-4 w-4 text-green-500" />
-                <span className="text-green-500 text-xs">LIVE</span>
-                {/* Subnet-specific cycle times and camera counts */}
-                {Object.entries(cycleStats).length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground text-xs">巡回</span>
-                    {Object.entries(cycleStats)
-                      .sort(([a], [b]) => a.localeCompare(b))
-                      .map(([subnet, stats], idx) => {
-                        // Format "192.168.125" -> "125.0/24"
-                        const shortSubnet = subnet.split('.')[2] + '.0/24'
-                        return (
-                          <span key={subnet} className="text-xs">
-                            {idx > 0 && <span className="text-muted-foreground mx-1">|</span>}
-                            {shortSubnet}: {stats.cycle_duration_formatted} ({stats.cameras_polled}台)
-                          </span>
-                        )
-                      })}
-                  </div>
-                )}
-              </>
+        {/* システムステータス - デスクトップのみ表示 */}
+        {!isMobile && systemStatus && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Activity className="h-4 w-4" />
+            <span>CPU: {systemStatus.cpu_percent.toFixed(1)}%</span>
+            <span>MEM: {systemStatus.memory_percent.toFixed(1)}%</span>
+            <span>Modals: {systemStatus.active_modals}/{systemStatus.modal_budget_remaining + systemStatus.active_modals}</span>
+            {systemStatus.healthy ? (
+              <Badge variant="secondary">Healthy</Badge>
             ) : (
-              <>
-                <WifiOff className="h-4 w-4 text-muted-foreground" />
-                <span className="text-muted-foreground text-xs">Offline</span>
-              </>
+              <Badge variant="destructive">Unhealthy</Badge>
             )}
           </div>
-          {systemStatus && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Activity className="h-4 w-4" />
-              <span>CPU: {systemStatus.cpu_percent.toFixed(1)}%</span>
-              <span>MEM: {systemStatus.memory_percent.toFixed(1)}%</span>
-              <span>Modals: {systemStatus.active_modals}/{systemStatus.modal_budget_remaining + systemStatus.active_modals}</span>
-              {systemStatus.healthy ? (
-                <Badge variant="secondary">Healthy</Badge>
-              ) : (
-                <Badge variant="destructive">Unhealthy</Badge>
-              )}
-            </div>
-          )}
-          <Button variant="ghost" size="icon" onClick={() => setSettingsModalOpen(true)}>
-            <Settings className="h-5 w-5" />
-          </Button>
-        </div>
-      </header>
-
-      {/* Main Content - 3 Pane Layout: 30%/55%/15% */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Pane - Suggest View (30%) */}
-        <aside className="w-[30%] border-r overflow-hidden flex flex-col">
-          <SuggestPane
-            currentEvent={currentEvent}
-            cameras={cameras || []}
-            onAirTimeSeconds={onAirTimeSeconds}
-            onOnAirChange={handleOnAirChange}
-          />
-        </aside>
-
-        {/* Center Pane - Camera Grid (55%) - No scroll, tiles compress to fit */}
-        <main
-          ref={gridContainerRef}
-          className="w-[55%] p-4 overflow-hidden flex flex-col"
-        >
-          {camerasLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : cameras && cameras.length > 0 ? (
-            <CameraGrid
-              cameras={cameras}
-              onCameraClick={handleCameraClick}
-              onSettingsClick={handleSettingsClick}
-              onAddClick={() => setScanModalOpen(true)}
-              snapshotTimestamps={snapshotTimestamps}
-              cameraStatuses={cameraStatuses}
-              fallbackPollingEnabled={!wsConnected}
-              fallbackPollingIntervalMs={30000}
-              animationEnabled={true}
-              animationStyle="slide-down"
-              containerHeight={gridContainerHeight}
-              onAirCameraIds={onAirCameraIds}
-            />
-          ) : (
-            <BlankCard onScanClick={() => setScanModalOpen(true)} />
-          )}
-        </main>
-
-        {/* Right Pane - Event Log (15%) */}
-        <aside
-          className="w-[15%] border-l bg-card overflow-hidden flex flex-col relative z-10 isolate"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <EventLogPane
-            cameras={cameras || []}
-            cooldownSeconds={cooldownSeconds}
-            executionState={executionState}
-          />
-        </aside>
+        )}
+        <Button variant="ghost" size="icon" onClick={() => setSettingsModalOpen(true)}>
+          <Settings className="h-5 w-5" />
+        </Button>
       </div>
+    </header>
+  )
 
+  // Issue #108: モーダル群（共通）
+  const renderModals = () => (
+    <>
       {/* Scan Modal */}
       <ScanModal
         open={scanModalOpen}
@@ -457,6 +438,149 @@ function App() {
         onAirTimeSeconds={onAirTimeSeconds}
         onOnAirTimeSecondsChange={setOnAirTimeSeconds}
       />
+    </>
+  )
+
+  // Issue #108: モバイルレイアウト
+  if (isMobile) {
+    return (
+      <div className="h-screen flex flex-col">
+        {renderHeader()}
+
+        {/* Main Content - 縦積みレイアウト */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* SuggestView - 上30% */}
+          <div className="h-[30vh] flex-shrink-0 overflow-hidden border-b">
+            <SuggestPane
+              currentEvent={currentEvent}
+              cameras={cameras || []}
+              onAirTimeSeconds={onAirTimeSeconds}
+              onOnAirChange={handleOnAirChange}
+              isMobile={true}
+            />
+          </div>
+
+          {/* CameraGrid - 残り70%、内部スクロール */}
+          <div
+            ref={gridContainerRef}
+            className="flex-1 overflow-y-auto p-2 mobile-scrollbar-hide"
+          >
+            {camerasLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : cameras && cameras.length > 0 ? (
+              <CameraGrid
+                cameras={cameras}
+                onCameraClick={handleCameraClick}
+                onSettingsClick={handleSettingsClick}
+                onAddClick={() => setScanModalOpen(true)}
+                snapshotTimestamps={snapshotTimestamps}
+                cameraStatuses={cameraStatuses}
+                fallbackPollingEnabled={!wsConnected}
+                fallbackPollingIntervalMs={30000}
+                animationEnabled={true}
+                animationStyle="slide-down"
+                containerHeight={undefined}  // モバイルでは無制限
+                containerWidth={gridContainerWidth}
+                onAirCameraIds={onAirCameraIds}
+                isMobile={true}
+                columns={3}
+                allowScroll={true}
+              />
+            ) : (
+              <BlankCard onScanClick={() => setScanModalOpen(true)} />
+            )}
+          </div>
+        </div>
+
+        {/* Floating AI Button */}
+        <FloatingAIButton
+          onClick={() => setMobileDrawerOpen(!mobileDrawerOpen)}
+          hasNewEvents={hasUnreadEvents}
+          isDrawerOpen={mobileDrawerOpen}
+        />
+
+        {/* Mobile Drawer - AI Event Log */}
+        <MobileDrawer
+          open={mobileDrawerOpen}
+          onClose={() => setMobileDrawerOpen(false)}
+          title="AI Event Log"
+        >
+          <EventLogPane
+            cameras={cameras || []}
+            cooldownSeconds={cooldownSeconds}
+            executionState={executionState}
+            isMobile={true}
+          />
+        </MobileDrawer>
+
+        {renderModals()}
+      </div>
+    )
+  }
+
+  // デスクトップレイアウト（既存）
+  return (
+    <div className="h-screen flex flex-col">
+      {renderHeader()}
+
+      {/* Main Content - 3 Pane Layout: 30%/55%/15% */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Pane - Suggest View (30%) */}
+        <aside className="w-[30%] border-r overflow-hidden flex flex-col">
+          <SuggestPane
+            currentEvent={currentEvent}
+            cameras={cameras || []}
+            onAirTimeSeconds={onAirTimeSeconds}
+            onOnAirChange={handleOnAirChange}
+          />
+        </aside>
+
+        {/* Center Pane - Camera Grid (55%) - No scroll, tiles compress to fit */}
+        <main
+          ref={gridContainerRef}
+          className="w-[55%] p-4 overflow-hidden flex flex-col"
+        >
+          {camerasLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : cameras && cameras.length > 0 ? (
+            <CameraGrid
+              cameras={cameras}
+              onCameraClick={handleCameraClick}
+              onSettingsClick={handleSettingsClick}
+              onAddClick={() => setScanModalOpen(true)}
+              snapshotTimestamps={snapshotTimestamps}
+              cameraStatuses={cameraStatuses}
+              fallbackPollingEnabled={!wsConnected}
+              fallbackPollingIntervalMs={30000}
+              animationEnabled={true}
+              animationStyle="slide-down"
+              containerHeight={gridContainerHeight}
+              containerWidth={gridContainerWidth}
+              onAirCameraIds={onAirCameraIds}
+            />
+          ) : (
+            <BlankCard onScanClick={() => setScanModalOpen(true)} />
+          )}
+        </main>
+
+        {/* Right Pane - Event Log (15%) */}
+        <aside
+          className="w-[15%] border-l bg-card overflow-hidden flex flex-col relative z-10 isolate"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <EventLogPane
+            cameras={cameras || []}
+            cooldownSeconds={cooldownSeconds}
+            executionState={executionState}
+          />
+        </aside>
+      </div>
+
+      {renderModals()}
     </div>
   )
 }
