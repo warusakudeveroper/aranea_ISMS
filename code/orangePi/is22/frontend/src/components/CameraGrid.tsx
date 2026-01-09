@@ -182,6 +182,7 @@ interface SortableCameraTileProps {
 function SortableCameraTile({
   camera,
   isDragging,
+  isMobile,
   ...props
 }: SortableCameraTileProps) {
   const {
@@ -193,11 +194,13 @@ function SortableCameraTile({
     isDragging: isSortableDragging,
   } = useSortable({ id: camera.camera_id })
 
-  const style = {
+  const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isSortableDragging ? 0.5 : 1,
     zIndex: isSortableDragging ? 50 : undefined,
+    // Issue #108: モバイル時は確実に正方形を維持
+    ...(isMobile ? { aspectRatio: '1 / 1' } : {}),
   }
 
   return (
@@ -211,7 +214,7 @@ function SortableCameraTile({
       >
         <GripVertical className="h-4 w-4 text-white" />
       </div>
-      <CameraTile camera={camera} {...props} />
+      <CameraTile camera={camera} isMobile={isMobile} {...props} />
     </div>
   )
 }
