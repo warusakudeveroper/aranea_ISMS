@@ -81,10 +81,12 @@ interface CameraTileProps {
   isTimeout?: boolean
   /** Error message to display (e.g., "timeout", "No route to host") */
   errorMessage?: string
-  /** Maximum tile height in pixels (for no-scroll layout) */
-  maxHeight?: number
+  /** @deprecated tileHeight is no longer used - grid controls row height, tiles use h-full */
+  tileHeight?: number
   /** Camera is currently on-air in SuggestPane (yellow highlight) */
   isOnAir?: boolean
+  /** Issue #108: モバイル表示モード - オーバーレイを簡素化 */
+  isMobile?: boolean
 }
 
 // Note: getAspectClass removed - tiles now fill container fully
@@ -107,8 +109,9 @@ export function CameraTile({
   isSlowCamera = false,
   isTimeout = false,
   errorMessage,
-  maxHeight,
+  // tileHeight is deprecated - grid controls row height, tiles use h-full
   isOnAir = false,
+  isMobile = false,
 }: CameraTileProps) {
   // Track current and next snapshot URLs for animation
   const [currentUrl, setCurrentUrl] = useState(snapshotUrl)
@@ -186,7 +189,6 @@ export function CameraTile({
           !isOnAir && severity >= 3 && "ring-2 ring-red-500",
           !isOnAir && isTimeout && "ring-2 ring-orange-500"
         )}
-        style={{ maxHeight: maxHeight ? `${maxHeight}px` : undefined }}
         onClick={onClick}
       >
         <div className="relative bg-muted overflow-hidden h-full w-full">
@@ -280,32 +282,41 @@ export function CameraTile({
             </Badge>
           )}
 
-          {/* Overlay info - bottom gradient with 2-line display */}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent p-2 pt-6">
-            {/* Line 1: Camera name (Model name) */}
-            <div className="flex items-center gap-1.5 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-              <CameraIcon className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="text-sm font-medium truncate">
-                {camera.name}
-                {getModelDisplayName(camera) !== 'Unknown' && (
-                  <span className="text-white/70 font-normal text-xs ml-1">
-                    ({getModelDisplayName(camera)})
-                  </span>
-                )}
-              </span>
+          {/* Overlay info - Issue #108: モバイル時は簡素化 */}
+          {isMobile ? (
+            /* モバイル: 最小限のオーバーレイ - 時間のみ表示 */
+            <div className="absolute bottom-0 right-0 px-1 py-0.5 bg-black/60 text-[8px] text-white/90 rounded-tl">
+              <Clock className="h-2 w-2 inline mr-0.5" />
+              {lastSnapshotAt ? formatRelativeTime(lastSnapshotAt) : '--'}
             </div>
-            {/* Line 2: IP address | Relative time (right-aligned) */}
-            <div className="flex items-center justify-between text-[10px] text-white/80 mt-0.5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-              <div className="flex items-center gap-1 truncate">
-                <Globe className="h-2.5 w-2.5 flex-shrink-0" />
-                <span className="truncate">{camera.ip_address || '-'}</span>
+          ) : (
+            /* デスクトップ: フル表示 */
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent p-2 pt-6">
+              {/* Line 1: Camera name (Model name) */}
+              <div className="flex items-center gap-1.5 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                <CameraIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="text-sm font-medium truncate">
+                  {camera.name}
+                  {getModelDisplayName(camera) !== 'Unknown' && (
+                    <span className="text-white/70 font-normal text-xs ml-1">
+                      ({getModelDisplayName(camera)})
+                    </span>
+                  )}
+                </span>
               </div>
-              <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
-                <Clock className="h-2.5 w-2.5" />
-                <span>{lastSnapshotAt ? `${formatRelativeTime(lastSnapshotAt)} 更新` : '--'}</span>
+              {/* Line 2: IP address | Relative time (right-aligned) */}
+              <div className="flex items-center justify-between text-[10px] text-white/80 mt-0.5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                <div className="flex items-center gap-1 truncate">
+                  <Globe className="h-2.5 w-2.5 flex-shrink-0" />
+                  <span className="truncate">{camera.ip_address || '-'}</span>
+                </div>
+                <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
+                  <Clock className="h-2.5 w-2.5" />
+                  <span>{lastSnapshotAt ? `${formatRelativeTime(lastSnapshotAt)} 更新` : '--'}</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </Card>
     )
@@ -323,7 +334,6 @@ export function CameraTile({
         !isOnAir && severity >= 3 && "ring-2 ring-red-500",
         !isOnAir && isTimeout && "ring-2 ring-orange-500"
       )}
-      style={{ maxHeight: maxHeight ? `${maxHeight}px` : undefined }}
       onClick={onClick}
     >
       <div className="relative bg-muted overflow-hidden h-full w-full">

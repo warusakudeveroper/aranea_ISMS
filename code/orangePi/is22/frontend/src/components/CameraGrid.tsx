@@ -175,6 +175,8 @@ interface SortableCameraTileProps {
   tileHeight?: number
   isOnAir?: boolean
   isDragging?: boolean
+  /** Issue #108: モバイル表示モード */
+  isMobile?: boolean
 }
 
 function SortableCameraTile({
@@ -288,7 +290,7 @@ export function CameraGrid({
   containerWidth,
   onAirCameraIds = [],
   // Issue #108: モバイル対応
-  isMobile: _isMobile = false,  // Reserved for future mobile-specific behavior
+  isMobile = false,
   columns = DEFAULT_COLUMNS,
   allowScroll = false,
 }: CameraGridProps) {
@@ -475,6 +477,7 @@ export function CameraGrid({
                 errorMessage={status?.error}
                 tileHeight={tileHeight}
                 isOnAir={isOnAir}
+                isMobile={isMobile}
               />
             )
           })}
