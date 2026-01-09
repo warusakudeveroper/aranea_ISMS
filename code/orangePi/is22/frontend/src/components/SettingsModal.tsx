@@ -23,6 +23,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Slider } from "@/components/ui/slider"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Server,
   Activity,
@@ -48,6 +56,10 @@ import {
   Tags,
   Bell,
   Search,
+  Bot,
+  Link2Off,
+  FileText,
+  Sliders,
 } from "lucide-react"
 import { API_BASE_URL } from "@/lib/config"
 import { PerformanceDashboard } from "@/components/PerformanceDashboard"
@@ -144,6 +156,57 @@ interface StorageSettings {
   }
 }
 
+// AI Assistant settings (Paraclate module placeholder)
+interface AIAssistantSettings {
+  suggestionFrequency: number  // 0=OFF, 1=低, 2=中, 3=高
+  paraclate: {
+    reportIntervalMinutes: number
+    grandSummaryTimes: string[]
+    reportDetail: "concise" | "standard" | "detailed"
+    instantAlertOnAnomaly: boolean
+    autoTuningEnabled: boolean
+    tuningFrequency: "daily" | "weekly" | "monthly"
+    tuningAggressiveness: number  // 0-100
+    contextNote: string
+  }
+}
+
+const AI_ASSISTANT_SETTINGS_KEY = "ai_assistant_settings"
+
+const defaultAIAssistantSettings: AIAssistantSettings = {
+  suggestionFrequency: 2,  // 中
+  paraclate: {
+    reportIntervalMinutes: 60,
+    grandSummaryTimes: ["09:00", "17:00", "21:00"],
+    reportDetail: "standard",
+    instantAlertOnAnomaly: true,
+    autoTuningEnabled: true,
+    tuningFrequency: "weekly",
+    tuningAggressiveness: 50,
+    contextNote: "",
+  },
+}
+
+export function loadAIAssistantSettings(): AIAssistantSettings {
+  try {
+    const stored = localStorage.getItem(AI_ASSISTANT_SETTINGS_KEY)
+    if (stored) {
+      return { ...defaultAIAssistantSettings, ...JSON.parse(stored) }
+    }
+  } catch (e) {
+    console.error("Failed to load AI assistant settings:", e)
+  }
+  return defaultAIAssistantSettings
+}
+
+function saveAIAssistantSettings(settings: AIAssistantSettings): void {
+  try {
+    localStorage.setItem(AI_ASSISTANT_SETTINGS_KEY, JSON.stringify(settings))
+  } catch (e) {
+    console.error("Failed to save AI assistant settings:", e)
+  }
+}
+
 export function SettingsModal({
   open,
   onOpenChange,
@@ -175,6 +238,9 @@ export function SettingsModal({
 
   // Camera list for diagnostics (T3-3)
   const [cameras, setCameras] = useState<CameraType[]>([])
+
+  // AI Assistant settings (Paraclate placeholder)
+  const [aiSettings, setAiSettings] = useState<AIAssistantSettings>(() => loadAIAssistantSettings())
 
   // Fetch cameras list for diagnostics
   const fetchCameras = useCallback(async () => {
@@ -569,7 +635,7 @@ export function SettingsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
+      <DialogContent className="max-w-6xl h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="h-5 w-5" />
@@ -578,7 +644,7 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-10">
+          <TabsList className="grid w-full grid-cols-11">
             <TabsTrigger value="display" className="flex items-center gap-1 text-xs">
               <Video className="h-4 w-4" />
               表示
@@ -614,6 +680,10 @@ export function SettingsModal({
             <TabsTrigger value="dashboard" className="flex items-center gap-1 text-xs">
               <Gauge className="h-4 w-4" />
               統計
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="flex items-center gap-1 text-xs">
+              <Bot className="h-4 w-4" />
+              AI
             </TabsTrigger>
             <TabsTrigger value="brands" className="flex items-center gap-1 text-xs">
               <Tags className="h-4 w-4" />
@@ -1524,6 +1594,278 @@ export function SettingsModal({
                 </h3>
                 <PerformanceDashboard />
               </div>
+            </div>
+          </TabsContent>
+
+          {/* AI Assistant Settings Tab (Paraclate placeholder) */}
+          <TabsContent value="ai" className="flex-1 overflow-auto mt-4">
+            <div className="space-y-4">
+              {/* Suggestion Frequency Settings */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Sliders className="h-4 w-4" />
+                    検出傾向調整サジェスト
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-3">
+                    <Label>サジェスト頻度</Label>
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1">
+                        <Slider
+                          value={[aiSettings.suggestionFrequency]}
+                          onValueChange={(value) => {
+                            const newSettings = { ...aiSettings, suggestionFrequency: value[0] }
+                            setAiSettings(newSettings)
+                            saveAIAssistantSettings(newSettings)
+                          }}
+                          min={0}
+                          max={3}
+                          step={1}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground px-1">
+                      <span>OFF</span>
+                      <span>低</span>
+                      <span>中</span>
+                      <span>高</span>
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted/50 text-sm">
+                    {aiSettings.suggestionFrequency === 0 && (
+                      <p className="text-muted-foreground">サジェストを無効化。検出傾向の調整提案は表示されません。</p>
+                    )}
+                    {aiSettings.suggestionFrequency === 1 && (
+                      <p>低頻度: 明らかな問題がある場合のみサジェストを表示</p>
+                    )}
+                    {aiSettings.suggestionFrequency === 2 && (
+                      <p>中頻度（推奨）: バランスの取れたサジェスト表示</p>
+                    )}
+                    {aiSettings.suggestionFrequency === 3 && (
+                      <p>高頻度: 積極的にサジェストを表示して調整を促進</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Paraclate Integration Settings (Placeholder) */}
+              <Card className="border-dashed">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Paraclate連携（mobes2.0）
+                    <Badge variant="secondary" className="ml-2">準備中</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Scheduled Report Settings */}
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-medium flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                      定時報告設定
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="report-interval">通常報告間隔（分）</Label>
+                        <Input
+                          id="report-interval"
+                          type="number"
+                          min={15}
+                          max={240}
+                          value={aiSettings.paraclate.reportIntervalMinutes}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10)
+                            if (!isNaN(v) && v >= 15 && v <= 240) {
+                              const newSettings = {
+                                ...aiSettings,
+                                paraclate: { ...aiSettings.paraclate, reportIntervalMinutes: v }
+                              }
+                              setAiSettings(newSettings)
+                              saveAIAssistantSettings(newSettings)
+                            }
+                          }}
+                          disabled
+                          className="opacity-60"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>GrandSummary時刻</Label>
+                        <div className="flex flex-wrap gap-1">
+                          {aiSettings.paraclate.grandSummaryTimes.map((time, i) => (
+                            <Badge key={i} variant="outline" className="opacity-60">{time}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-amber-600 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      mobes2.0への接続設定後に有効化されます
+                    </p>
+                  </div>
+
+                  {/* Report Context Settings */}
+                  <div className="space-y-3 pt-3 border-t">
+                    <h4 className="text-sm font-medium flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      報告コンテキスト
+                    </h4>
+                    <div className="space-y-2">
+                      <Label htmlFor="context-note">重視するポイント</Label>
+                      <textarea
+                        id="context-note"
+                        className="w-full min-h-[80px] p-2 border rounded-md text-sm resize-none opacity-60"
+                        placeholder="例: 不審者の検出を重視。深夜帯の動体検知は特に注意して報告してください。"
+                        value={aiSettings.paraclate.contextNote}
+                        onChange={(e) => {
+                          const newSettings = {
+                            ...aiSettings,
+                            paraclate: { ...aiSettings.paraclate, contextNote: e.target.value }
+                          }
+                          setAiSettings(newSettings)
+                          saveAIAssistantSettings(newSettings)
+                        }}
+                        disabled
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>報告の詳細度</Label>
+                        <Select
+                          value={aiSettings.paraclate.reportDetail}
+                          onValueChange={(value: "concise" | "standard" | "detailed") => {
+                            const newSettings = {
+                              ...aiSettings,
+                              paraclate: { ...aiSettings.paraclate, reportDetail: value }
+                            }
+                            setAiSettings(newSettings)
+                            saveAIAssistantSettings(newSettings)
+                          }}
+                          disabled
+                        >
+                          <SelectTrigger className="opacity-60">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="concise">簡潔</SelectItem>
+                            <SelectItem value="standard">標準</SelectItem>
+                            <SelectItem value="detailed">詳細</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2 pt-6">
+                        <input
+                          type="checkbox"
+                          id="instant-alert"
+                          checked={aiSettings.paraclate.instantAlertOnAnomaly}
+                          onChange={(e) => {
+                            const newSettings = {
+                              ...aiSettings,
+                              paraclate: { ...aiSettings.paraclate, instantAlertOnAnomaly: e.target.checked }
+                            }
+                            setAiSettings(newSettings)
+                            saveAIAssistantSettings(newSettings)
+                          }}
+                          disabled
+                          className="opacity-60"
+                        />
+                        <Label htmlFor="instant-alert" className="text-sm opacity-60">異常検出時の即時通知</Label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI Attunement Settings */}
+                  <div className="space-y-3 pt-3 border-t">
+                    <h4 className="text-sm font-medium flex items-center gap-2">
+                      <Sliders className="h-4 w-4 text-muted-foreground" />
+                      AIアチューンメント
+                    </h4>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="auto-tuning"
+                          checked={aiSettings.paraclate.autoTuningEnabled}
+                          onChange={(e) => {
+                            const newSettings = {
+                              ...aiSettings,
+                              paraclate: { ...aiSettings.paraclate, autoTuningEnabled: e.target.checked }
+                            }
+                            setAiSettings(newSettings)
+                            saveAIAssistantSettings(newSettings)
+                          }}
+                          disabled
+                          className="opacity-60"
+                        />
+                        <Label htmlFor="auto-tuning" className="text-sm opacity-60">自動チューニング提案を有効化</Label>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>提案頻度</Label>
+                          <Select
+                            value={aiSettings.paraclate.tuningFrequency}
+                            onValueChange={(value: "daily" | "weekly" | "monthly") => {
+                              const newSettings = {
+                                ...aiSettings,
+                                paraclate: { ...aiSettings.paraclate, tuningFrequency: value }
+                              }
+                              setAiSettings(newSettings)
+                              saveAIAssistantSettings(newSettings)
+                            }}
+                            disabled
+                          >
+                            <SelectTrigger className="opacity-60">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="daily">毎日</SelectItem>
+                              <SelectItem value="weekly">週1回</SelectItem>
+                              <SelectItem value="monthly">月1回</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>チューニング積極性</Label>
+                          <div className="pt-2 opacity-60">
+                            <Slider
+                              value={[aiSettings.paraclate.tuningAggressiveness]}
+                              onValueChange={(value) => {
+                                const newSettings = {
+                                  ...aiSettings,
+                                  paraclate: { ...aiSettings.paraclate, tuningAggressiveness: value[0] }
+                                }
+                                setAiSettings(newSettings)
+                                saveAIAssistantSettings(newSettings)
+                              }}
+                              min={0}
+                              max={100}
+                              step={10}
+                              disabled
+                            />
+                            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                              <span>保守的</span>
+                              <span>積極的</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Connection Status (Placeholder) */}
+                  <div className="pt-3 border-t">
+                    <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
+                      <Link2Off className="h-5 w-5 text-muted-foreground" />
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Paraclate API: 未接続</p>
+                        <p className="text-xs text-muted-foreground">最終同期: --</p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
 

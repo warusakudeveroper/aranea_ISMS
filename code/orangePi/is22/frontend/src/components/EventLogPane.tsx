@@ -38,6 +38,8 @@ import { cn } from "@/lib/utils"
 import { API_BASE_URL } from "@/lib/config"
 import { ChatInput } from "./ChatInput"
 import { DetectionDetailModal } from "./DetectionDetailModal"
+import { loadAIAssistantSettings } from "./SettingsModal"
+import aichatIcon from "@/assets/aichat_icon.svg"
 
 // Execution state for patrol ticker
 type ExecutionState = "idle" | "accessing" | "cooldown" | "waiting"
@@ -652,14 +654,34 @@ export function EventLogPane({
 
     const checkOverdetection = async () => {
       try {
+        // Check suggestion frequency setting
+        const aiSettings = loadAIAssistantSettings()
+        const frequency = aiSettings.suggestionFrequency
+
+        // If frequency is 0 (OFF), skip suggestions entirely
+        if (frequency === 0) {
+          setCheckedOverdetection(true)
+          return
+        }
+
         const response = await fetch(`${API_BASE_URL}/api/stats/overdetection?period=24h`)
         const data = await response.json()
 
         if (!data.ok || !data.data?.cameras) return
 
+        // Frequency-based severity filtering:
+        // 1 (低): only critical
+        // 2 (中): warning and critical
+        // 3 (高): all issues including info
+        const severityFilter = (severity: string) => {
+          if (frequency === 1) return severity === 'critical'
+          if (frequency === 2) return severity === 'warning' || severity === 'critical'
+          return true // frequency === 3: all severities
+        }
+
         const camerasWithIssues = data.data.cameras.filter(
           (c: { camera_id: string; issues: { severity: string }[] }) =>
-            c.issues.some(i => i.severity === 'warning' || i.severity === 'critical')
+            c.issues.some(i => severityFilter(i.severity))
         )
 
         if (camerasWithIssues.length === 0) {
@@ -768,10 +790,8 @@ export function EventLogPane({
 
       if (response.ok) {
         const presetName = PRESET_NAMES[presetId] || presetId
-        // Mark message as handled and add confirmation
-        setChatMessages(prev => prev.map(msg =>
-          msg.id === messageId ? { ...msg, handled: true } : msg
-        ))
+        // Delete the suggestion message and add confirmation
+        setChatMessages(prev => prev.filter(msg => msg.id !== messageId))
         setChatMessages(prev => [...prev, {
           id: `confirm-${Date.now()}`,
           role: "assistant",
@@ -875,45 +895,54 @@ export function EventLogPane({
               質問を入力してください
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {chatMessages.map((msg) => (
                 <div
                   key={msg.id}
                   className={cn(
                     "flex",
-                    msg.role === "user" ? "justify-end" : "justify-start"
+                    msg.role === "user" ? "justify-end" : "justify-start items-start gap-2"
                   )}
                 >
+                  {/* AI Avatar - only for assistant/system messages */}
+                  {msg.role !== "user" && (
+                    <img
+                      src={aichatIcon}
+                      alt="AI"
+                      className="w-8 h-8 flex-shrink-0 rounded-full bg-white p-0.5"
+                    />
+                  )}
+                  {/* Message Bubble */}
                   <div
                     className={cn(
-                      "max-w-[85%] text-xs px-3 py-2 rounded-2xl",
-                      // User message: blue background, white text, right tail
-                      msg.role === "user" && "bg-blue-500 text-white rounded-br-sm",
+                      "max-w-[80%] text-xs px-3 py-2 rounded-2xl shadow-sm",
+                      // User message: iOS blue background, white text, right tail
+                      msg.role === "user" && "bg-[#007AFF] text-white rounded-tr-sm",
                       // System/Assistant message: light gray background, dark text, left tail
-                      (msg.role === "system" || msg.role === "assistant") && "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm"
+                      (msg.role === "system" || msg.role === "assistant") && "bg-[#F0F0F0] text-[#1A1A1A] rounded-tl-sm"
                     )}
                   >
                     {/* Message content */}
                     <div className="leading-relaxed">{msg.content}</div>
                     {/* Timestamp */}
                     <div className={cn(
-                      "text-[9px] mt-1 opacity-60",
-                      msg.role === "user" ? "text-right text-blue-100" : "text-right text-gray-500 dark:text-gray-400"
+                      "text-[9px] mt-1",
+                      msg.role === "user" ? "text-right text-white/70" : "text-right text-gray-500"
                     )}>
                       {msg.timestamp.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
                     </div>
                     {/* Action buttons for system messages with actionMeta */}
                     {msg.role === "system" && msg.actionMeta && !msg.handled && (
-                      <div className="flex gap-2 mt-2 pt-2 border-t border-gray-300 dark:border-gray-600">
+                      <div className="flex gap-2 mt-2 pt-2 border-t border-gray-300">
                         <button
                           onClick={() => handlePresetChange(msg.actionMeta!.cameraId, msg.actionMeta!.presetId, msg.id)}
-                          className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-blue-500 hover:bg-blue-600 text-white"
+                          className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-[#007AFF] hover:bg-[#0066CC] text-white"
                         >
                           はい
                         </button>
                         <button
                           onClick={() => handleDismissSuggestion(msg.id)}
-                          className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200"
+                          className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-gray-300 hover:bg-gray-400 text-gray-700"
                         >
                           いいえ
                         </button>
@@ -921,7 +950,7 @@ export function EventLogPane({
                     )}
                     {/* Handled indicator */}
                     {msg.role === "system" && msg.handled && (
-                      <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <div className="mt-1.5 text-[10px] text-gray-500 flex items-center gap-1">
                         <span>✓</span>
                         <span>対応済み</span>
                       </div>
