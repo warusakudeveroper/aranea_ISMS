@@ -275,21 +275,25 @@ export function SuggestPane({
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className={cn(
+      "h-full flex",
+      // Issue #108: モバイル=横並び（左から右へ）、PC=縦並び（上から下へ）
+      isMobile ? "flex-row" : "flex-col"
+    )}>
       <AnimatePresence mode="popLayout">
         {visibleCameras.map((cam, index) => (
           <motion.div
             key={cam.lacisId}
             layout
             layoutId={cam.lacisId}
-            // Issue #108: PC=top-in/left-out, モバイル=left-in/top-out
+            // Issue #108: PC=top-in/left-out, モバイル=left-in/right-out
             initial={isMobile
               ? { opacity: 0, x: -100 }   // モバイル: 左からスライドイン
               : { opacity: 0, y: -50 }    // PC: 上からスライドイン
             }
             animate={{ opacity: 1, x: 0, y: 0 }}
             exit={isMobile
-              ? { opacity: 0, y: -100 }   // モバイル: 上にスライドアウト
+              ? { opacity: 0, x: 100 }    // モバイル: 右にスライドアウト
               : { opacity: 0, x: -100 }   // PC: 左にスライドアウト
             }
             transition={{
@@ -297,10 +301,13 @@ export function SuggestPane({
               opacity: { duration: 0.2 }
             }}
             className={cn(
-              // Fixed 1/3 height (not flex-1)
-              "h-1/3 relative overflow-hidden bg-black",
+              // Issue #108: モバイル=横幅1/3（縦長）、PC=高さ1/3
+              isMobile ? "w-1/3 h-full" : "h-1/3 w-full",
+              "relative overflow-hidden bg-black",
               // Minimal gap (1px border)
-              index > 0 && "border-t border-white/10"
+              isMobile
+                ? index > 0 && "border-l border-white/10"
+                : index > 0 && "border-t border-white/10"
             )}
           >
           {/* Video Player */}
@@ -322,26 +329,46 @@ export function SuggestPane({
           {/* Detection Badge - Top Left */}
           <Badge
             variant={getSeverityVariant(cam.severity)}
-            className="absolute top-2 left-2 text-xs"
+            className={cn(
+              "absolute text-xs",
+              // Issue #108: モバイル時は小さめ
+              isMobile ? "top-1 left-1 text-[10px] px-1 py-0" : "top-2 left-2"
+            )}
           >
             {cam.primaryEvent}
           </Badge>
 
           {/* LIVE Indicator - Top Right */}
-          <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 bg-red-600 text-white text-xs">
-            <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+          <div className={cn(
+            "absolute flex items-center gap-1 bg-red-600 text-white",
+            // Issue #108: モバイル時は小さめ
+            isMobile ? "top-1 right-1 px-1 py-0 text-[10px]" : "top-2 right-2 px-2 py-0.5 text-xs"
+          )}>
+            <span className={cn(
+              "bg-white rounded-full animate-pulse",
+              isMobile ? "w-1 h-1" : "w-1.5 h-1.5"
+            )} />
             LIVE
           </div>
 
           {/* Camera Info Overlay - Bottom */}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent p-2 pt-6">
-            <p className="text-white text-sm font-medium truncate">
+          <div className={cn(
+            "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent",
+            // Issue #108: モバイル時はコンパクト
+            isMobile ? "p-1 pt-4" : "p-2 pt-6"
+          )}>
+            <p className={cn(
+              "text-white font-medium truncate",
+              isMobile ? "text-[10px]" : "text-sm"
+            )}>
               {cam.cameraName}
             </p>
-            <div className="flex items-center gap-1 text-white/70 text-xs mt-0.5">
-              <Globe className="h-3 w-3" />
-              <span>{cam.ipAddress}</span>
-            </div>
+            {!isMobile && (
+              <div className="flex items-center gap-1 text-white/70 text-xs mt-0.5">
+                <Globe className="h-3 w-3" />
+                <span>{cam.ipAddress}</span>
+              </div>
+            )}
           </div>
         </motion.div>
       ))}

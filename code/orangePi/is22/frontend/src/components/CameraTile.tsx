@@ -284,10 +284,15 @@ export function CameraTile({
 
           {/* Overlay info - Issue #108: モバイル時は簡素化 */}
           {isMobile ? (
-            /* モバイル: 最小限のオーバーレイ - 時間のみ表示 */
-            <div className="absolute bottom-0 right-0 px-1 py-0.5 bg-black/60 text-[8px] text-white/90 rounded-tl">
-              <Clock className="h-2 w-2 inline mr-0.5" />
-              {lastSnapshotAt ? formatRelativeTime(lastSnapshotAt) : '--'}
+            /* モバイル: コンパクトオーバーレイ - カメラ名 + 時間 */
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-1 py-0.5">
+              <div className="flex items-center justify-between text-[8px] text-white/90">
+                <span className="truncate max-w-[60%] font-medium">{camera.name}</span>
+                <span className="flex items-center gap-0.5 flex-shrink-0">
+                  <Clock className="h-2 w-2" />
+                  {lastSnapshotAt ? formatRelativeTime(lastSnapshotAt) : '--'}
+                </span>
+              </div>
             </div>
           ) : (
             /* デスクトップ: フル表示 */

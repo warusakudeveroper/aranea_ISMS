@@ -174,12 +174,13 @@ function SubnetCredentialEditor({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-[500px] max-h-[80vh] overflow-auto rounded-lg bg-white p-6 shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      {/* Issue #108: モバイル対応 */}
+      <div className="w-full max-w-[500px] max-h-[80vh] overflow-auto rounded-lg bg-white p-4 md:p-6 shadow-lg">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold flex items-center gap-2">
+          <h3 className="text-base md:text-lg font-semibold flex items-center gap-2">
             <Settings2 className="h-5 w-5" />
-            サブネット設定: {subnet.cidr}
+            <span className="truncate">設定: {subnet.cidr}</span>
           </h3>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <XCircle className="h-4 w-4" />
@@ -1464,11 +1465,13 @@ export function ScanModal({
   return (
     <>
       <Dialog open={open} onOpenChange={handleCloseAttempt}>
-        <DialogContent className="w-[60vw] min-w-[800px] max-w-[1200px] h-[90vh] overflow-hidden flex flex-col">
+        {/* Issue #108: モバイル対応 - 画面幅に応じてサイズ調整 */}
+        <DialogContent className="w-[95vw] md:w-[60vw] md:min-w-[800px] max-w-[1200px] h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Search className="h-5 w-5" />
-              カメラスキャン
+              <span className="hidden sm:inline">カメラスキャン</span>
+              <span className="sm:hidden">スキャン</span>
               {selectedSubnets.length > 0 && (
                 <Badge variant="secondary" className="ml-2">
                   {selectedSubnets.length}サブネット

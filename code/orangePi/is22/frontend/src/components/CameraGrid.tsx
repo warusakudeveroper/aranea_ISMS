@@ -204,16 +204,22 @@ function SortableCameraTile({
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="relative group/sortable h-full">
-      {/* Drag handle - visible on hover */}
-      <div
-        {...attributes}
-        {...listeners}
-        className="absolute top-1 left-1 z-10 p-1 rounded bg-black/50 cursor-grab active:cursor-grabbing opacity-0 group-hover/sortable:opacity-100 transition-opacity"
-        title="ドラッグで並べ替え"
-      >
-        <GripVertical className="h-4 w-4 text-white" />
-      </div>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`relative group/sortable ${isMobile ? '' : 'h-full'}`}
+    >
+      {/* Drag handle - visible on hover (モバイルでは非表示) */}
+      {!isMobile && (
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute top-1 left-1 z-10 p-1 rounded bg-black/50 cursor-grab active:cursor-grabbing opacity-0 group-hover/sortable:opacity-100 transition-opacity"
+          title="ドラッグで並べ替え"
+        >
+          <GripVertical className="h-4 w-4 text-white" />
+        </div>
+      )}
       <CameraTile camera={camera} isMobile={isMobile} {...props} />
     </div>
   )
@@ -448,11 +454,12 @@ export function CameraGrid({
         {/* tileHeightが指定されている場合、gridAutoRowsで行高を固定 */}
         {/* これにより正方形モードでも圧縮モードでも確実にタイル高さを制御 */}
         {/* Issue #108: 動的列数対応 (PC:4列, モバイル:3列) */}
+        {/* Issue #108: モバイル時はaspectRatioでタイルサイズを制御するためgridAutoRowsは使わない */}
         <div
           className="grid gap-2"
           style={{
             gridTemplateColumns: `repeat(${columns}, 1fr)`,
-            ...(tileHeight ? { gridAutoRows: `${tileHeight}px` } : {})
+            ...(!isMobile && tileHeight ? { gridAutoRows: `${tileHeight}px` } : {})
           }}
         >
           {displayedCameras.map((camera) => {
