@@ -178,6 +178,8 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/api/sdm", super::sdm_routes::sdm_routes())
         // AraneaRegister (Phase 1: Issue #114)
         .nest("/api/register", super::register_routes::register_routes())
+        // Summary/GrandSummary (Phase 3: Issue #116)
+        .nest("/api", super::summary_routes::summary_routes())
         .with_state(state)
 }
 

@@ -25,6 +25,7 @@
 pub mod aranea_register;
 pub mod camera_registry;
 pub mod camera_brand;
+pub mod summary_service;
 pub mod config_store;
 pub mod sdm_integration;
 pub mod admission_controller;

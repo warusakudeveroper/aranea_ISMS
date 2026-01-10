@@ -25,7 +25,7 @@
 
 ### T3-1: SummaryOverview設計・データモデル
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -35,8 +35,8 @@
 - SummaryPayload型定義
 
 **成果物**:
-- `migrations/019_summary_service.sql`
-- `src/summary_service/types.rs`
+- `migrations/022_summary_service.sql` ✅
+- `src/summary_service/types.rs` ✅
 
 **summaryID形式**（CONSISTENCY_CHECK P1-1対応）:
 - DBのsummary_id（BIGINT AUTO_INCREMENT）を正本
@@ -50,7 +50,7 @@
 
 ### T3-2: summary_generator.rs 実装
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: L
 
@@ -64,8 +64,8 @@
 - `build_summary_json()`: Paraclate送信用JSONペイロード構築
 
 **成果物**:
-- `src/summary_service/generator.rs`
-- `src/summary_service/payload_builder.rs`
+- `src/summary_service/generator.rs` ✅
+- `src/summary_service/payload_builder.rs` ✅
 
 **検証方法**:
 - 空期間→空Summary
@@ -75,7 +75,7 @@
 
 ### T3-3: ai_summary_cache リポジトリ
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -91,7 +91,7 @@
 - `update_summary_json()`
 
 **成果物**:
-- `src/summary_service/repository.rs`
+- `src/summary_service/repository.rs` ✅
 
 **検証方法**:
 - CRUD操作テスト
@@ -100,7 +100,7 @@
 
 ### T3-4: 定時実行スケジューラ
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: L
 
@@ -114,7 +114,7 @@
 - UTCとの変換を正確に実装
 
 **成果物**:
-- `src/summary_service/scheduler.rs`
+- `src/summary_service/scheduler.rs` ✅
 
 **検証方法**:
 - スケジュール時刻到達→自動実行
@@ -124,7 +124,7 @@
 
 ### T3-5: Summary API実装
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -137,9 +137,13 @@
 | `/api/summary/latest` | GET | 最新Summary取得 |
 | `/api/summary/:id` | GET | 特定Summary取得 |
 | `/api/summary/range` | GET | 期間指定一覧 |
+| `/api/grand-summary/latest` | GET | 最新GrandSummary |
+| `/api/grand-summary/:date` | GET | 日付指定GrandSummary |
+| `/api/reports/schedule` | GET | スケジュール取得 |
+| `/api/reports/schedule` | PUT | スケジュール更新 |
 
 **成果物**:
-- `src/web_api/summary_routes.rs`
+- `src/web_api/summary_routes.rs` ✅
 
 **検証方法**:
 - API呼び出しテスト
@@ -148,7 +152,7 @@
 
 ### T3-6: GrandSummary設計
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -158,8 +162,8 @@
 - 日次境界はAsia/Tokyo基準
 
 **成果物**:
-- GrandSummary JSON仕様
-- 統合アルゴリズム
+- GrandSummary JSON仕様 ✅
+- 統合アルゴリズム ✅
 
 **検証方法**:
 - hourly 24件→daily 1件統合
@@ -168,7 +172,7 @@
 
 ### T3-7: grand_summary.rs 実装
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -177,9 +181,11 @@
 
 **主要メソッド**:
 - `generate()`: 日付指定でGrandSummary生成
+- `get_latest()`: 最新GrandSummary取得
+- `get_by_date()`: 日付指定取得
 
 **成果物**:
-- `src/summary_service/grand_summary.rs`
+- `src/summary_service/grand_summary.rs` ✅
 
 **検証方法**:
 - 統合値正確
@@ -189,7 +195,7 @@
 
 ### T3-8: Summary→GrandSummary統合テスト
 
-**状態**: ⬜ NOT_STARTED
+**状態**: 🔄 IN_PROGRESS
 **優先度**: P1（品質改善）
 **見積もり規模**: M
 
@@ -284,3 +290,4 @@
 | 日付 | 更新内容 |
 |------|---------|
 | 2026-01-10 | 初版作成 |
+| 2026-01-10 | T3-1〜T3-7 COMPLETED、T3-8 IN_PROGRESS |

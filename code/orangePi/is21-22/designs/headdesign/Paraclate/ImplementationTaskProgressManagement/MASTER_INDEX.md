@@ -2,7 +2,7 @@
 
 作成日: 2026-01-10
 最終更新: 2026-01-10
-バージョン: 1.4.0
+バージョン: 1.5.0
 
 ---
 
@@ -58,11 +58,11 @@
 |-------|------|-----------|---------|-------|
 | Phase 1 | ✅ | 7 | 7 | 100% |
 | Phase 2 | ✅ | 7 | 7 | 100% |
-| Phase 3 | ⬜ | 0 | 8 | 0% |
+| Phase 3 | 🔄 | 7 | 8 | 88% |
 | Phase 4 | ⬜ | 0 | 7 | 0% |
 | Phase 5 | ⬜ | 0 | 7 | 0% |
 | Phase 6 | 🔄 | 8 | 9 | 89% |
-| **合計** | | **22** | **45** | **49%** |
+| **合計** | | **29** | **45** | **64%** |
 
 ### Phase 1 タスク詳細
 
@@ -87,6 +87,19 @@
 | T2-5 | ログ検索API拡張 | ✅ COMPLETED |
 | T2-6 | カメラステータス管理 | ✅ COMPLETED |
 | T2-7 | カメラコンテキスト管理 | ✅ COMPLETED |
+
+### Phase 3 タスク詳細
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T3-1 | SummaryOverview設計・データモデル | ✅ COMPLETED |
+| T3-2 | summary_generator.rs 実装 | ✅ COMPLETED |
+| T3-3 | ai_summary_cache リポジトリ | ✅ COMPLETED |
+| T3-4 | 定時実行スケジューラ | ✅ COMPLETED |
+| T3-5 | Summary API実装 | ✅ COMPLETED |
+| T3-6 | GrandSummary設計 | ✅ COMPLETED |
+| T3-7 | grand_summary.rs 実装 | ✅ COMPLETED |
+| T3-8 | Summary→GrandSummary統合テスト | 🔄 IN_PROGRESS |
 
 ### Phase 6 タスク詳細
 
@@ -269,3 +282,4 @@ T1-1 → T1-2 → T1-3 → T2-1 → T2-2 → T3-1 → T3-2 → T4-1 → T4-4 →
 | 2026-01-10 | 1.2.0 | **Phase 6追加**（IS21 Baseline）、DD06/DD07作成、Linux共通モジュール仕様追加 | Claude |
 | 2026-01-10 | 1.3.0 | **Phase 6 実装完了（8/9）**: MqttManager, StateReporter, 設定スキーマ, MQTTハンドラ実装。統合テスト待ち | Claude |
 | 2026-01-10 | 1.4.0 | **Phase 2 完了（7/7）**: CameraRegistry全タスク完了。camera_registry module (service, repository, lacis_id, context, ipcam_connector)、detection_log_service拡張、camera_status_tracker拡張 | Claude |
+| 2026-01-10 | 1.5.0 | **Phase 3 進行中（7/8）**: Summary/GrandSummary実装完了。summary_service module (types, repository, generator, grand_summary, scheduler, payload_builder)、summary_routes.rs API実装。統合テスト待ち | Claude |

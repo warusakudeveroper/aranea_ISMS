@@ -8,6 +8,7 @@ use is22_camserver::{
     aranea_register::AraneaRegisterService,
     auto_attunement::AutoAttunementService,
     camera_brand::CameraBrandService,
+    camera_registry::CameraContextService,
     camera_status_tracker::CameraStatusTracker,
     config_store::ConfigStore,
     detection_log_service::DetectionLogService,
@@ -23,6 +24,9 @@ use is22_camserver::{
     snapshot_service::SnapshotService,
     stream_gateway::StreamGateway,
     suggest_engine::SuggestEngine,
+    summary_service::{
+        GrandSummaryGenerator, ScheduleRepository, SummaryGenerator, SummaryRepository,
+    },
     state::{AppConfig, AppState, SystemHealth},
     web_api,
 };
@@ -211,6 +215,19 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // Initialize Summary Service components (Phase 3: Issue #116)
+    let summary_repository = SummaryRepository::new(pool.clone());
+    let schedule_repository = ScheduleRepository::new(pool.clone());
+    let camera_context_service = CameraContextService::new(pool.clone());
+    let summary_generator = Arc::new(SummaryGenerator::new(
+        detection_log.clone(),
+        camera_context_service,
+        summary_repository.clone(),
+        config_store.clone(),
+    ));
+    let grand_summary_generator = Arc::new(GrandSummaryGenerator::new(summary_repository.clone()));
+    tracing::info!("Summary Service initialized (SummaryGenerator, GrandSummaryGenerator, Repositories)");
+
     // Create application state
     let state = AppState {
         pool,
@@ -234,6 +251,10 @@ async fn main() -> anyhow::Result<()> {
         auto_attunement,
         overdetection_analyzer,
         aranea_register,
+        summary_generator,
+        grand_summary_generator,
+        summary_repository,
+        schedule_repository,
     };
 
     // Create router

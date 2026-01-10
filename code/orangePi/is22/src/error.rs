@@ -43,7 +43,7 @@ pub enum Error {
 
     /// Database error
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(String),
 
     /// Serialization error
     #[error("Serialization error: {0}")]
@@ -60,6 +60,22 @@ pub enum Error {
     /// Network error (AraneaRegister etc.)
     #[error("Network error: {0}")]
     Network(String),
+
+    /// Config error
+    #[error("Config error: {0}")]
+    Config(String),
+
+    /// API error
+    #[error("API error: {0}")]
+    Api(String),
+
+    /// Parse error
+    #[error("Parse error: {0}")]
+    Parse(String),
+
+    /// Summary service error
+    #[error("Summary error: {0}")]
+    Summary(String),
 
     /// Internal error
     #[error("Internal error: {0}")]
@@ -84,10 +100,10 @@ impl IntoResponse for Error {
                 "SYSTEM_OVERLOAD",
                 msg.clone(),
             ),
-            Error::Database(e) => (
+            Error::Database(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "DATABASE_ERROR",
-                e.to_string(),
+                msg.clone(),
             ),
             Error::Serialization(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -107,6 +123,26 @@ impl IntoResponse for Error {
             Error::Network(msg) => (
                 StatusCode::BAD_GATEWAY,
                 "NETWORK_ERROR",
+                msg.clone(),
+            ),
+            Error::Config(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "CONFIG_ERROR",
+                msg.clone(),
+            ),
+            Error::Api(msg) => (
+                StatusCode::BAD_GATEWAY,
+                "API_ERROR",
+                msg.clone(),
+            ),
+            Error::Parse(msg) => (
+                StatusCode::BAD_REQUEST,
+                "PARSE_ERROR",
+                msg.clone(),
+            ),
+            Error::Summary(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "SUMMARY_ERROR",
                 msg.clone(),
             ),
             Error::Internal(msg) => (

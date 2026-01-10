@@ -20,6 +20,9 @@ use crate::realtime_hub::RealtimeHub;
 use crate::snapshot_service::SnapshotService;
 use crate::stream_gateway::StreamGateway;
 use crate::suggest_engine::SuggestEngine;
+use crate::summary_service::{
+    GrandSummaryGenerator, ScheduleRepository, SummaryGenerator, SummaryRepository,
+};
 use sqlx::MySqlPool;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -117,6 +120,14 @@ pub struct AppState {
     pub overdetection_analyzer: Arc<OverdetectionAnalyzer>,
     /// AraneaRegisterService (Phase 1: Issue #114)
     pub aranea_register: Option<Arc<AraneaRegisterService>>,
+    /// SummaryGenerator (Phase 3: Issue #116)
+    pub summary_generator: Arc<SummaryGenerator>,
+    /// GrandSummaryGenerator (Phase 3: Issue #116)
+    pub grand_summary_generator: Arc<GrandSummaryGenerator>,
+    /// SummaryRepository (Phase 3: Issue #116)
+    pub summary_repository: SummaryRepository,
+    /// ScheduleRepository (Phase 3: Issue #116)
+    pub schedule_repository: ScheduleRepository,
 }
 
 /// System health metrics
