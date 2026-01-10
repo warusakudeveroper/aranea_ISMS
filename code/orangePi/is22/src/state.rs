@@ -4,6 +4,7 @@
 
 use crate::admission_controller::AdmissionController;
 use crate::ai_client::AIClient;
+use crate::aranea_register::AraneaRegisterService;
 use crate::auto_attunement::AutoAttunementService;
 use crate::camera_brand::CameraBrandService;
 use crate::config_store::ConfigStore;
@@ -41,6 +42,8 @@ pub struct AppConfig {
     pub snapshot_dir: PathBuf,
     /// Temporary directory (for prev images for IS21 diff detection)
     pub temp_dir: PathBuf,
+    /// araneaDeviceGate URL (Phase 1: AraneaRegister)
+    pub aranea_gate_url: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -64,6 +67,7 @@ impl Default for AppConfig {
             temp_dir: std::env::var("TEMP_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("/var/lib/is22/temp")),
+            aranea_gate_url: std::env::var("ARANEA_GATE_URL").ok(),
         }
     }
 }
@@ -111,6 +115,8 @@ pub struct AppState {
     pub auto_attunement: Arc<AutoAttunementService>,
     /// OverdetectionAnalyzer (Issue #107: 過剰検出分析)
     pub overdetection_analyzer: Arc<OverdetectionAnalyzer>,
+    /// AraneaRegisterService (Phase 1: Issue #114)
+    pub aranea_register: Option<Arc<AraneaRegisterService>>,
 }
 
 /// System health metrics

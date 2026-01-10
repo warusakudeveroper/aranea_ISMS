@@ -6,9 +6,11 @@
 //! - Request validation
 //! - Response formatting
 
+mod register_routes;
 mod routes;
 mod sdm_routes;
 
+pub use register_routes::register_routes;
 pub use routes::create_router;
 pub use sdm_routes::sdm_routes;
 

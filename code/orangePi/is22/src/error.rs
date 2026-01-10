@@ -57,6 +57,10 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Network error (AraneaRegister etc.)
+    #[error("Network error: {0}")]
+    Network(String),
+
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),
@@ -99,6 +103,11 @@ impl IntoResponse for Error {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "IO_ERROR",
                 e.to_string(),
+            ),
+            Error::Network(msg) => (
+                StatusCode::BAD_GATEWAY,
+                "NETWORK_ERROR",
+                msg.clone(),
             ),
             Error::Internal(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,

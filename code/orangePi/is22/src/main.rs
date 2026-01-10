@@ -5,6 +5,7 @@
 use is22_camserver::{
     admission_controller::AdmissionController,
     ai_client::AIClient,
+    aranea_register::AraneaRegisterService,
     auto_attunement::AutoAttunementService,
     camera_brand::CameraBrandService,
     camera_status_tracker::CameraStatusTracker,
@@ -197,6 +198,19 @@ async fn main() -> anyhow::Result<()> {
     ));
     tracing::info!("PollingOrchestrator initialized with AI Event Log pipeline + go2rtc cycle registration");
 
+    // Initialize AraneaRegisterService (Phase 1: Issue #114)
+    let aranea_register = if let Some(ref gate_url) = config.aranea_gate_url {
+        tracing::info!(gate_url = %gate_url, "AraneaRegisterService initializing");
+        Some(Arc::new(AraneaRegisterService::new(
+            gate_url.clone(),
+            pool.clone(),
+            config_store.clone(),
+        )))
+    } else {
+        tracing::info!("AraneaRegisterService disabled (ARANEA_GATE_URL not set)");
+        None
+    };
+
     // Create application state
     let state = AppState {
         pool,
@@ -219,6 +233,7 @@ async fn main() -> anyhow::Result<()> {
         inference_stats,
         auto_attunement,
         overdetection_analyzer,
+        aranea_register,
     };
 
     // Create router

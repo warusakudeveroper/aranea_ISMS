@@ -176,6 +176,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/ws", get(websocket_handler))
         // SDM (Google Nest Doorbell Integration)
         .nest("/api/sdm", super::sdm_routes::sdm_routes())
+        // AraneaRegister (Phase 1: Issue #114)
+        .nest("/api/register", super::register_routes::register_routes())
         .with_state(state)
 }
 
