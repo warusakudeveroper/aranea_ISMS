@@ -88,7 +88,7 @@ export interface Camera {
   polling_enabled: boolean;
   polling_interval_sec: number;
   suggest_policy_weight: number;
-  camera_context: Record<string, unknown> | null;
+  camera_context: string | Record<string, unknown> | null;
   rotation: number;             // 表示回転角度 (0/90/180/270)
   fit_mode: 'fit' | 'trim';     // fit=画像全体収める, trim=カード埋める(デフォルト)
   fid: string | null;           // ファシリティID
@@ -179,7 +179,7 @@ export interface UpdateCameraRequest {
   polling_interval_sec?: number;
   suggest_policy_weight?: number;
   // === カメラコンテキスト・表示 ===
-  camera_context?: Record<string, unknown>;
+  camera_context?: string | Record<string, unknown>;
   rotation?: number;
   fit_mode?: 'fit' | 'trim';
   sort_order?: number;
@@ -788,7 +788,7 @@ export interface SdmRegisterDeviceRequest {
   location: string;
   fid: string;
   tid: string;
-  camera_context?: Record<string, unknown>;
+  camera_context?: string | Record<string, unknown>;
   snapshot_interval_sec?: number;
 }
 

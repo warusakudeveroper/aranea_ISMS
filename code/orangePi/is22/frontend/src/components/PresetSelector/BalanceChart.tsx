@@ -31,10 +31,10 @@ const Bar: React.FC<BarProps> = ({ label, value, color, isAnimating }) => {
   return (
     <div className="mb-3">
       <div className="flex justify-between text-xs mb-1">
-        <span className="text-gray-300">{label}</span>
-        <span className="text-gray-400">{value}%</span>
+        <span className="text-muted-foreground">{label}</span>
+        <span className="text-muted-foreground/70">{value}%</span>
       </div>
-      <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+      <div className="h-3 bg-muted rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full ${isAnimating ? 'transition-none' : 'transition-all duration-200'}`}
           style={{
@@ -55,8 +55,8 @@ export const BalanceChart: React.FC<BalanceChartProps> = ({
   isAnimating = false,
 }) => {
   return (
-    <div className="bg-gray-800 rounded-lg p-4">
-      <h4 className="text-sm font-medium text-gray-200 mb-4">検出バランス</h4>
+    <div className="bg-muted/50 rounded-lg p-4">
+      <h4 className="text-sm font-medium text-foreground mb-4">検出バランス</h4>
 
       <Bar
         label="検出感度"

@@ -5,6 +5,12 @@
 - 参照: `GoogleDevices_introduction_BasicDesign.md`（全体方針）、`GoogleDevices_introduction_Environment .md`（コード外手順）。
 - 範囲: バックエンド（Rust/Axum + go2rtc統合）、フロントエンド（React/shadcn 設定モーダル）、オペレーション/シークレット管理、テスト計画まで。デバイス実機設定やGCP/SDMコンソール操作は環境手順書に委譲。
 
+### 本書で確定する前提（アンアンビギュアス）
+- **SSoT**: SDM設定の正本は `settings.sdm_config`（DB）。`/etc/is22/secrets/sdm.env` は初期入力/バックアップ用保管庫であり、DB保存後は参照専用。UI保存はDBを必ず上書きし、差分を監査ログに残す。  
+- **go2rtc要件**: v1.9.9+ を前提とし、Nest ソース文字列は `nest://{sdm_device_id}?project_id={project_id}&enterprise={enterprise_project_id}&client_id={client_id}&client_secret={client_secret}&refresh_token={refresh_token}` で生成し `/api/streams` へ登録する。秘密値は cameras テーブルに保存しない。  
+- **RBAC/CSRF/監査**: `/api/sdm/*` は管理者ロールのみ許可し、Cookie運用時はCSRFトークン必須。全操作を監査ログに記録し、`client_secret`/`refresh_token` はマスクする。  
+- **実装タイミング**: IpcamScan 側の修正完了後に実装する（プレースホルダ/ダミーボタンは追加しない）。
+
 ## 1. 目的・ゴール
 - SDM経由で Nest Doorbell を is22 に登録し、既存 IpcamScan 由来カメラと同一UXで配信・静止画巡回・is21推論まで回す。
 - 侵入最小（既存アーキに追従）、SSoT厳守（cameras/settings）、SOLID（sdm専用モジュール化）、アンアンビギュアスなAPI/UI定義を提供する。
@@ -39,6 +45,11 @@
   - `sdm_traits JSON NULL`（任意：traitsサマリを保存、AI hintsとは分離）
 - マイグレーション例: `schema/010_sdm_integration.sql` を追加し、`CAMERA_COLUMNS` と `Camera` 構造体、更新bindへ反映（ConfigStore一貫性保持）。
 - 既存列利用: `family="nest"`, `discovery_method="sdm"`, `snapshot_url=go2rtc frame`, `camera_context` は is21 hints 用に任意。
+- 制約/インデックス:  
+  - `sdm_device_id` にユニークインデックス（NULL許容、NOT NULL への移行は2段階で実施）。  
+  - `camera_id` は英小文字/数字/ハイフンのみ、最大64文字（UI/BE共通バリデーション）。  
+  - JSON列(`sdm_traits`) は1MB上限を設定し、必要なら要約を保存。  
+  - 既存カラムを更新する場合は移行用スクリプトで既存行に `sdm_device_id=NULL` を明示し、ロールバック手順をDDLに付記。
 
 ## 6. 設定/シークレット構造（`sdm_config`）
 - `settings` に JSON で保存するキー（例）:
@@ -56,7 +67,7 @@
 }
 ```
 - UI からは `client_secret` / `refresh_token` を再表示しない（保存のみ）。空文字は「更新なし」と解釈。
-- secrets の原本は `/etc/is22/secrets/sdm.env` に 600 権限で保持し、UI保存前に運用者が貼付（環境手順書のSSoTを優先）。
+- secrets の正本は `settings.sdm_config`。`/etc/is22/secrets/sdm.env` は初期入力/バックアップ用の保管庫で、権限600を維持しつつ DB へ転記する。UI保存時は DB を上書きし、差分を監査ログに残す。
 
 ## 7. バックエンド詳細設計（Rust/Axum）
 ### 7.1 モジュール構成
@@ -76,24 +87,56 @@
 | GET `/api/sdm/devices` | なし（内部で access_token 取得） | `{devices:[{sdm_device_id,name,type,traits_summary,structure}]}` | 401（refresh_token無効）, 500 |
 | POST `/api/sdm/devices/:id/register` | `{camera_id,name,location,fid,tid,camera_context?}` | Cameraオブジェクト | 400（重複/不足）, 409（camera_id衝突）, 500 |
 | POST `/api/sdm/reconcile` | 任意（管理者向け手動トリガ） | `{added, skipped}` | 500 |
+| GET `/api/sdm/test/go2rtc-version` | なし | `{version:"1.9.9", compatible:true}` | 500 |
+| GET `/api/sdm/test/token` | なし | `{ok:true}` | 401/403/429/500 |
+| GET `/api/sdm/test/device/:id` | なし | `{ok:true, traits_summary}` | 401/403/404/500 |
+
+- 共通セキュリティ: `/api/sdm/*` は管理者ロール限定。Cookie運用時はCSRFトークン必須。全操作を監査ログへ記録し、`client_secret`/`refresh_token` はマスクする。`/api/sdm/devices` は quota 保護のため1分に1回まで。
 
 - エラーログには client_secret / refresh_token を出さない（mask）。Google API 失敗は status と body を要約してログへ。
 
 ### 7.3 go2rtc 連携
-- StreamGateway 経由で `add_source(camera_id, nest_source_string)` を実行。source文字列は `sdm_config` と `sdm_device_id` から生成（秘密をカメラ行へ埋め込まない）。
+- 前提バージョン: go2rtc v1.9.9+（nest ソース対応版）。  
+- ソース文字列: `nest://{sdm_device_id}?project_id={project_id}&enterprise={enterprise_project_id}&client_id={client_id}&client_secret={client_secret}&refresh_token={refresh_token}`。StreamGateway が sdm_config を参照して組み立て、`POST /api/streams` に `{name: camera_id, source: <上記>}` を送る。  
 - Reconcile:  
   - 起動時: ConfigStore に存在する Nest カメラを go2rtc `/api/streams` と突合し、欠損分を追加。  
-  - 定期: `tokio::spawn` で interval（例: 5分）を回し、差分登録。  
-  - 失敗は warn ログ＋メトリクス、次周期で再試行。
+  - 定期: 5分間隔で差分登録。  
+  - 失敗は warn ログ＋メトリクス、次周期で再試行。  
+- Secretsは go2rtc にのみ送信し、cameras 行には保存しない。
 
 ### 7.4 Snapshot/Polling 連携
-- 登録時に `snapshot_url` を `http://<go2rtc>/api/streams/{camera_id}/frame.jpeg` に設定。SnapshotService は既存の HTTP フォールバックで取得。
-- PollingOrchestrator は config refresh 後に Nest カメラも巡回対象に自動追加される想定。特別な並列数変更は不要（逐次）。
+- 登録時に `snapshot_url` を `http://<go2rtc>/api/streams/{camera_id}/frame.jpeg` に設定。解像度は go2rtc デフォルト（1280x720）を使用し、必要なら `frame?width=1280&height=720` を付与して固定する。  
+- PollingOrchestrator は config refresh 後に Nest カメラも巡回対象に自動追加される想定。特別な並列数変更は不要（逐次）。  
+- 取得間隔は既存カメラと同一設定を流用し、増加による帯域影響はメトリクスで監視する。
 
 ### 7.5 観測性
 - logs: `sdm` target で info/warn/error を分類、token文字列は redact。  
 - metrics: `sdm_devices_list_success_total`, `sdm_register_success_total`, `sdm_reconcile_added_total`, `sdm_reconcile_error_total` を追加検討。  
 - healthcheck: `/api/status` に sdm_config 状態サマリ（configured/authorized/error）を含めることを検討。
+
+### 7.6 トークンライフサイクルとリトライ
+- 状態: `status` は `not_configured | configured_pending_auth | authorized | error`。`error_reason` に Google 401/403/429/5xx の要約を格納。  
+- アクセストークン取得: `POST https://oauth2.googleapis.com/token` 失敗時は指数バックオフ（1s, 5s, 30s 最大3回）。3回失敗で `status=error` に更新し UI へ反映。  
+- devices.list 401/403: refresh_token 失効とみなし `status=error` に即時更新、UIに「再認可」を表示。  
+- quota超過(429): `status=error` にはしない。エラーカウンタを記録し10分待ちで再試行。  
+- 監査: 認可コード交換・refresh_token更新時は監査ログに操作主体と結果のみを記録し、秘密値はマスク。
+
+### 7.7 登録フローの整合性とロールバック
+1. `POST /api/sdm/devices/:id/register` 受信後、`cameras` へ `enabled=false` でINSERT（family=nest, discovery_method=sdm, sdm_device_id保存）。同時にユニーク制約重複をチェック。  
+2. go2rtcへ `add_source(camera_id, nest_source_string)` を実行。失敗時は DB 挿入をロールバックし 502 を返す（登録残骸を残さない）。  
+3. go2rtc成功後に `snapshot_url` を frame.jpeg でUPDATEし `enabled=true` に変更。  
+4. `config_store.refresh_cache()` を呼び、PollingOrchestratorが即時反映。  
+5. 再登録/リトライは idempotent（同じ sdm_device_id に対する重複は 409 を返す）。
+
+### 7.8 解除/削除フロー
+- 新規エンドポイント（設計のみ）: `DELETE /api/sdm/devices/:id` で cameras 行を `enabled=false` にし、go2rtc の source を削除。`delete_source` 失敗時は warn ログを残し、次回 reconcile で再試行。  
+- is21 ログ/スナップショットは残置（監査用）。必要に応じ retention 設定を別途適用。
+
+### 7.9 高度な疎通テストAPI
+- `/api/sdm/test/go2rtc-version`: go2rtc APIへアクセスしバージョンを返却。v1.9.9未満なら `compatible:false`。  
+- `/api/sdm/test/token`: refresh_token から access_token を取得するテスト。401/403/429/5xx をHTTPステータスで返し、UIで色分けする。  
+- `/api/sdm/test/device/:id`: SDM devices.get 相当で traits を取得し、認可/権限の有無を確認する。404 は未登録デバイスを示す。  
+- いずれも管理者限定、監査ログ対象、秘密値はログに出さない。
 
 ## 8. フロントエンド詳細設計（React/shadcn）
 ### 8.1 エントリ
@@ -117,7 +160,7 @@
 
 ## 9. 運用・セキュリティ
 - secrets は UI/API ログに出さない。`sdm_config` のマスク処理を一元化。  
-- `/etc/is22/secrets/sdm.env` を SSoT とし、設定モーダルは転記・更新の手段。ファイル権限は 600（環境手順書準拠）。  
+- SDM設定の正本は `settings.sdm_config`。`/etc/is22/secrets/sdm.env` は初期入力/バックアップ用保管庫で、権限600を維持。  
 - refresh_token 失効時は `status=error`＋`error_reason` に格納し、UIが明示。  
 - go2rtc への通信は内部ネットワーク前提。認証が必要な場合は `GO2RTC_URL` に埋め込まず別途認証ヘッダを StreamGateway に実装。
 
@@ -133,24 +176,27 @@
 
 ## 11. テスト計画（MECE・アンアンビギュアス）
 - **バックエンド（Rust）**  
-  - 単体: sdm_config バリデーション、token交換エラー分岐（mock HTTP）。  
-  - 統合: `/api/sdm/config` PUT/GET、devices.list mock、register 実行で cameras/go2rtc 呼び出しが行われること（go2rtc は stub でOK）。  
-  - Reconcile: go2rtc から欠損を検出し add_source が呼ばれるか。  
+  - 単体: sdm_config バリデーション、token交換エラー分岐（401/403/429/5xx）と指数バックオフ、RBAC/CSRFエラー時の 401/403。  
+  - 統合: `/api/sdm/config` PUT/GET、devices.list mock、register で cameras 挿入→go2rtc登録→refresh_cache が実行されること（go2rtc は stub）。go2rtc登録失敗時にDBロールバックされること。  
+  - Reconcile: go2rtc 欠損検出で add_source が呼ばれること、失敗時にメトリクス/ログが増えること。  
+  - 削除: `DELETE /api/sdm/devices/:id` で enabled=false と go2rtc delete が呼ばれ idempotent であること。  
 - **フロントエンド（React）**  
-  - コンポーネント: フォームバリデーション、状態表示（Not configured/Authorized/Error）。  
-  - API モック統合: devices table 表示、登録ダイアログ送信後の refetch。  
+  - コンポーネント: フォームバリデーション、状態表示（Not configured/Authorized/Error/ConfiguredPendingAuth）。  
+  - API モック統合: devices table 表示、登録ダイアログ送信後の refetch、go2rtc未対応バージョン時の警告表示。  
 - **Chrome実UI/UX（手動/E2E）**  
-  - 設定モーダルを開き、config保存→code交換→devices取得→登録→CameraGrid反映までを Chrome で通し操作。  
+  - 設定モーダルを開き、config保存→code交換→devices取得→登録→CameraGrid反映までを通し操作。  
+  - refresh_token失効（401）を模擬し Error 状態→再認可→復旧すること。  
   - go2rtc停止→reconcileで復旧することをブラウザ経由で確認（snapshot取得成功）。  
 - **非機能**  
-  - secrets マスク確認（ネットワークログ/ブラウザDevToolsに client_secret/refresh_token が出ない）。  
-  - 長時間: go2rtc 再起動後に自動復旧するまでの時間測定（目標 <1周期）。
+  - secrets マスク確認（ネットワークログ/ブラウザDevTools/サーバログに client_secret/refresh_token が出ない）。  
+  - 長時間: go2rtc 再起動後に自動復旧するまでの時間測定（目標 <1周期）。  
+  - レート制限: `/api/sdm/devices` の呼び出し間隔制御が効くこと。
 
 ## 12. リスク・未決
-- go2rtc の Nest ソース文字列仕様が環境差で変わる場合は、設定値として injection できるよう拡張が必要（仮置き: sdm_config から生成）。
-- Google 側 UI/同意画面の変更により認可URLテンプレが変動する可能性。UI側のヘルプテキストは実際の Google 表記に依存しすぎないよう文言設計する。
+- go2rtc の Nest ソース対応がビルド/バージョンによって差異がある可能性。実機検証で文字列とバージョンを確定し、必要なら設定で上書きできるよう拡張する。  
+- Google 側 UI/同意画面の変更により認可URLテンプレが変動する可能性。UI側のヘルプテキストは実際の Google 表記に依存しすぎないよう文言設計する。  
 - Refresh token 失効頻度に応じて「再認可リマインダ」機構が必要になるかもしれない（将来検討）。
 
 ## 13. MECE / アンアンビギュアス確認
 - 機能領域（データ/設定/バックエンド/フロント/運用/テスト）で重複なく網羅（MECE）し、各API・フローの入出力と失敗時挙動を明記（アンアンビギュアス）。  
-- 残る不確定要素は go2rtc の Nest ソース具体値のみであり、これはリスク章に分離済み。その他は実装手順に落とし込める粒度まで具体化できている。
+- 残る不確定要素は go2rtc nest 対応版の実機検証に限られ、それ以外は実装手順に落とし込める粒度まで具体化できている。

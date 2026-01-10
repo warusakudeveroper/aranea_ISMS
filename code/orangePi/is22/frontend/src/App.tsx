@@ -447,10 +447,13 @@ function App() {
       <div className="h-screen flex flex-col">
         {renderHeader()}
 
-        {/* Main Content - 縦積みレイアウト */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* SuggestView - 上30% */}
-          <div className="h-[30vh] flex-shrink-0 overflow-hidden border-b">
+        {/* Main Content - 縦積みレイアウト、全体スクロール */}
+        <div
+          ref={gridContainerRef}
+          className="flex-1 overflow-y-auto mobile-scrollbar-hide"
+        >
+          {/* SuggestView - 30vh、スクロール対象 */}
+          <div className="h-[30vh] min-h-[30vh] overflow-hidden border-b">
             <SuggestPane
               currentEvent={currentEvent}
               cameras={cameras || []}
@@ -460,13 +463,10 @@ function App() {
             />
           </div>
 
-          {/* CameraGrid - 残り70%、内部スクロール */}
-          <div
-            ref={gridContainerRef}
-            className="flex-1 overflow-y-auto p-2 mobile-scrollbar-hide"
-          >
+          {/* CameraGrid - スクロール対象 */}
+          <div className="p-2">
             {camerasLoading ? (
-              <div className="flex items-center justify-center h-full">
+              <div className="flex items-center justify-center h-[50vh]">
                 <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : cameras && cameras.length > 0 ? (

@@ -54,6 +54,7 @@
 | T4-1 | OverdetectionAlert警告表示 | components/PresetSelector/OverdetectionAlert.tsx | [x] |
 | T4-2 | TagDistribution分布グラフ | components/PresetSelector/TagDistribution.tsx | [x] |
 | T4-3 | 調整導線ボタン | components/PresetSelector/OverdetectionAlert.tsx | [x] |
+| T4-4 | チャットサジェスト機能 | components/EventLogPane.tsx | [x] |
 
 ### Phase 5: Frontend - カスタムタグフィルター
 
@@ -98,6 +99,15 @@
 - [ ] 過剰検出警告がハイライト
 - [ ] タグ除外設定画面遷移
 - [ ] カスタムタグフィルター保存
+
+### チャットサジェスト
+
+- [ ] 過剰検出時にAIアシスタント欄に通知表示
+- [ ] 「{カメラ名}の検出の調整が必要そうです」メッセージ
+- [ ] 「現在{現在プリセット}→{推奨プリセット}」表示
+- [ ] はい/いいえボタン表示
+- [ ] 「はい」クリック時にプリセット変更API呼び出し
+- [ ] 対応済み表示
 
 ---
 
@@ -147,10 +157,10 @@ T1-1 ─┬─► T1-2 ─┬─► T1-4 ─► T1-5 ─► T1-6
 | Phase 1 | 6 | 6 | 100% |
 | Phase 2 | 4 | 5 | 80% |
 | Phase 3 | 4 | 4 | 100% |
-| Phase 4 | 3 | 3 | 100% |
+| Phase 4 | 4 | 4 | 100% |
 | Phase 5 | 1 | 2 | 50% |
 | Phase 6 | 0 | 3 | 0% |
-| **合計** | **18** | **23** | **78%** |
+| **合計** | **19** | **24** | **79%** |
 
 ---
 
@@ -172,6 +182,7 @@ T1-1 ─┬─► T1-2 ─┬─► T1-4 ─► T1-5 ─► T1-6
 - `frontend/src/components/PresetSelector/TagDistribution.tsx` - TagDistribution (NEW)
 - `frontend/src/hooks/usePresetAnimation.ts` - usePresetAnimation (NEW)
 - `frontend/src/components/SettingsModal.tsx` - PresetSelector統合
+- `frontend/src/components/EventLogPane.tsx` - チャットサジェスト機能追加
 
 ---
 

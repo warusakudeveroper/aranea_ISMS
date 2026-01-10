@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
+import { PresetSelector } from "@/components/PresetSelector"
 import {
   Dialog,
   DialogContent,
@@ -40,7 +41,6 @@ import {
   Database,
   Network,
   Settings2,
-  CloudUpload,
 } from "lucide-react"
 
 interface CameraDetailModalProps {
@@ -75,15 +75,6 @@ export function CameraDetailModal({
   const [authTestResult, setAuthTestResult] = useState<AuthTestResult | null>(null)
   const [rescanResult, setRescanResult] = useState<RescanResult | null>(null)
 
-  // Preset sync
-  const [isPresetSyncing, setIsPresetSyncing] = useState(false)
-  const [presetSyncResult, setPresetSyncResult] = useState<{
-    success: boolean
-    message: string
-    preset_id?: string
-    preset_version?: string
-  } | null>(null)
-
   // Delete confirmation
   const [deleteType, setDeleteType] = useState<DeleteType>(null)
   const [hardDeleteInput, setHardDeleteInput] = useState("")
@@ -98,7 +89,6 @@ export function CameraDetailModal({
       setEditedFields({})
       setAuthTestResult(null)
       setRescanResult(null)
-      setPresetSyncResult(null)
       setShowPassword(false)
       setHardDeleteInput("")
       setImageLoaded(false)
@@ -210,42 +200,6 @@ export function CameraDetailModal({
       alert("再スキャンに失敗しました")
     } finally {
       setIsRescanning(false)
-    }
-  }
-
-  // Handle preset sync to IS21
-  const handlePresetSync = async () => {
-    if (!camera) return
-
-    setIsPresetSyncing(true)
-    setPresetSyncResult(null)
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/cameras/${camera.camera_id}/sync-preset`,
-        { method: "POST" }
-      )
-      const result = await response.json()
-      if (result.success) {
-        setPresetSyncResult({
-          success: true,
-          message: result.message,
-          preset_id: result.preset_id,
-          preset_version: result.preset_version,
-        })
-      } else {
-        setPresetSyncResult({
-          success: false,
-          message: result.message || "プリセット同期に失敗しました",
-        })
-      }
-    } catch (error) {
-      console.error("Preset sync failed:", error)
-      setPresetSyncResult({
-        success: false,
-        message: "プリセット同期に失敗しました",
-      })
-    } finally {
-      setIsPresetSyncing(false)
     }
   }
 
@@ -493,26 +447,15 @@ export function CameraDetailModal({
                 </Button>
               </div>
             </FormField>
-            <FormField label="プリセット" editable>
-              <select
-                className="w-full p-2 border rounded-md text-sm"
-                value={getValue("preset_id") ?? "balanced"}
-                onChange={(e) => updateField("preset_id", e.target.value)}
-              >
-                <option value="balanced">バランス - 汎用的なバランス設定</option>
-                <option value="person_priority">人物優先 - 人物検知を最優先</option>
-                <option value="entrance">エントランス - 建物入口向け</option>
-                <option value="corridor">廊下 - 廊下・通路向け</option>
-                <option value="parking">駐車場 - 人物+車両検知</option>
-                <option value="outdoor">屋外 - 屋外・外周向け</option>
-                <option value="night_vision">夜間 - 低照度環境向け</option>
-                <option value="crowd">群衆 - 混雑検知向け</option>
-                <option value="retail">小売店 - 店舗向け</option>
-                <option value="office">オフィス - オフィス・会議室向け</option>
-                <option value="warehouse">倉庫 - 倉庫・物流施設向け</option>
-                <option value="custom">カスタム - 個別設定</option>
-              </select>
-            </FormField>
+            {/* プリセット選択グラフィカルUI */}
+            <div className="mt-2">
+              <PresetSelector
+                cameraId={camera.camera_id}
+                currentPresetId={getValue("preset_id") ?? "balanced"}
+                onPresetChange={(presetId) => updateField("preset_id", presetId)}
+                apiBaseUrl={API_BASE_URL}
+              />
+            </div>
             <FormField label="分析間隔" editable>
               <div className="flex items-center gap-2">
                 <input
@@ -526,50 +469,6 @@ export function CameraDetailModal({
                 <span className="text-sm text-muted-foreground">秒</span>
               </div>
             </FormField>
-            <p className="text-xs text-muted-foreground mt-2">
-              プリセットは検知対象や検知感度のデフォルト設定です。カメラの設置場所に合わせて選択してください。
-            </p>
-
-            {/* Preset Sync to IS21 */}
-            <div className="flex items-center gap-2 mt-3 pt-3 border-t">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handlePresetSync}
-                disabled={isPresetSyncing || !camera.lacis_id}
-                title={!camera.lacis_id ? "lacisIDが未設定のためIS21への同期はできません" : ""}
-              >
-                {isPresetSyncing ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                ) : (
-                  <CloudUpload className="h-4 w-4 mr-1" />
-                )}
-                IS21へ同期
-              </Button>
-              {!camera.lacis_id && (
-                <span className="text-xs text-muted-foreground">
-                  lacisID未設定
-                </span>
-              )}
-              {presetSyncResult && (
-                <div className="flex items-center gap-1 text-sm">
-                  {presetSyncResult.success ? (
-                    <span className="text-green-600 flex items-center gap-1">
-                      <Check className="h-4 w-4" />
-                      {presetSyncResult.preset_id} v{presetSyncResult.preset_version}
-                    </span>
-                  ) : (
-                    <span className="text-red-600 flex items-center gap-1">
-                      <X className="h-4 w-4" />
-                      {presetSyncResult.message}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              プリセット設定をIS21（AI推論サーバー）に同期します。同期後、AI分析でこのプリセットが適用されます。
-            </p>
 
             {/* Threshold Overrides Section */}
             <div className="mt-4 pt-4 border-t">
@@ -621,26 +520,43 @@ export function CameraDetailModal({
 
           {/* Camera Context Section */}
           <Section title="カメラコンテキスト" icon={<Info className="h-4 w-4" />}>
-            <textarea
-              className="w-full min-h-[80px] p-2 border rounded-md text-sm"
-              value={
-                getValue("camera_context")
-                  ? JSON.stringify(getValue("camera_context"), null, 2)
-                  : ""
-              }
-              onChange={(e) => {
-                try {
-                  const parsed = JSON.parse(e.target.value)
-                  updateField("camera_context", parsed)
-                } catch {
-                  // Allow invalid JSON while typing
-                }
-              }}
-              placeholder='{"description": "玄関入口を監視するカメラ", "tags": ["入口", "セキュリティ"]}'
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              LLM判定などで使用するカメラの説明をJSON形式で入力
-            </p>
+            {(() => {
+              const contextValue = getValue("camera_context") ?? ""
+              const contextString = typeof contextValue === 'string'
+                ? contextValue
+                : (typeof contextValue === 'object' && contextValue !== null
+                    ? (contextValue as { description?: string }).description ?? JSON.stringify(contextValue)
+                    : String(contextValue))
+              const maxLength = 148
+              const currentLength = contextString.length
+              const remaining = maxLength - currentLength
+              return (
+                <>
+                  <textarea
+                    className="w-full min-h-[60px] p-2 border rounded-md text-sm resize-none"
+                    value={contextString}
+                    onChange={(e) => {
+                      const newValue = e.target.value.slice(0, maxLength)
+                      updateField("camera_context", newValue)
+                    }}
+                    maxLength={maxLength}
+                    placeholder="例: 玄関入口を監視。来客・配達員の検知を重視。夜間は照明が暗め。"
+                  />
+                  <div className="flex justify-between items-center mt-1">
+                    <p className="text-xs text-muted-foreground">
+                      AI判定で使用するカメラの説明・特徴を入力
+                    </p>
+                    <span className={cn(
+                      "text-xs font-mono",
+                      remaining <= 20 ? "text-amber-600" : "text-muted-foreground",
+                      remaining <= 0 && "text-red-600"
+                    )}>
+                      残り {remaining} 文字
+                    </span>
+                  </div>
+                </>
+              )
+            })()}
           </Section>
 
           {/* Device Info Section */}

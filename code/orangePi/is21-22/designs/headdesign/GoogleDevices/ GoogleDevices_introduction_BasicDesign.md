@@ -3,6 +3,14 @@
 
 ---
 
+# 0. SSoTと依存関係の確定
+
+- **SDM設定の正本**: `settings.sdm_config`（DB）。 `/etc/is22/secrets/sdm.env` は運用者の初期入力用メモであり、DB保存後はDBを唯一の正とする。UI保存時にDBへ上書きし、envとの差分は監査ログに残す。  
+- **go2rtc要件**: v1.9.9+ を前提とし、`nest://{sdm_device_id}?project_id={project_id}&enterprise={enterprise_project_id}&client_id={client_id}&client_secret={client_secret}&refresh_token={refresh_token}` 形式のソース文字列を `/api/streams` 経由で登録する。秘密値は cameras 行に埋め込まず sdm_config から都度組み立てる。  
+- **API権限**: `/api/sdm/*` は管理者ロール限定、Cookie運用時はCSRFトークン必須。全操作を監査ログに記録し、`client_secret/refresh_token` はマスクする。  
+- **実装タイミング**: IpcamScan側修正完了後に実装着手する（プレースホルダ禁止）。本書は確定仕様のみを記載。
+
+# 1. 背景と結論（設計判断）
 # 1. 背景と結論（設計判断）
 
 ## 1.1 背景
@@ -14,7 +22,7 @@
 ## 1.2 結論（追加すべきルート）
 
 * **IpcamScan（サブネットスキャン）**：Tapo/VIGI/一般ONVIF/RTSPカメラを登録
-* **SDM登録（新設）**：Google Nest Doorbell を登録（IPベースの検出に依存しない）
+* **SDM登録（新設）**：Google Nest Doorbell を登録（IPベースの検出に依存しない。Camscanが出す導線は「SDM登録」へ統一）
 * 登録後は、mAcT側の扱いを揃える：
 
   * **go2rtc に “camera_id = source名” として追加**（配信は既存と同じ）
@@ -277,9 +285,9 @@ App.tsx には Settingsアイコンボタンがあり、現状は onClick未実�
 ただし設計上のUXとしては以下を入れると親切です：
 
 * スキャン結果に `oui:google` だけ出るケース（Nest Hub/Chromecast等）を「Nest候補」として見せるのはOK（既にOUIテーブルにGoogleは入っている） 
-* その上で `SuggestedAction` に `manual_check` を割当て、UIで
+* その上で `SuggestedAction` に `SdmRegister` を割当て、UIで
   「Nest Doorbell 等はローカル検出できない場合があります → SDM登録へ」
-  という導線を出す（ScanModalからSystemSettingsModalへのリンク）
+  という導線を出す（ScanModalからSystemSettingsModalへのリンク。Camscan修正完了後に実装）
 
 ---
 

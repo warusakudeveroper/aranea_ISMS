@@ -14,7 +14,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { BalanceChart } from './BalanceChart';
 import { OverdetectionAlert } from './OverdetectionAlert';
 import { TagDistribution } from './TagDistribution';
-import { usePresetAnimation, PresetBalance } from '../../hooks/usePresetAnimation';
+import { usePresetAnimation } from '../../hooks/usePresetAnimation';
+import type { PresetBalance } from '../../hooks/usePresetAnimation';
 
 // API Response Types
 interface PresetBalanceInfo {
@@ -67,6 +68,7 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
   const [overdetection, setOverdetection] = useState<CameraOverdetection | null>(null);
   const [tagTrends, setTagTrends] = useState<TagTrend[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingStats, setLoadingStats] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const { currentBalance, isAnimating, animateTo, setInstant } = usePresetAnimation();
@@ -118,19 +120,28 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
     }
   }, [apiBaseUrl, cameraId]);
 
-  // Initial fetch
+  // Initial fetch - load presets first (fast), then stats asynchronously (slow)
   useEffect(() => {
-    const loadData = async () => {
+    const loadPresets = async () => {
       setLoading(true);
+      await fetchPresets();
+      setLoading(false);
+    };
+    loadPresets();
+  }, [fetchPresets]);
+
+  // Load stats asynchronously (slow APIs - don't block main UI)
+  useEffect(() => {
+    const loadStats = async () => {
+      setLoadingStats(true);
       await Promise.all([
-        fetchPresets(),
         fetchOverdetection(),
         fetchTagTrends(),
       ]);
-      setLoading(false);
+      setLoadingStats(false);
     };
-    loadData();
-  }, [fetchPresets, fetchOverdetection, fetchTagTrends]);
+    loadStats();
+  }, [fetchOverdetection, fetchTagTrends]);
 
   // Handle preset change
   const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -155,8 +166,8 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="animate-pulse bg-gray-700 h-10 rounded"></div>
-        <div className="animate-pulse bg-gray-700 h-40 rounded"></div>
+        <div className="animate-pulse bg-muted h-10 rounded"></div>
+        <div className="animate-pulse bg-muted h-40 rounded"></div>
       </div>
     );
   }
@@ -169,19 +180,17 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
     );
   }
 
-  const currentPreset = presets.find(p => p.preset_id === currentPresetId);
-
   return (
     <div className="space-y-4">
       {/* Preset Selector */}
       <div>
-        <label className="block text-sm text-gray-300 mb-2">
+        <label className="block text-sm text-muted-foreground mb-2">
           現在のプリセット
         </label>
         <select
           value={currentPresetId}
           onChange={handlePresetChange}
-          className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full bg-background border border-input rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         >
           {presets.map(preset => (
             <option key={preset.preset_id} value={preset.preset_id}>
@@ -201,22 +210,30 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
       />
 
       {/* Overdetection Alert */}
-      {overdetection && overdetection.issues.length > 0 && (
-        <OverdetectionAlert
-          issues={overdetection.issues}
-          onAdjustThreshold={onOpenThresholdSettings}
-          onExcludeTag={handleExcludeTag}
-          onChangePreset={() => {
-            // Focus on preset selector
-            const selectEl = document.querySelector('select');
-            if (selectEl) selectEl.focus();
-          }}
-        />
-      )}
+      {loadingStats ? (
+        <div className="text-xs text-muted-foreground animate-pulse">
+          統計データを読み込み中...
+        </div>
+      ) : (
+        <>
+          {overdetection && overdetection.issues.length > 0 && (
+            <OverdetectionAlert
+              issues={overdetection.issues}
+              onAdjustThreshold={onOpenThresholdSettings}
+              onExcludeTag={handleExcludeTag}
+              onChangePreset={() => {
+                // Focus on preset selector
+                const selectEl = document.querySelector('select');
+                if (selectEl) selectEl.focus();
+              }}
+            />
+          )}
 
-      {/* Tag Distribution */}
-      {tagTrends.length > 0 && (
-        <TagDistribution tags={tagTrends} />
+          {/* Tag Distribution */}
+          {tagTrends.length > 0 && (
+            <TagDistribution tags={tagTrends} />
+          )}
+        </>
       )}
     </div>
   );

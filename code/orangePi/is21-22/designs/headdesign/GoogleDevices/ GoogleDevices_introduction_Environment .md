@@ -12,7 +12,7 @@
 * SDM連携に必要な **Project情報** と **OAuthクレデンシャル** を取得済み
 * **refresh_token**（長期運用の鍵）を取得済み
 * SDM APIで **device_id**（DoorbellのID）を取得済み
-* is22（NUCbox G5）側に、秘密情報を安全に置く場所が用意できている
+* is22（NUCbox G5）側に、秘密情報を安全に置く場所が用意できている（/etc 配置は「初期入力の保管庫」であり、正本は settings.sdm_config に保存する）
 * （任意）go2rtcへ Nest入力を追加する準備が整っている
   ※is22は go2rtc を前提依存にしています 
 
@@ -35,9 +35,9 @@
 
 ---
 
-## 2. まず「控えるべき値」一覧（SSoTメモ）
+## 2. まず「控えるべき値」一覧（DB入力用メモ）
 
-この手順中に出てくる値は最後にまとめて保管します（**漏洩すると危険**）。
+この手順中に出てくる値は最後にまとめて保管します（**漏洩すると危険**）。**正本は is22 の settings.sdm_config（DB）** であり、ここで控える値は後でUI/API経由でDBに保存するためのメモです。
 
 * **GCP_PROJECT_ID**（例：my-sdm-project）
 * **GCP_PROJECT_NUMBER**（数値の方）
@@ -55,7 +55,7 @@
 
 1. Device Access Console に入り、開発者登録を完了
 
-   * ここで少額課金（$5相当）が発生することが多いです（仕様変更あり得る）
+   * **ここで少額課金（$5相当）が必須**（仕様変更あり得る）。支払い後、有効化まで数分かかる場合があります。
 
 > 目的：SDM（Smart Device Management）を使う権限を得る
 
@@ -233,8 +233,7 @@ SDM_DEVICE_ID="..."
 sudo chmod 600 /etc/is22/secrets/sdm.env
 ```
 
-> これは「のちに mAcT の設定モーダル（SDMタブ）へ貼る」ためのSSoTメモです。
-> GitHubやログへ絶対に出さない。
+> これは「のちに mAcT の設定モーダル（SDMタブ）へ貼る」ための保管庫です。GitHubやログへ絶対に出さない。DB保存後は settings.sdm_config が正本となり、/etc ファイルは参照専用とする。
 
 ---
 
@@ -251,8 +250,13 @@ sudo chmod 600 /etc/is22/secrets/sdm.env
 
 ## 10. （任意）go2rtc 側の“準備確認”（運用チェック）
 
-is22は go2rtc を前提にしていて、`GO2RTC_URL=http://localhost:1984` を環境変数として持ちます 
+is22は go2rtc を前提にしていて、`GO2RTC_URL=http://localhost:1984` を環境変数として持ちます。**Nest対応には v1.9.9+ が必要**です。  
 （Tapo/VIGI共存が既にできているならここはスキップ可）
+
+### go2rtcが古かった場合の更新ヒント（運用向け）
+- バージョン確認: `curl -s http://localhost:1984/api/version`  
+- 未満だった場合: 既存運用手順（go2rtc更新手順書）に従いバイナリを更新し、サービスを再起動する。更新後に再度 `/api/version` で確認。  
+- 更新に失敗した場合: ウィザードの「高度な設定」からテストを再実行し、エラーメッセージを確認。
 
 * go2rtc API に到達できることを確認：
 
@@ -278,7 +282,7 @@ curl -s http://localhost:1984/api/streams | head
 ### C) 取れたのに後日死ぬ
 
 * refresh_tokenの運用（更新・再認可）が必要になるケースがある
-  → だから **秘密情報をSSoTとして保管**し、再認可できるようにしておく（この手順書の目的）
+  → だから **秘密情報を安全に保管**し、再認可できるようにしておく（この手順書の目的）。最終的な正本は settings.sdm_config（DB）とする。
 
 ---
 
@@ -291,7 +295,8 @@ curl -s http://localhost:1984/api/streams | head
 * [ ] PCM: 認可完了、code取得済
 * [ ] code→token交換で refresh_token 取得済
 * [ ] devices.list で Doorbell の device_id 取得済
-* [ ] `/etc/is22/secrets/sdm.env` に全値保存し、権限600になっている
+* [ ] `/etc/is22/secrets/sdm.env` に全値保存し、権限600になっている（初期入力用保管庫）
+* [ ] 設定モーダルまたはAPI経由で settings.sdm_config に値を反映済み（DBが正本）
 * [ ] （任意）fid/tid と紐づけメモが取れている 
 
 ---

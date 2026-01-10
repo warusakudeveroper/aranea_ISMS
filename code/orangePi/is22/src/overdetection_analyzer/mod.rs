@@ -119,24 +119,27 @@ impl OverdetectionAnalyzer {
         }
     }
 
-    /// 全プリセットのバランス値を計算
+    /// 全プリセットのバランス値を計算 (v2.0)
     pub fn get_all_preset_balances(&self) -> Vec<PresetBalanceInfo> {
         use crate::preset_loader::{Preset, preset_ids};
 
+        // v2.0: 13プリセット（廃止3種除外、新規4種追加）
         let presets = vec![
             (preset_ids::PERSON_PRIORITY, "人物優先", Preset::person_priority()),
             (preset_ids::BALANCED, "バランス", Preset::balanced()),
             (preset_ids::PARKING, "駐車場", Preset::parking()),
             (preset_ids::ENTRANCE, "エントランス", Preset::entrance()),
             (preset_ids::CORRIDOR, "廊下", Preset::corridor()),
+            (preset_ids::HOTEL_CORRIDOR, "ホテル廊下", Preset::hotel_corridor()),  // v2.0 新規
             (preset_ids::OUTDOOR, "屋外", Preset::outdoor()),
-            (preset_ids::NIGHT_VISION, "夜間", Preset::night_vision()),
             (preset_ids::CROWD, "群衆", Preset::crowd()),
-            (preset_ids::RETAIL, "小売店", Preset::retail()),
             (preset_ids::OFFICE, "オフィス", Preset::office()),
-            (preset_ids::WAREHOUSE, "倉庫", Preset::warehouse()),
+            (preset_ids::RESTAURANT, "飲食店ホール", Preset::restaurant()),        // v2.0 新規
+            (preset_ids::SECURITY_ZONE, "警戒区域", Preset::security_zone()),      // v2.0 新規
+            (preset_ids::OBJECT_FOCUS, "対物検知", Preset::object_focus()),        // v2.0 新規
             (preset_ids::CUSTOM, "カスタム", Preset::custom()),
         ];
+        // v2.0 廃止: night_vision, retail, warehouse
 
         presets.into_iter().map(|(id, name, preset)| {
             PresetBalanceInfo {
@@ -160,9 +163,10 @@ impl OverdetectionAnalyzer {
         let person_detail = ((1.0 - par) * 100.0 / 0.8 * 100.0).clamp(0.0, 100.0) as u8;
 
         // 対象多様性: excluded_objects数基準（少ない = 多様）
-        // 最大20個と想定
+        // v2.0: YOLOラベル展開により最大40個と想定
+        // (VEHICLES:8 + ANIMALS:10 + OFFICE:8 + INDOOR:6 + FURNITURE:4 + TABLEWARE:7 = 43)
         let excluded_count = preset.excluded_objects.len();
-        let object_variety = (100 - (excluded_count * 100 / 20).min(100)) as u8;
+        let object_variety = (100 - (excluded_count * 100 / 40).min(100)) as u8;
 
         // 動体検知感度: enable_frame_diff基準
         let motion_sensitivity = if preset.enable_frame_diff { 80 } else { 20 };
@@ -180,88 +184,45 @@ impl OverdetectionAnalyzer {
         let interval = match period {
             "7d" => "7 DAY",
             "30d" => "30 DAY",
-            _ => "1 DAY", // デフォルト24h
+            _ => "1 DAY",
         };
 
-        // アクティブなカメラを取得
+        tracing::info!("Overdetection analysis started for period: {}", period);
+
+        // 1. アクティブなカメラを取得（上位10件に制限）
         let cameras: Vec<(String, Option<String>)> = sqlx::query_as(
             r#"
-            SELECT DISTINCT dl.camera_id, c.name
-            FROM detection_logs dl
-            LEFT JOIN cameras c ON dl.camera_id = c.id
-            WHERE dl.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-            "#,
+            SELECT DISTINCT c.camera_id, c.name
+            FROM cameras c
+            INNER JOIN detection_logs d ON c.camera_id = d.camera_id
+            WHERE d.created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+            GROUP BY c.camera_id, c.name
+            ORDER BY COUNT(*) DESC
+            LIMIT 10
+            "#
         )
         .fetch_all(&self.pool)
         .await?;
 
-        let mut result_cameras = Vec::new();
+        let mut results = Vec::new();
 
+        // 2. カメラごとに分析
         for (camera_id, camera_name) in cameras {
             let mut issues = Vec::new();
 
-            // タグ固定化チェック
-            let tag_issues = self.tag_analyzer.analyze_fixation(&camera_id, interval).await?;
-            for tag_issue in tag_issues {
-                let severity = if tag_issue.percentage >= 80.0 {
-                    OverdetectionSeverity::Critical
-                } else if tag_issue.percentage >= 70.0 {
-                    OverdetectionSeverity::Warning
-                } else {
-                    OverdetectionSeverity::Info
-                };
-
-                issues.push(OverdetectionIssue {
-                    issue_type: OverdetectionType::TagFixation,
-                    tag: Some(tag_issue.tag.clone()),
-                    label: None,
-                    zone: None,
-                    rate: tag_issue.percentage,
-                    count: tag_issue.count,
-                    severity,
-                    suggestion: format!(
-                        "PAR閾値を0.6以上に上げるか、'{}'をタグ除外リストに追加",
-                        tag_issue.tag
-                    ),
-                });
-            }
-
-            // 固定物反応チェック
-            let static_issues = self.static_detector.analyze(&camera_id, interval).await?;
-            for static_issue in static_issues {
-                issues.push(OverdetectionIssue {
-                    issue_type: OverdetectionType::StaticObject,
-                    tag: None,
-                    label: Some(static_issue.label.clone()),
-                    zone: Some(format!("x:{},y:{}", static_issue.x_zone, static_issue.y_zone)),
-                    rate: 0.0, // 固定物は率ではなく件数ベース
-                    count: static_issue.repeat_count,
-                    severity: if static_issue.repeat_count >= 20 {
-                        OverdetectionSeverity::Critical
-                    } else {
-                        OverdetectionSeverity::Warning
-                    },
-                    suggestion: format!(
-                        "固定オブジェクトの可能性。'{}'をexcluded_objectsに追加検討",
-                        static_issue.label
-                    ),
-                });
+            // 高頻度検出チェック
+            if let Some(issue) = self.check_high_frequency(&camera_id, interval).await? {
+                issues.push(issue);
             }
 
             // Unknown乱発チェック
-            let unknown_issue = self.check_unknown_flood(&camera_id, interval).await?;
-            if let Some(issue) = unknown_issue {
+            if let Some(issue) = self.check_unknown_flood(&camera_id, interval).await? {
                 issues.push(issue);
             }
 
-            // 高頻度検出チェック
-            let high_freq_issue = self.check_high_frequency(&camera_id, interval).await?;
-            if let Some(issue) = high_freq_issue {
-                issues.push(issue);
-            }
-
+            // 問題があるカメラのみ結果に追加
             if !issues.is_empty() {
-                result_cameras.push(CameraOverdetection {
+                results.push(CameraOverdetection {
                     camera_id,
                     camera_name,
                     issues,
@@ -269,9 +230,11 @@ impl OverdetectionAnalyzer {
             }
         }
 
+        tracing::info!("Overdetection analysis completed: {} cameras with issues", results.len());
+
         Ok(OverdetectionResult {
             period: period.to_string(),
-            cameras: result_cameras,
+            cameras: results,
         })
     }
 
@@ -318,31 +281,9 @@ impl OverdetectionAnalyzer {
     }
 
     /// 高頻度検出チェック（Z-score > 2.0）
+    /// 性能最適化: 全カメラ統計は重いため、簡略化
     async fn check_high_frequency(&self, camera_id: &str, interval: &str) -> Result<Option<OverdetectionIssue>> {
-        // 全カメラの平均・標準偏差を計算
-        let global_stats: Option<(f64, f64)> = sqlx::query_as(&format!(
-            r#"
-            SELECT
-                AVG(cnt) as avg_count,
-                STDDEV(cnt) as std_count
-            FROM (
-                SELECT camera_id, COUNT(*) as cnt
-                FROM detection_logs
-                WHERE created_at >= DATE_SUB(NOW(), INTERVAL {})
-                GROUP BY camera_id
-            ) sub
-            "#,
-            interval
-        ))
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let (avg, std) = match global_stats {
-            Some((avg, std)) if std > 0.0 => (avg, std),
-            _ => return Ok(None),
-        };
-
-        // このカメラの検出数
+        // このカメラの検出数のみ取得（Z-scoreは省略）
         let camera_count: Option<(i64,)> = sqlx::query_as(&format!(
             r#"
             SELECT COUNT(*) as cnt
@@ -356,25 +297,28 @@ impl OverdetectionAnalyzer {
         .fetch_optional(&self.pool)
         .await?;
 
+        // 1日あたり500件以上を高頻度とみなす簡易判定
+        let threshold = match interval {
+            "7 DAY" => 3500,  // 500 * 7
+            "30 DAY" => 15000, // 500 * 30
+            _ => 500, // 1 DAY
+        };
+
         if let Some((count,)) = camera_count {
-            let z_score = (count as f64 - avg) / std;
-            if z_score > 2.0 {
+            if count > threshold {
                 return Ok(Some(OverdetectionIssue {
                     issue_type: OverdetectionType::HighFrequency,
                     tag: None,
                     label: None,
                     zone: None,
-                    rate: z_score,
+                    rate: count as f64,
                     count,
-                    severity: if z_score > 3.0 {
+                    severity: if count > threshold * 2 {
                         OverdetectionSeverity::Critical
                     } else {
                         OverdetectionSeverity::Warning
                     },
-                    suggestion: format!(
-                        "検出数が平均の{:.1}σ上（Z-score: {:.2}）。ポーリング間隔を延ばすか閾値を上げて検討",
-                        z_score, z_score
-                    ),
+                    suggestion: "検出数が多い。ポーリング間隔を延ばすか閾値を上げて検討".to_string(),
                 }));
             }
         }

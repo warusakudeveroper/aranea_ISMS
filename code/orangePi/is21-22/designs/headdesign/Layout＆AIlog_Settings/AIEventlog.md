@@ -1,319 +1,50 @@
-# AIEventlog: AIイベントログ設定機能設計
+AI Event Log
+## 表示関連
+1. 現在カメラ名と検知結果が出ている行に余裕があってもカメラ名が省略される。このせいでカメラ名がわからない
+2. 丸数字の意味がわからない。少なくともカメラ名は長かったら省略されること、この丸数字の意味はマウスホバーでヒント表示すべき
+3. アイコンがひどくみづらい。これは背景色を中間色にまとめているせい。
+   そもそも背景色と文字色は
+   - 人検知=黄色( #ffff00)文字#222222※オペレーション的には最重要なので目立つ色
+   - 車両検知=青([#6495ED)文字#FFFFFF※わかる必要はあるが人検知とは明確に区別したい。
+   - 異常検知=赤(ff0000)文字#FFFF00※とにかく危険な印象
+   - 不明=薄いグレー(#d3d3d3) 文字#222222※曖昧な中間色で構成
+   - カメラロスト=濃いグレー(#333333) 文字#FFFFFF※ブラックアウトした感じを出す
+   - カメラ復帰=白(FFFFFF)文字#444444※実際にはほぼ意味のない通知なので目立たないけどわかるくらい
 
-文書番号: Layout＆AIlog_Settings/AIEventlog
-作成日: 2026-01-07
-ステータス: 設計確定
-関連文書: is22_AI_EVENT_LOG_DESIGN.md
+	の指定であったが守られていない。これはシンプルな問題なので早急に解決すべきである。
 
----
-
-## 1. 概要
-
-### 1.1 目的
-`is22_AI_EVENT_LOG_DESIGN.md` セクション9で定義されたAIイベントログ設定項目をSettingsModalで操作可能にし、運用時のチューニングを容易にする。
-
-### 1.2 現状
-- SettingsModalに「AIイベントログ」設定タブが存在しない
-- 設定項目はハードコードまたはDB直接操作が必要
-- EventLogPaneのフィルタ機能はUI側で実装されているが、永続化されていない
-
-### 1.3 対象ファイル
-- `frontend/src/components/SettingsModal.tsx` - タブ追加
-- `frontend/src/components/AiEventLogSettingsTab.tsx` - 新規作成
-- `src/web_api/routes.rs` - 設定API追加（必要に応じて）
-
-### 1.4 MECEチェック
-本設計は以下の観点で網羅的・相互排他的に整理：
-- 設定項目: IS21接続/保存ポリシー/BQ同期/フィルタ永続化
-- 各設定の読み取り/書き込み/検証を明確化
-- 既存設計（is22_AI_EVENT_LOG_DESIGN.md）との整合性を確認
-
----
-
-## 2. 設定項目定義
-
-### 2.1 設定項目一覧（is22_AI_EVENT_LOG_DESIGN.md セクション9より）
-
-```json
-{
-  "ai_event_log": {
-    "is21_endpoint": "http://192.168.3.240:9000/v1/analyze",
-    "timeout_ms": 30000,
-    "save_none_events": false,
-    "min_confidence": 0.3,
-    "bq_sync_interval_sec": 60,
-    "bq_sync_batch_size": 100
-  }
-}
+## AI判定について
+1. これは様々な問題が絡み合っていて複雑なのでここではまずis21とis22の評価方法、評価基準、レスポンスの内容などについて詳細に解説してください。その後に詳細な調整にすすみます。必ずエビデンスをつけてプリセットが明確に働いているか、直近画像を二枚送って差分査定をおこなっているかを解説してください。
+2. 現在の状態としては画面を確認すればわかりますがイベントログに
 ```
+   `Toj 1FEVThuman (1)
 
-### 2.2 設定項目詳細
+17:36:39
 
-| 項目 | 型 | 範囲 | デフォルト | 説明 |
-|------|-----|------|-----------|------|
-| is21_endpoint | string | URL形式 | http://192.168.3.240:9000/v1/analyze | IS21推論エンドポイント |
-| timeout_ms | number | 5000-120000 | 30000 | IS21リクエストタイムアウト(ms) |
-| save_none_events | boolean | - | false | primary_event="none"も保存するか |
-| min_confidence | number | 0.1-1.0 | 0.3 | 最小信頼度閾値 |
-| bq_sync_interval_sec | number | 30-600 | 60 | BQ同期間隔(秒) |
-| bq_sync_batch_size | number | 10-500 | 100 | BQ同期バッチサイズ |
+3
 
----
+50%
 
-## 3. UI設計
+carry.bag
 
-### 3.1 タブ追加
+outfit.pants
 
-SettingsModalに「AIログ」タブを追加（既存8タブ → 9タブ）
+count.single
 
-```typescript
-// SettingsModal.tsx TabsList
-<TabsTrigger value="ailog" className="flex items-center gap-1 text-xs">
-  <Activity className="h-4 w-4" />
-  AIログ
-</TabsTrigger>
+appearance.uniform_like
 ```
+となっていても実際には手ぶらの施設スタッフなのでもう少し精度向上を検討する必要はあります。
+検出速度などは問題を感じてませんがこれが"まともに推論していないことによる高速反応"であるなら大きな問題。is21の動作状態の監視も必要です。
+- また、unknown判定に関して元々"何もない"なら画像の保存もログも出さない仕様のはずですがunknownに関しては画像保存の対象なのでunknown乱発によって画像の保存ストーム状態になっておりストレージが無限に肥大化するループになってませんか？画像の保存に関してストレージのクォータを設定モーダルに"最大保存容量"などの設定を設けてユーザーの裁量範疇で画像の保存を行う仕様になってますか？
+- そもそもunknown判定自体に誤りはありませんか？現在unknownの項目に関しては保存画像が見えません。そのため単純に正常に画像を送信できていないカメラがある。
+- 推測でしかないが例えば回線品質が悪いからフォールバックでサブストリームで巡回画像を取得しているにも関わらず取得できないメインストリームの画像をAI推論判定材料にしていないか？
+- そもそも設定モーダルに推論統計のタブを作成し、推論判定結果と対象のカメラの分布と件数、判定結果の傾向を統計値として分析として提供するインターフェースがあった方が良いのでは
+- プリセットと推論結果による結果の変移を分析可能にしないとプリセット変更の効果がエビデンスのないプラセボになるのでどのカメラがそのプリセットで動作していてそのような結果を吐いているかの分析を取得できる仕様にすべき
+- そもそもプリセットが適切か
+- 現在人検知、車両検知自体は動作しているようである。ai推論としては最低限の動作はしていると思われるが上記がエラーだとするとそれを検知する方法もエラーリカバーの方法もブラックボックスなので検討必要
+- 結果が曖昧なAI推論に対してデータの過度な正規化を行なっていないか？DBは正規化されるべきだが応答速度や可用性を考えると過度の正規化は望ましくない。
+- 最終的にはAI推論結果の統計から"過度に反応しすぎるカメラ""正しくない判定を行なっているカメラ"の設定値をカメラコンテキストとカメラ名、fid(施設コード)からmobesSystemに保存された施設情報、ridから部屋やリソースの仕様をLLMコンテキストとして連携し宿泊施設や飲食店、美容院、オフィスなどでは予約、来訪者情報との照合を行って動作するシステムである。
+- これは同時にLLMでコンテキストベースでカメラの属性を読み込んで調整する"autoAttunement"機能の実装に至る前段階であり、この機能実装が統合されたエラー内容、検出傾向、検出統計、偏差と分布、KPIとフィードバック、同じ人がカメラ間を移動した場合の検出結果の偏差調整(これは同一に近いタイムスタンプで類似の特徴を捉えた場合のベクトル的距離検証必要)による"autoAttunement"の調整用API(LLMおよび人力調整)の機能拡張が必要でありその基本設計ドキュメントの作成と実装予定todoをコード内に組み込んでおく必要性を意味する。
 
-### 3.2 AiEventLogSettingsTab レイアウト
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ AIイベントログ設定                                                    │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│ ┌─ IS21接続設定 ───────────────────────────────────────────────────┐ │
-│ │ エンドポイント: [http://192.168.3.240:9000/v1/analyze           ] │ │
-│ │ タイムアウト:   [30___] 秒  (5-120秒)                            │ │
-│ │                                                                   │ │
-│ │ 💡 IS21タブでも接続テストが可能です                               │ │
-│ └───────────────────────────────────────────────────────────────────┘ │
-│                                                                      │
-│ ┌─ 保存ポリシー ─────────────────────────────────────────────────────┐ │
-│ │ □ 検出なしイベントも保存する (none events)                        │ │
-│ │ 最小信頼度: [0.30] (0.10-1.00)                                    │ │
-│ │                                                                   │ │
-│ │ 💡 検出なしを保存すると容量が増加しますが、解析改善に役立ちます    │ │
-│ └───────────────────────────────────────────────────────────────────┘ │
-│                                                                      │
-│ ┌─ BigQuery同期設定 ─────────────────────────────────────────────────┐ │
-│ │ 同期間隔:   [60__] 秒  (30-600秒)                                 │ │
-│ │ バッチサイズ: [100_] 件  (10-500件)                               │ │
-│ │                                                                   │ │
-│ │ ステータス: 🟢 同期中 | 未同期: 12件 | 最終同期: 10:30:15         │ │
-│ └───────────────────────────────────────────────────────────────────┘ │
-│                                                                      │
-│                                        [設定を保存]                   │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-### 3.3 コンポーネント設計
-
-```typescript
-// frontend/src/components/AiEventLogSettingsTab.tsx
-
-interface AiEventLogSettings {
-  is21_endpoint: string
-  timeout_ms: number
-  save_none_events: boolean
-  min_confidence: number
-  bq_sync_interval_sec: number
-  bq_sync_batch_size: number
-}
-
-interface BqSyncStatus {
-  status: 'syncing' | 'idle' | 'error'
-  pending_count: number
-  last_synced_at: string | null
-  error_message: string | null
-}
-
-export function AiEventLogSettingsTab() {
-  const [settings, setSettings] = useState<AiEventLogSettings | null>(null)
-  const [bqStatus, setBqStatus] = useState<BqSyncStatus | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  // GET /api/settings/ai-event-log
-  // GET /api/settings/bq-sync-status
-  // PUT /api/settings/ai-event-log
-}
-```
-
----
-
-## 4. API設計
-
-### 4.1 設定取得
-
-```
-GET /api/settings/ai-event-log
-```
-
-レスポンス:
-```json
-{
-  "ok": true,
-  "data": {
-    "is21_endpoint": "http://192.168.3.240:9000/v1/analyze",
-    "timeout_ms": 30000,
-    "save_none_events": false,
-    "min_confidence": 0.3,
-    "bq_sync_interval_sec": 60,
-    "bq_sync_batch_size": 100
-  }
-}
-```
-
-### 4.2 設定更新
-
-```
-PUT /api/settings/ai-event-log
-Content-Type: application/json
-
-{
-  "is21_endpoint": "http://192.168.3.240:9000/v1/analyze",
-  "timeout_ms": 30000,
-  "save_none_events": false,
-  "min_confidence": 0.3,
-  "bq_sync_interval_sec": 60,
-  "bq_sync_batch_size": 100
-}
-```
-
-レスポンス:
-```json
-{
-  "ok": true,
-  "message": "Settings saved successfully"
-}
-```
-
-### 4.3 BQ同期ステータス
-
-```
-GET /api/settings/bq-sync-status
-```
-
-レスポンス:
-```json
-{
-  "ok": true,
-  "data": {
-    "status": "syncing",
-    "pending_count": 12,
-    "last_synced_at": "2026-01-07T10:30:15Z",
-    "error_message": null
-  }
-}
-```
-
----
-
-## 5. バリデーション
-
-### 5.1 フロントエンドバリデーション
-
-| 項目 | ルール | エラーメッセージ |
-|------|--------|----------------|
-| is21_endpoint | URL形式、http/https | "有効なURLを入力してください" |
-| timeout_ms | 5000-120000 | "5〜120秒の範囲で入力してください" |
-| min_confidence | 0.1-1.0 | "0.1〜1.0の範囲で入力してください" |
-| bq_sync_interval_sec | 30-600 | "30〜600秒の範囲で入力してください" |
-| bq_sync_batch_size | 10-500 | "10〜500件の範囲で入力してください" |
-
-### 5.2 バックエンドバリデーション
-
-```rust
-// src/web_api/routes.rs
-fn validate_ai_event_log_settings(req: &AiEventLogSettingsRequest) -> Result<(), ValidationError> {
-    if req.timeout_ms < 5000 || req.timeout_ms > 120000 {
-        return Err(ValidationError::new("timeout_ms must be between 5000 and 120000"));
-    }
-    if req.min_confidence < 0.1 || req.min_confidence > 1.0 {
-        return Err(ValidationError::new("min_confidence must be between 0.1 and 1.0"));
-    }
-    // ...
-    Ok(())
-}
-```
-
----
-
-## 6. 変更ファイル一覧
-
-| ファイル | 変更内容 | 行数見積 |
-|----------|---------|---------|
-| `frontend/src/components/SettingsModal.tsx` | タブ追加、import追加 | +10行 |
-| `frontend/src/components/AiEventLogSettingsTab.tsx` | 新規作成 | +250行 |
-| `src/web_api/routes.rs` | API追加 | +100行 |
-| `src/config_store/types.rs` | AiEventLogSettings型追加 | +20行 |
-| `src/config_store/repository.rs` | 設定読み書きメソッド追加 | +50行 |
-
----
-
-## 7. テスト計画
-
-### 7.1 バックエンドテスト
-
-| ID | テスト内容 | 期待結果 |
-|----|-----------|----------|
-| BE-T01 | GET /api/settings/ai-event-log | 設定値を返す |
-| BE-T02 | PUT 正常値 | 200 OK, 設定保存 |
-| BE-T03 | PUT timeout_ms範囲外 | 400 Bad Request |
-| BE-T04 | PUT min_confidence範囲外 | 400 Bad Request |
-| BE-T05 | GET /api/settings/bq-sync-status | ステータス返却 |
-
-### 7.2 フロントエンドテスト
-
-| ID | テスト内容 | 期待結果 |
-|----|-----------|----------|
-| FE-T01 | AIログタブ表示 | タブがクリック可能 |
-| FE-T02 | 設定読み込み | フォームに値が表示 |
-| FE-T03 | 範囲外入力 | エラーメッセージ表示 |
-| FE-T04 | 保存ボタン押下 | APIコール、成功通知 |
-| FE-T05 | BQ同期ステータス表示 | pending_count等表示 |
-
-### 7.3 Chrome UIテスト
-
-| ID | テスト内容 | 期待結果 |
-|----|-----------|----------|
-| UI-T01 | 設定モーダル→AIログタブ | タブ遷移、設定表示 |
-| UI-T02 | 値変更→保存 | 保存成功、再読み込みで反映 |
-| UI-T03 | BQ同期ステータス確認 | リアルタイム更新 |
-
----
-
-## 8. 依存関係
-
-### 8.1 既存依存
-- `is22_AI_EVENT_LOG_DESIGN.md` セクション9の設定項目定義
-- SettingsModalの既存タブ構造（8タブ → 9タブに拡張）
-
-### 8.2 新規依存
-- settings テーブルに `ai_event_log` JSON カラムが存在すること
-- bq_sync_queue テーブル（BQ同期ステータス取得用）
-
----
-
-## 9. 実装タスク
-
-| タスクID | 内容 | 見積 |
-|----------|------|------|
-| IMPL-A01 | AiEventLogSettingsTab.tsx 新規作成 | 2時間 |
-| IMPL-A02 | SettingsModal.tsx タブ追加 | 15分 |
-| IMPL-A03 | routes.rs API追加 | 1時間 |
-| IMPL-A04 | config_store 型・リポジトリ追加 | 30分 |
-| TEST-A01 | バックエンドテスト作成・実行 | 30分 |
-| TEST-A02 | フロントエンドテスト作成・実行 | 30分 |
-| TEST-A03 | Chrome UIテスト実行 | 20分 |
-
----
-
-## 10. 大原則チェックリスト
-
-- [x] SSoT: is22_AI_EVENT_LOG_DESIGN.md の設定定義を唯一の情報源として参照
-- [x] SOLID-S: AiEventLogSettingsTab は設定UI表示・保存の単一責務
-- [x] MECE: 全設定項目と操作（読取/書込/検証）を網羅
-- [x] アンアンビギュアス: バリデーションルール・範囲を明確に定義
-- [x] 車輪の再発明禁止: 既存SettingsModalパターンを踏襲
-- [x] テスト計画あり: BE5項目、FE5項目、UI3項目を定義
+- 今後の詳細実装に関しては詳細な設計が必要としても現況動作が何らかの問題を孕んでいるなら簡易的対応でも先に修正し正常な分析が可能な状態までは即座に対応すべきです。
+- このis21,22の正常動作が確定的にならないとLLM連携系の実装に進むことができません。

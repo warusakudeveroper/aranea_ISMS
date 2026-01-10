@@ -510,6 +510,16 @@ impl CameraBrandService {
             last_updated: cache.last_updated,
         }
     }
+
+    /// Export OUI map for scanner use
+    /// Returns HashMap<OUI prefix, brand display name>
+    /// This is used by the scanner module for synchronous OUI lookups
+    pub async fn export_oui_map(&self) -> HashMap<String, String> {
+        let cache = self.cache.read().await;
+        cache.oui_map.iter()
+            .map(|(k, v)| (k.clone(), v.brand_display_name.clone()))
+            .collect()
+    }
 }
 
 /// Cache statistics

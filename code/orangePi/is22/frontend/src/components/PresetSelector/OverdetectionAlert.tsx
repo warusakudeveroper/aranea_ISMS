@@ -76,8 +76,8 @@ export const OverdetectionAlert: React.FC<OverdetectionAlertProps> = ({
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4">
-      <h4 className="text-sm font-medium text-amber-400 mb-3 flex items-center gap-2">
+    <div className="bg-muted/50 rounded-lg p-4">
+      <h4 className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-3 flex items-center gap-2">
         <span>⚠️</span>
         <span>過剰検出の警告</span>
       </h4>
@@ -91,31 +91,31 @@ export const OverdetectionAlert: React.FC<OverdetectionAlertProps> = ({
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2">
                 <span>{getSeverityIcon(issue.severity)}</span>
-                <span className="text-sm font-medium text-gray-200">
+                <span className="text-sm font-medium text-foreground">
                   {getTypeLabel(issue.type)}
                 </span>
               </div>
               {issue.rate > 0 && (
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-muted-foreground">
                   {issue.rate.toFixed(1)}%
                 </span>
               )}
             </div>
 
-            <div className="mt-1 text-xs text-gray-300">
+            <div className="mt-1 text-xs text-muted-foreground">
               {issue.tag && (
-                <span className="mr-2">タグ: <code className="bg-gray-700 px-1 rounded">{issue.tag}</code></span>
+                <span className="mr-2">タグ: <code className="bg-muted px-1 rounded">{issue.tag}</code></span>
               )}
               {issue.label && (
-                <span className="mr-2">ラベル: <code className="bg-gray-700 px-1 rounded">{issue.label}</code></span>
+                <span className="mr-2">ラベル: <code className="bg-muted px-1 rounded">{issue.label}</code></span>
               )}
               {issue.zone && (
-                <span className="mr-2">ゾーン: <code className="bg-gray-700 px-1 rounded">{issue.zone}</code></span>
+                <span className="mr-2">ゾーン: <code className="bg-muted px-1 rounded">{issue.zone}</code></span>
               )}
               <span>件数: {issue.count}</span>
             </div>
 
-            <div className="mt-2 text-xs text-gray-400">
+            <div className="mt-2 text-xs text-muted-foreground/70">
               {issue.suggestion}
             </div>
 
@@ -131,7 +131,7 @@ export const OverdetectionAlert: React.FC<OverdetectionAlertProps> = ({
               {issue.tag && onExcludeTag && (
                 <button
                   onClick={() => onExcludeTag(issue.tag!)}
-                  className="text-xs px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                  className="text-xs px-2 py-1 bg-muted hover:bg-muted/80 text-foreground rounded transition-colors border"
                 >
                   タグ除外
                 </button>
@@ -139,7 +139,7 @@ export const OverdetectionAlert: React.FC<OverdetectionAlertProps> = ({
               {onChangePreset && (
                 <button
                   onClick={onChangePreset}
-                  className="text-xs px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                  className="text-xs px-2 py-1 bg-muted hover:bg-muted/80 text-foreground rounded transition-colors border"
                 >
                   プリセット変更
                 </button>

@@ -97,7 +97,7 @@ export function MobileDrawer({
         aria-hidden="true"
       />
 
-      {/* Drawer */}
+      {/* Drawer - Issue #108: 白85%背景で視認性向上 */}
       <div
         ref={drawerRef}
         role="dialog"
@@ -105,7 +105,7 @@ export function MobileDrawer({
         aria-label={title}
         className={cn(
           "fixed top-0 right-0 z-50 h-full",
-          "bg-card",
+          "bg-white/[0.85] backdrop-blur-sm",
           "shadow-xl",
           "flex flex-col",
           "transition-transform duration-300 ease-out",
@@ -114,7 +114,7 @@ export function MobileDrawer({
         style={{ width }}
       >
         {/* Header */}
-        <div className="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b bg-card">
+        <div className="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b bg-white/90">
           <span className="font-semibold text-foreground">{title}</span>
           <button
             onClick={onClose}

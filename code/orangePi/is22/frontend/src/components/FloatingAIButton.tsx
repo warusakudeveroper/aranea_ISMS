@@ -38,10 +38,12 @@ export function FloatingAIButton({
         // 位置・サイズ
         "fixed right-4 bottom-4 z-50",
         "w-14 h-14 rounded-full",
-        // 色
-        "bg-primary text-primary-foreground",
-        // シャドウ
-        "shadow-lg",
+        // 色 - Issue #108: 白85%背景で視認性向上
+        "bg-white/[0.85] text-primary",
+        // ボーダー
+        "border-2 border-primary/30",
+        // シャドウ - 強化
+        "shadow-xl",
         // レイアウト
         "flex items-center justify-center",
         // トランジション

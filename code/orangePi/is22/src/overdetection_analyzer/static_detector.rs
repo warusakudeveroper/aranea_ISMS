@@ -29,80 +29,32 @@ impl StaticDetector {
         Self { pool }
     }
 
-    /// 固定物反応を検出（同一座標±5%で同一ラベルが10件/時間以上）
+    /// 固定物反応を検出（同一イベントが高頻度で検出）
     ///
-    /// detection_logsにはbboxデータが含まれている場合に検出
-    /// bbox_x, bbox_y, image_width, image_heightカラムが必要
+    /// 性能最適化: JSON_TABLE展開は重いため、primary_eventベースの簡易検出を使用
     pub async fn analyze(&self, camera_id: &str, interval: &str) -> Result<Vec<StaticObjectIssue>> {
-        // detection_logsテーブルの構造を確認
-        // bboxesがJSONで保存されている場合の処理
-
-        // bboxes JSON構造: [{"x": 100, "y": 50, "w": 200, "h": 300, "label": "person", "conf": 0.85}]
-        // x, yを20分割ゾーンに変換して集計
-
-        let static_objects: Vec<(i32, i32, String, i64)> = sqlx::query_as(&format!(
-            r#"
-            SELECT
-                CAST(FLOOR(JSON_EXTRACT(bbox.*, '$.x') / 32) AS SIGNED) as x_zone,
-                CAST(FLOOR(JSON_EXTRACT(bbox.*, '$.y') / 24) AS SIGNED) as y_zone,
-                JSON_UNQUOTE(JSON_EXTRACT(bbox.*, '$.label')) as label,
-                COUNT(*) as repeat_count
-            FROM detection_logs dl,
-                 JSON_TABLE(dl.bboxes, '$[*]' COLUMNS (
-                     bbox JSON PATH '$'
-                 )) AS bbox
-            WHERE dl.camera_id = ?
-              AND dl.created_at >= DATE_SUB(NOW(), INTERVAL {})
-              AND dl.bboxes IS NOT NULL
-              AND dl.bboxes != '[]'
-              AND JSON_EXTRACT(bbox.*, '$.x') IS NOT NULL
-            GROUP BY x_zone, y_zone, label
-            HAVING repeat_count >= 10
-            ORDER BY repeat_count DESC
-            LIMIT 20
-            "#,
-            interval
-        ))
-        .bind(camera_id)
-        .fetch_all(&self.pool)
-        .await
-        .unwrap_or_default();
-
-        // bboxesカラムがない場合やデータがない場合は空を返す
-        // 代替として、primary_labelベースの簡易検出を行う
-        if static_objects.is_empty() {
-            return self.analyze_by_primary_label(camera_id, interval).await;
-        }
-
-        Ok(static_objects.into_iter().map(|(x_zone, y_zone, label, repeat_count)| {
-            StaticObjectIssue {
-                x_zone,
-                y_zone,
-                label,
-                repeat_count,
-            }
-        }).collect())
+        // primary_eventベースの簡易検出を使用（JSON_TABLE展開は性能問題のため無効化）
+        self.analyze_by_primary_label(camera_id, interval).await
     }
 
-    /// primary_labelベースの簡易固定物検出
-    /// 同一ラベルが短時間に繰り返し検出される場合を検出
+    /// primary_eventベースの簡易固定物検出
+    /// 同一イベントが高頻度で検出される場合を検出（性能最適化版）
     async fn analyze_by_primary_label(&self, camera_id: &str, interval: &str) -> Result<Vec<StaticObjectIssue>> {
-        // 1時間単位で同一ラベルの検出数を集計
+        // 全期間で同一イベントの検出数を集計（時間単位分割を削除して高速化）
         let repeated_labels: Vec<(String, i64)> = sqlx::query_as(&format!(
             r#"
             SELECT
-                primary_label,
+                primary_event,
                 COUNT(*) as repeat_count
             FROM detection_logs
             WHERE camera_id = ?
               AND created_at >= DATE_SUB(NOW(), INTERVAL {})
-              AND primary_event != 'none'
-              AND primary_label IS NOT NULL
-              AND primary_label != ''
-            GROUP BY primary_label, DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00')
-            HAVING repeat_count >= 10
+              AND primary_event NOT IN ('none', '')
+              AND primary_event IS NOT NULL
+            GROUP BY primary_event
+            HAVING repeat_count >= 50
             ORDER BY repeat_count DESC
-            LIMIT 10
+            LIMIT 5
             "#,
             interval
         ))
