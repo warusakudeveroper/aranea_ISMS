@@ -85,4 +85,66 @@
 
 ---
 
-**レビューステータス**: ドキュメント間整合性確認完了 ✅
+### 2026-01-10 第2回レビュー対応
+
+#### P0-1: 02_is21_status.md のFID不一致
+| ドキュメント | 修正前 | 修正後 |
+|-------------|--------|--------|
+| investigation_report/02_is21_status.md (セクション8.2) | `FID: 9966` | `FID: 0000` |
+
+**対応内容**:
+- 権限設定セクションに「設計（To-be）」ラベルを追加
+- FID値を0000（全施設を表す特殊値）に修正
+- 注釈を追加してfid=0000とPermission71の関係を明記
+
+#### P0-2: DesignOverview JSON形式の修正
+| 修正箇所 | 修正前 | 修正後 |
+|---------|--------|--------|
+| Paraclate_DesignOverview.md (L17-39) | 不正なJSON（`"key","value"`形式） | 有効なJSON（`"key":"value"`形式） |
+
+**対応内容**:
+- summaryOverviewのキー・バリュー区切りを`,`から`:`に修正
+- cameraContextを配列形式からオブジェクト形式に変更
+- cameraDetectionをオブジェクト配列に変更
+- `fendDetectAt`を`lastDetectAt`に修正（タイポ）
+
+#### P0-3: DesignOverview TypeDomain修正
+| 修正前 | 修正後 |
+|--------|--------|
+| `Typedomain=araneaDevices` | `TypeDomain=araneaDevice` |
+| `araneaDecvices共通` | `araneaDevice共通` |
+| `ar-is22Camsetver` | `ar-is22CamServer` |
+
+**対応内容**: 実装仕様の`araneaDevice`（単数形）に統一。タイポも併せて修正。
+
+#### P0-4: 05_paraclate_integration.md 認証方式統一
+| 修正前 | 修正後 |
+|--------|--------|
+| JWTベアラートークン認証 | lacisOath認証 |
+| HTTPヘッダー認証 | リクエストボディ内lacisOathオブジェクト |
+
+**対応内容**:
+- セクション3.2を「認証方式（lacisOath）」に改題
+- lacisOathフィールド（lacisID/tid/cic/blessing）の説明表を追加
+- JWT/Bearer認証ではなくlacisOath方式であることを明記
+
+#### P1-2: FunctionArrangement 日本語化・SSoT表記修正
+| 修正箇所 | 修正前 | 修正後 |
+|---------|--------|--------|
+| L47 | `아직`（韓国語） | `現在`（日本語） |
+| SSoT表 | 列幅不揃い・不明瞭 | 整形済み・「SSoTソース」列明示 |
+
+**対応内容**:
+- 韓国語混入を日本語に置換
+- SSoT割当表を整形し、列名を明確化
+- 画像保存（LacisFiles）行を追加
+
+#### 確認済み項目（第2回）
+- ✅ P0指摘事項: 全4件対応完了
+- ✅ P1指摘事項: 1件対応完了
+- ✅ ドキュメント間整合性: 統一済み
+- ✅ The_golden_rules.md準拠: 継続
+
+---
+
+**レビューステータス**: 第2回レビュー対応完了 ✅

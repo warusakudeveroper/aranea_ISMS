@@ -41,15 +41,26 @@ https://www.example_endpoint.com/api/paraclate
 
 **注意**: 実際のURLはmobes2.0実装後に確定
 
-### 3.2 認証ヘッダー
+### 3.2 認証方式（lacisOath）
+
+**認証方式**: lacisOath（lacisID/tid/cic）
 
 ```http
 POST /api/paraclate/summary
-Authorization: Bearer {jwt_token}
-X-Lacis-ID: {is22_lacis_id}
-X-Tenant-ID: {tid}
-X-Facility-ID: {fid}
+Content-Type: application/json
 ```
+
+リクエストボディ内の`lacisOath`オブジェクトで認証を行う：
+
+| フィールド | 説明 |
+|-----------|------|
+| lacisID | デバイス固有識別子（3022...形式） |
+| tid | テナントID |
+| cic | Client Identification Code（アクティベーション時に発行） |
+| blessing | 越境アクセス時のみ使用（permission91+による発行） |
+
+**注意**: JWT/Bearerトークン認証ではなく、lacisOath方式を使用する。
+これはaraneaDevice全体で統一された認証方式である。
 
 ### 3.3 Summary送信
 

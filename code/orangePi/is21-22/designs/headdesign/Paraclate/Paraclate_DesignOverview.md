@@ -15,27 +15,37 @@ Paraclateはギリシア語由来のそこで見守る精霊を表し、この�
   Summary、GrandSummaryともにDB整備、
    Summaryの送信形式案は以下の通り
    ```json
-   
-  {
-"summaryOverview":{
-	"summaryID","{summaryID}",
-	"firstDetectAt","{timeStamp}",
-	"fendDetectAt","{timeStamp}",
-	"detectedEvents":"n"
-	},
-"cameraContext":{
-	"{camera_lacisID1}":["{cameraName}","{cameraContext}","{fid}","{rid}","preset"],
-	"{camera_lacisID2}":["{cameraName}","{cameraContext}","{fid}","{rid}","preset"],
-	"{camera_lacisID3}":["{cameraName}","{cameraContext}","{fid}","{rid}","preset"]
-	},
-"cameraDetection":[
-	"{DetectionTimestamp},{camera_lacisID},{detectionDetail}",
-	"{DetectionTimestamp},{camera_lacisID},{detectionDetail}",
-	"{DetectionTimestamp},{camera_lacisID},{detectionDetail}",
-	"{DetectionTimestamp},{camera_lacisID},{detectionDetail}",
-	"{DetectionTimestamp},{camera_lacisID},{detectionDetail}",
-	]
-}
+   {
+     "summaryOverview": {
+       "summaryID": "{summaryID}",
+       "firstDetectAt": "{timeStamp}",
+       "lastDetectAt": "{timeStamp}",
+       "detectedEvents": "n"
+     },
+     "cameraContext": {
+       "{camera_lacisID1}": {
+         "cameraName": "{cameraName}",
+         "cameraContext": "{cameraContext}",
+         "fid": "{fid}",
+         "rid": "{rid}",
+         "preset": "{preset}"
+       },
+       "{camera_lacisID2}": {
+         "cameraName": "{cameraName}",
+         "cameraContext": "{cameraContext}",
+         "fid": "{fid}",
+         "rid": "{rid}",
+         "preset": "{preset}"
+       }
+     },
+     "cameraDetection": [
+       {
+         "timestamp": "{DetectionTimestamp}",
+         "cameraLacisId": "{camera_lacisID}",
+         "detectionDetail": "{detectionDetail}"
+       }
+     ]
+   }
 ```
 送信時には
 ```json
@@ -50,7 +60,7 @@ lacisOath:
 の形式でmobes2.0の認証を行う。
 - tid,fid,lacisID,cicの取り扱いなどについてはaraneaSDKのナレッジおよびMetatronコマンドなどを用いて確認必要
 - 現時点ではis22にaranearegistor系の機能実装を行なっていないのでここについても実装タスクを作成する。code/ESP32/global/src/AraneaRegister.cppの実装を参考にすること。現在位置としてはまだスキーマ整備も行われていない。
-- Typedomain=araneaDevices,Type=ar-is22Camsetver,Prefix3(araneaDecvices共通)Producttype=022,ProductCode=0000(末尾の追い番ないので4進ルール的仕様として0000)
+- TypeDomain=araneaDevice, Type=ar-is22CamServer, Prefix=3(araneaDevice共通), ProductType=022, ProductCode=0000(末尾の追い番ないので4進ルール的仕様として0000)
 - これまで開発環境としてlacisOath認証による権限境界を意識しない仕様として進めてきたが以降はtid権限境界、fid=施設としての管理を必要とする。
 - 詳しくはhttps://github.com/warusakudeveroper/mobes2.0のlacisOath仕様関連の把握が必要である。
 - 簡易的に解説するとtid=テナントIDでありmobes2.0の契約主体を示す、テナントの権限はテナントの中のみであり、テナントの情報越境は許可されない。fidは施設IDでありテナントは必ず1つ以上のfidを有する。fidのサブネットはmobes側に今後実装するParaclateAPPとis22Server側の双方で同期する。

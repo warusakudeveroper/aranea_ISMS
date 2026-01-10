@@ -28,13 +28,14 @@
 
 ### SSoT割当（決定案）
 
-| 領域                                 | SSoT                                                   | 理由                           |
-| ---------------------------------- | ------------------------------------------------------ | ---------------------------- |
-| テナント/施設/権限（tid/fid/permission）     | mobes2.0（LacisOath / tenants / facilities）             | 既に仕様・実装がある                   |
-| is22 カメラ台帳・カメラ設定（RTSP/AI設定/コンテキスト） | is22 MariaDB（camerasがSSoT）                             | is22側の設計原則として明記              |
-| 検知ログ（リアルタイム/近傍検索）                  | is22 MariaDB（detection_logs）                           | 既に永続・検索・BQキューまである            |
-| 長期分析（横断・集計）                        | BigQuery（最終到達点）                                        | bq_sync_queue が既に存在し設計方針もある  |
-| AI設定（モデル/プロンプト/上限/運用方針）            | mobes2.0 AI Model Settings（aiApplications + overrides） | UI/運用が既に整備                   |
+| 領域 | SSoTソース | 理由 |
+|------|-----------|------|
+| テナント/施設/権限（tid/fid/permission） | mobes2.0（LacisOath / tenants / facilities） | 既に仕様・実装がある |
+| is22 カメラ台帳・カメラ設定（RTSP/AI設定/コンテキスト） | is22 MariaDB（camerasテーブル） | is22側の設計原則として明記 |
+| 検知ログ（リアルタイム/近傍検索） | is22 MariaDB（detection_logsテーブル） | 既に永続・検索・BQキューまである |
+| 長期分析（横断・集計） | BigQuery（最終到達点） | bq_sync_queueが既に存在し設計方針もある |
+| AI設定（モデル/プロンプト/上限/運用方針） | mobes2.0 AI Model Settings（aiApplications） | UI/運用が既に整備 |
+| 画像保存（スナップショット） | LacisFiles（mobes Storage） | Paraclate設計で定義 |
 
 ※「Paraclateエンドポイント」は **mobes側（AI設定）**に保持し、**実データ（カメラ台帳等）は is22 に置く**のが最もMECEです（endpointは接続情報であり業務データではない）。
 
@@ -44,7 +45,7 @@
 
 ### 3-1. 命名
 
-* is22 UI/README は 아직 “mobes AIcam control Tower (mAcT)” 表記 
+* is22 UI/README は現在 "mobes AIcam control Tower (mAcT)" 表記のままである
   → 指示通り **Paraclate（サブタイトル mobes AI control Tower）**へ改名タスクが必要
 * is21 も README は “IS21 camimageEdge AI” 
   → **ParaclateEdge** へ改名（仕様）
