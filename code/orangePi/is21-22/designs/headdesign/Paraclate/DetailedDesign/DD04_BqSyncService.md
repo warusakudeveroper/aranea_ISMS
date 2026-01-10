@@ -405,7 +405,7 @@ impl BqSyncEnqueuer {
         summary: &SummaryResult,
     ) -> Result<serde_json::Value, BqSyncError> {
         Ok(json!({
-            "summary_id": format!("sum_{}", summary.summary_id),
+            "summary_id": format!("SUM-{}", summary.summary_id),  // DD02と統一
             "tid": summary.tid,
             "fid": summary.fid,
             "summary_type": format!("{:?}", summary.summary_type).to_lowercase(),
@@ -556,9 +556,17 @@ impl BqSyncProcessor {
         table_name: &str,
         record_id: u64,
     ) -> Result<(), BqSyncError> {
+        // テーブルごとのPKカラム名（CONSISTENCY_CHECK P0-5対応）
+        let pk_column = match table_name {
+            "detection_logs" => "id",
+            "ai_summary_cache" => "summary_id",  // ai_summary_cacheのPKはsummary_id
+            "is21_logs" => "id",
+            _ => "id",
+        };
+
         let query = format!(
-            "UPDATE {} SET synced_to_bq = TRUE WHERE id = ?",
-            table_name
+            "UPDATE {} SET synced_to_bq = TRUE WHERE {} = ?",
+            table_name, pk_column
         );
 
         sqlx::query(&query)

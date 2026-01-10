@@ -212,7 +212,10 @@ src/
 
 ```rust
 /// テナントプライマリ認証情報
+/// JSONキー（camelCase）とRustフィールド（snake_case）の変換を自動化
+/// （CONSISTENCY_CHECK P0-6対応）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TenantPrimaryAuth {
     pub lacis_id: String,
     pub user_id: String,
@@ -221,6 +224,7 @@ pub struct TenantPrimaryAuth {
 
 /// 登録リクエスト
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegisterRequest {
     pub tenant_primary_auth: TenantPrimaryAuth,
     pub tid: String,
@@ -228,6 +232,7 @@ pub struct RegisterRequest {
 
 /// 登録結果
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegisterResult {
     pub ok: bool,
     pub lacis_id: Option<String>,
@@ -239,6 +244,7 @@ pub struct RegisterResult {
 
 /// 登録状態
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegistrationStatus {
     pub registered: bool,
     pub lacis_id: Option<String>,

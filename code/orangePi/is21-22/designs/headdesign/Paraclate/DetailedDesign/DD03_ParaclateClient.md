@@ -72,7 +72,7 @@ CREATE TABLE paraclate_config (
     endpoint VARCHAR(256) NOT NULL,
     report_interval_minutes INT DEFAULT 60,
     grand_summary_times JSON DEFAULT '["09:00", "17:00", "21:00"]',
-    retention_days INT DEFAULT 30,
+    retention_days INT DEFAULT 60,  -- mobes2.0設計に準拠（60日）
     attunement JSON DEFAULT '{}',
     sync_source_timestamp DATETIME(3),
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
@@ -191,14 +191,37 @@ Content-Type: application/json
 {
   "lacisOath": { ... },
   "event": {
-    "eventId": "uuid-xxx",
+    "eventId": "det_12345",
     "timestamp": "2026-01-10T12:34:56Z",
     "cameraLacisId": "3801AABBCCDDEEFF0001",
     "severity": 8,
-    "detectionDetail": { ... }
+    "detectionDetail": { ... },
+    "snapshot": {
+      "type": "base64",
+      "data": "iVBORw0KGgo...",
+      "mimeType": "image/jpeg"
+    }
   }
 }
 ```
+
+**snapshotフィールド仕様**（CONSISTENCY_CHECK P0-4対応、LacisFiles連携用）
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| type | "base64" \| "url" | スナップショットの提供形式 |
+| data | string | base64エンコード画像 or 署名付きURL |
+| mimeType | string | 画像MIME型（image/jpeg等） |
+
+**Response (200 OK)**
+```json
+{
+  "ok": true,
+  "eventId": "det_12345",
+  "receivedAt": "2026-01-10T12:34:57Z",
+  "snapshotRef": "lacisFiles://T2025120621041161827/snapshot_det_12345.jpg"
+}
+```
+`snapshotRef`はis22側で`detection_logs.snapshot_url`に保存し、BQ同期時に使用する。
 
 #### GET /api/paraclate/config/{tid}
 設定取得（SSoT同期用）
@@ -683,14 +706,26 @@ pub struct ConfigSyncService {
 
 impl ConfigSyncService {
     /// mobes2.0から設定を取得して同期
+    ///
+    /// 注意: セキュリティ要件として全リクエストにlacisOath認証が必須
+    /// （CONSISTENCY_CHECK P0-3対応）
     pub async fn sync_from_mobes(&self) -> Result<(), ParaclateError> {
         let tid = self.config_store.get("aranea.tid").await?;
         let endpoint = self.config_store.get("paraclate.endpoint").await?;
 
+        // lacisOath認証情報を取得（セキュリティ必須）
+        let registration = self.client.register_service.get_registration_status().await?;
+        let lacis_id = registration.lacis_id.ok_or(ParaclateError::NotRegistered)?;
+        let cic = self.config_store.get("aranea.cic").await?;
+
         let url = format!("{}/config/{}", endpoint, tid);
 
+        // lacisOath認証ヘッダを付与（mobes2.0要件）
         let response = self.client.http_client
             .get(&url)
+            .header("X-Lacis-ID", &lacis_id)
+            .header("X-Lacis-TID", &tid)
+            .header("X-Lacis-CIC", &cic)
             .send()
             .await?;
 
@@ -726,7 +761,7 @@ impl ConfigSyncService {
                         .as_array()
                         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                         .unwrap_or_else(|| vec!["09:00".to_string(), "17:00".to_string(), "21:00".to_string()]),
-                    retention_days: config["retentionDays"].as_i64().unwrap_or(30) as i32,
+                    retention_days: config["retentionDays"].as_i64().unwrap_or(60) as i32,  // mobes2.0準拠
                     attunement: config["attunement"].clone(),
                     sync_source_timestamp: updated_at,
                 };
@@ -1023,7 +1058,7 @@ CREATE TABLE IF NOT EXISTS paraclate_config (
     endpoint VARCHAR(256) NOT NULL,
     report_interval_minutes INT DEFAULT 60,
     grand_summary_times JSON DEFAULT '["09:00", "17:00", "21:00"]',
-    retention_days INT DEFAULT 30,
+    retention_days INT DEFAULT 60,  -- mobes2.0設計に準拠（60日）
     attunement JSON DEFAULT '{}',
     sync_source_timestamp DATETIME(3),
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
