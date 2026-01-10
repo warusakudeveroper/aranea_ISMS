@@ -2,7 +2,7 @@
 
 作成日: 2026-01-10
 最終更新: 2026-01-10
-バージョン: 1.0.0
+バージョン: 1.4.0
 
 ---
 
@@ -20,6 +20,7 @@
 | Phase 3 | DD02 | Summary/GrandSummary | Phase 2 | #116 |
 | Phase 4 | DD03 | ParaclateClient | Phase 1,2,3 | #117 |
 | Phase 5 | DD04 | BqSyncService | Phase 3,4 | #118 |
+| Phase 6 | DD06,DD07 | IS21 Baseline | Phase 1 | #119 |
 
 **親Issue**: #113
 
@@ -34,6 +35,7 @@
 | [Phase3_SummaryGrandSummary.md](./Phase3_SummaryGrandSummary.md) | AI要約生成・統合 | 8 |
 | [Phase4_ParaclateClient.md](./Phase4_ParaclateClient.md) | mobes2.0連携クライアント | 7 |
 | [Phase5_BqSyncService.md](./Phase5_BqSyncService.md) | BigQuery同期 | 7 |
+| [Phase6_IS21_Baseline.md](./Phase6_IS21_Baseline.md) | IS21基盤・推論サービス | 9 |
 | [COMPLETENESS_CHECK.md](./COMPLETENESS_CHECK.md) | 完全性チェック結果 | - |
 
 ---
@@ -54,12 +56,51 @@
 
 | Phase | 進捗 | 完了タスク | 全タスク | 進捗率 |
 |-------|------|-----------|---------|-------|
-| Phase 1 | ⬜ | 0 | 7 | 0% |
-| Phase 2 | ⬜ | 0 | 7 | 0% |
+| Phase 1 | ✅ | 7 | 7 | 100% |
+| Phase 2 | ✅ | 7 | 7 | 100% |
 | Phase 3 | ⬜ | 0 | 8 | 0% |
 | Phase 4 | ⬜ | 0 | 7 | 0% |
 | Phase 5 | ⬜ | 0 | 7 | 0% |
-| **合計** | | **0** | **36** | **0%** |
+| Phase 6 | 🔄 | 8 | 9 | 89% |
+| **合計** | | **22** | **45** | **49%** |
+
+### Phase 1 タスク詳細
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T1-1 | ProductType定義 | ✅ COMPLETED |
+| T1-2 | データモデル/マイグレーション | ✅ COMPLETED |
+| T1-3 | registration.rs サービス | ✅ COMPLETED (E2Eテスト完了、CIC=605123) |
+| T1-4 | lacis_oath.rs 認証情報 | ✅ COMPLETED |
+| T1-5 | blessing.rs（越境アクセス） | ✅ COMPLETED (基本構造、Phase4で拡張) |
+| T1-6 | 監査ログ | ✅ COMPLETED |
+| T1-7 | 冗長化対応 | ✅ COMPLETED (設計検証完了) |
+
+### Phase 2 タスク詳細
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T2-1 | カメラ台帳スキーマ設計・マイグレーション | ✅ COMPLETED |
+| T2-2 | camera_registry.rs サービス実装 | ✅ COMPLETED |
+| T2-3 | RTSP管理連携 | ✅ COMPLETED |
+| T2-4 | detection_logs.rs 検出ログ拡張 | ✅ COMPLETED |
+| T2-5 | ログ検索API拡張 | ✅ COMPLETED |
+| T2-6 | カメラステータス管理 | ✅ COMPLETED |
+| T2-7 | カメラコンテキスト管理 | ✅ COMPLETED |
+
+### Phase 6 タスク詳細
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T6-1 | MqttManager実装 | ✅ COMPLETED |
+| T6-2 | StateReporter実装 | ✅ COMPLETED |
+| T6-3 | 設定スキーマ定義 | ✅ COMPLETED |
+| T6-4 | Web API基盤 | ✅ COMPLETED (既存main.py) |
+| T6-5 | InferenceService基本構造 | ✅ COMPLETED (既存main.py) |
+| T6-6 | MQTTコマンドハンドラ | ✅ COMPLETED |
+| T6-7 | 推論APIエンドポイント | ✅ COMPLETED (/v1/analyze) |
+| T6-8 | systemdサービス設定 | ✅ COMPLETED |
+| T6-9 | 統合テスト | 🔄 IN_PROGRESS |
 
 ---
 
@@ -204,6 +245,8 @@ T1-1 → T1-2 → T1-3 → T2-1 → T2-2 → T3-1 → T3-2 → T4-1 → T4-4 →
 - [DD03_ParaclateClient.md](../DetailedDesign/DD03_ParaclateClient.md)
 - [DD04_BqSyncService.md](../DetailedDesign/DD04_BqSyncService.md)
 - [DD05_CameraRegistry.md](../DetailedDesign/DD05_CameraRegistry.md)
+- [DD06_LinuxCommonModules.md](../DetailedDesign/DD06_LinuxCommonModules.md)
+- [DD07_IS21_Baseline.md](../DetailedDesign/DD07_IS21_Baseline.md)
 - [CONSISTENCY_CHECK.md](../DetailedDesign/CONSISTENCY_CHECK.md)
 
 ### 上位ドキュメント（../）
@@ -219,3 +262,10 @@ T1-1 → T1-2 → T1-3 → T2-1 → T2-2 → T3-1 → T3-2 → T4-1 → T4-4 →
 | 日付 | バージョン | 更新内容 | 更新者 |
 |------|-----------|---------|-------|
 | 2026-01-10 | 1.0.0 | 初版作成 | is22設計担当 |
+| 2026-01-10 | 1.0.1 | Phase 1進捗更新（T1-1〜T1-6完了、T1-5進行中） | Claude |
+| 2026-01-10 | 1.0.2 | Type名修正(aranea_ar-is22/801)、Firestore本番登録完了、スキーマ検証完了 | Claude |
+| 2026-01-10 | 1.0.3 | **is22デバイス登録完了**（CIC=605123取得）、SDK v0.5.5でTypeDefinition作成、Rust実装ナレッジ登録 | Claude |
+| 2026-01-10 | 1.1.0 | **Phase 1 完了**（7/7タスク）、IS21 TypeDefinition作成、共有ライブラリ設計完了 | Claude |
+| 2026-01-10 | 1.2.0 | **Phase 6追加**（IS21 Baseline）、DD06/DD07作成、Linux共通モジュール仕様追加 | Claude |
+| 2026-01-10 | 1.3.0 | **Phase 6 実装完了（8/9）**: MqttManager, StateReporter, 設定スキーマ, MQTTハンドラ実装。統合テスト待ち | Claude |
+| 2026-01-10 | 1.4.0 | **Phase 2 完了（7/7）**: CameraRegistry全タスク完了。camera_registry module (service, repository, lacis_id, context, ipcam_connector)、detection_log_service拡張、camera_status_tracker拡張 | Claude |

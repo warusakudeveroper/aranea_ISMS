@@ -34,6 +34,8 @@ pub struct DetectionLog {
     pub fid: String,
     pub camera_id: String,
     pub lacis_id: Option<String>,
+    /// Camera's LacisID for Paraclate integration (Phase 2: CameraRegistry)
+    pub camera_lacis_id: Option<String>,
 
     // Timestamps
     pub captured_at: DateTime<Utc>,
@@ -296,6 +298,7 @@ impl DetectionLogService {
         tid: &str,
         fid: &str,
         lacis_id: Option<&str>,
+        camera_lacis_id: Option<&str>,
         response: &AnalyzeResponse,
         image_data: &[u8],
         camera_context: Option<&CameraContext>,
@@ -315,6 +318,7 @@ impl DetectionLogService {
             tid,
             fid,
             lacis_id,
+            camera_lacis_id,
             response,
             camera_context,
             &image_path,
@@ -360,6 +364,7 @@ impl DetectionLogService {
         tid: &str,
         fid: &str,
         lacis_id: Option<&str>,
+        camera_lacis_id: Option<&str>,
         response: &AnalyzeResponse,
         camera_context: Option<&CameraContext>,
         image_path: &str,
@@ -436,6 +441,7 @@ impl DetectionLogService {
             fid: fid.to_string(),
             camera_id: response.camera_id.clone(),
             lacis_id: lacis_id.map(String::from),
+            camera_lacis_id: camera_lacis_id.map(String::from),
             captured_at,
             analyzed_at: now,
             primary_event: response.primary_event.clone(),
@@ -505,7 +511,7 @@ impl DetectionLogService {
         let result = sqlx::query(
             r#"
             INSERT INTO detection_logs (
-                tid, fid, camera_id, lacis_id,
+                tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
@@ -517,7 +523,7 @@ impl DetectionLogService {
                 processing_ms, polling_cycle_id, schema_version,
                 synced_to_bq
             ) VALUES (
-                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
@@ -535,6 +541,7 @@ impl DetectionLogService {
         .bind(&log.fid)
         .bind(&log.camera_id)
         .bind(&log.lacis_id)
+        .bind(&log.camera_lacis_id)
         .bind(log.captured_at)
         .bind(log.analyzed_at)
         .bind(&log.primary_event)
@@ -615,7 +622,7 @@ impl DetectionLogService {
         let rows = sqlx::query(
             r#"
             SELECT
-                log_id, tid, fid, camera_id, lacis_id,
+                log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
@@ -643,7 +650,7 @@ impl DetectionLogService {
         let rows = sqlx::query(
             r#"
             SELECT
-                log_id, tid, fid, camera_id, lacis_id,
+                log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
@@ -668,6 +675,94 @@ impl DetectionLogService {
         rows.into_iter().map(|row| self.row_to_log(row)).collect()
     }
 
+    /// Get detection logs by camera LacisID (Phase 2: CameraRegistry)
+    pub async fn get_by_camera_lacis_id(&self, camera_lacis_id: &str, limit: u32) -> Result<Vec<DetectionLog>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
+                captured_at, analyzed_at,
+                primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
+                tags, person_details, bboxes, suspicious,
+                frame_diff, loitering_detected,
+                preset_id, preset_version, output_schema,
+                context_applied, camera_context,
+                is21_log,
+                image_path_local, image_path_cloud,
+                processing_ms, polling_cycle_id, schema_version,
+                created_at, synced_to_bq, synced_at
+            FROM detection_logs
+            WHERE camera_lacis_id = ?
+            ORDER BY captured_at DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(camera_lacis_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(|row| self.row_to_log(row)).collect()
+    }
+
+    /// Get detection logs by tid/fid boundary (Phase 2: CameraRegistry)
+    pub async fn get_by_tid_fid(&self, tid: &str, fid: Option<&str>, limit: u32) -> Result<Vec<DetectionLog>> {
+        let rows = if let Some(fid) = fid {
+            sqlx::query(
+                r#"
+                SELECT
+                    log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
+                    captured_at, analyzed_at,
+                    primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
+                    tags, person_details, bboxes, suspicious,
+                    frame_diff, loitering_detected,
+                    preset_id, preset_version, output_schema,
+                    context_applied, camera_context,
+                    is21_log,
+                    image_path_local, image_path_cloud,
+                    processing_ms, polling_cycle_id, schema_version,
+                    created_at, synced_to_bq, synced_at
+                FROM detection_logs
+                WHERE tid = ? AND fid = ?
+                ORDER BY captured_at DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(tid)
+            .bind(fid)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT
+                    log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
+                    captured_at, analyzed_at,
+                    primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
+                    tags, person_details, bboxes, suspicious,
+                    frame_diff, loitering_detected,
+                    preset_id, preset_version, output_schema,
+                    context_applied, camera_context,
+                    is21_log,
+                    image_path_local, image_path_cloud,
+                    processing_ms, polling_cycle_id, schema_version,
+                    created_at, synced_to_bq, synced_at
+                FROM detection_logs
+                WHERE tid = ?
+                ORDER BY captured_at DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(tid)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        rows.into_iter().map(|row| self.row_to_log(row)).collect()
+    }
+
     /// Get detection logs by time range
     pub async fn get_by_time_range(
         &self,
@@ -678,7 +773,7 @@ impl DetectionLogService {
         let rows = sqlx::query(
             r#"
             SELECT
-                log_id, tid, fid, camera_id, lacis_id,
+                log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
@@ -709,7 +804,7 @@ impl DetectionLogService {
         let rows = sqlx::query(
             r#"
             SELECT
-                log_id, tid, fid, camera_id, lacis_id,
+                log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
                 tags, person_details, bboxes, suspicious,
@@ -783,6 +878,7 @@ impl DetectionLogService {
             fid: row.try_get("fid")?,
             camera_id: row.try_get("camera_id")?,
             lacis_id: row.try_get("lacis_id")?,
+            camera_lacis_id: row.try_get("camera_lacis_id")?,
             captured_at: DateTime::from_naive_utc_and_offset(captured_at, Utc),
             analyzed_at: DateTime::from_naive_utc_and_offset(analyzed_at, Utc),
             primary_event: row.try_get("primary_event")?,

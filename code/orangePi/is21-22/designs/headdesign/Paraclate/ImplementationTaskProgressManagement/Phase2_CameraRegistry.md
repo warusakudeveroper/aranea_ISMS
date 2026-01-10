@@ -15,7 +15,7 @@ is22配下のカメラを仮想araneaDevice（is801 paraclateCamera）として�
 
 ### T2-1: カメラ台帳スキーマ設計・マイグレーション
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -55,7 +55,7 @@ ADD INDEX idx_tid_fid (tid, fid);
 
 ### T2-2: camera_registry.rs サービス実装
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED
 **優先度**: P0（ブロッカー）
 **見積もり規模**: L
 
@@ -85,7 +85,7 @@ ADD INDEX idx_tid_fid (tid, fid);
 
 ### T2-3: RTSP管理連携
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -105,7 +105,7 @@ ADD INDEX idx_tid_fid (tid, fid);
 
 ### T2-4: detection_logs.rs 検出ログ拡張
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -125,7 +125,7 @@ ADD INDEX idx_tid_fid (tid, fid);
 
 ### T2-5: ログ検索API拡張
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED
 **優先度**: P1（品質改善）
 **見積もり規模**: M
 
@@ -143,7 +143,7 @@ ADD INDEX idx_tid_fid (tid, fid);
 
 ### T2-6: カメラステータス管理
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED
 **優先度**: P1（品質改善）
 **見積もり規模**: S
 
@@ -161,7 +161,7 @@ ADD INDEX idx_tid_fid (tid, fid);
 
 ### T2-7: カメラコンテキスト管理
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED
 **優先度**: P1（品質改善）
 **見積もり規模**: M
 
@@ -268,3 +268,4 @@ ADD INDEX idx_tid_fid (tid, fid);
 | 日付 | 更新内容 |
 |------|---------|
 | 2026-01-10 | 初版作成 |
+| 2026-01-10 | T2-1〜T2-7全タスク完了 |

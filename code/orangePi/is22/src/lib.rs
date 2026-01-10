@@ -23,6 +23,7 @@
 //! - MECE: Mutually exclusive, collectively exhaustive
 
 pub mod aranea_register;
+pub mod camera_registry;
 pub mod camera_brand;
 pub mod config_store;
 pub mod sdm_integration;
