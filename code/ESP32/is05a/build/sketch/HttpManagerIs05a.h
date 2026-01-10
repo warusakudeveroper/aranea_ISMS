@@ -1,0 +1,83 @@
+#line 1 "/Users/hideakikurata/Library/CloudStorage/Dropbox/Mac (3)/Documents/aranea_ISMS/code/ESP32/is05a/HttpManagerIs05a.h"
+/**
+ * HttpManagerIs05a.h
+ *
+ * is05a専用 Web UI実装
+ *
+ * AraneaWebUIを継承し、8chチャンネル管理とWebhook設定UIを追加。
+ */
+
+#ifndef HTTP_MANAGER_IS05A_H
+#define HTTP_MANAGER_IS05A_H
+
+#include "AraneaWebUI.h"
+
+class ChannelManager;
+class WebhookManager;
+class RuleManager;
+
+class HttpManagerIs05a : public AraneaWebUI {
+public:
+    HttpManagerIs05a();
+
+    /**
+     * 初期化（拡張版）
+     */
+    void begin(SettingManager* settings, ChannelManager* channels,
+               WebhookManager* webhooks, RuleManager* rules, int port = 80);
+
+    /**
+     * チャンネルステータス更新（OLED用）
+     */
+    void setChannelStatus(int lastChanged, const String& lastChangeTime);
+
+    /**
+     * 送信ステータス更新
+     */
+    void setSendStatus(int successCount, int failCount, const String& lastResult);
+
+protected:
+    // ========================================
+    // AraneaWebUI オーバーライド
+    // ========================================
+    void getTypeSpecificStatus(JsonObject& obj) override;
+    String generateTypeSpecificTabs() override;
+    String generateTypeSpecificTabContents() override;
+    String generateTypeSpecificJS() override;
+    void registerTypeSpecificEndpoints() override;
+    void getTypeSpecificConfig(JsonObject& obj) override;
+
+    // SpeedDial
+    String generateTypeSpecificSpeedDial() override;
+    bool applyTypeSpecificSpeedDial(const String& section, const std::vector<String>& lines) override;
+
+private:
+    ChannelManager* channels_;
+    WebhookManager* webhooks_;
+    RuleManager* rules_;
+
+    // ステータス
+    int lastChangedChannel_;
+    String lastChangeTime_;
+    int sendSuccessCount_;
+    int sendFailCount_;
+    String lastSendResult_;
+
+    // APIハンドラ
+    void handleChannels();
+    void handleChannel();
+    void handleChannelConfig();
+    void handlePulse();
+    void handleWebhookConfig();
+    void handleWebhookTest();
+    void handleRules();
+    void handleRuleSave();
+    void handleRuleDelete();
+
+    // 出力制御ハンドラ
+    void handleOutputTrigger();
+    void handleOutputStop();
+    void handleOutputConfig();
+};
+
+#endif // HTTP_MANAGER_IS05A_H

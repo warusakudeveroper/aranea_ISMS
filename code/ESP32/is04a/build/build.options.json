@@ -1,0 +1,9 @@
+{
+  "additionalFiles": "../..,../..,../..,../..,../..,../..,../..,../..,../..,../..,../../..,../../..",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "",
+  "fqbn": "esp32:esp32:esp32:PartitionScheme=min_spiffs",
+  "hardwareFolders": "/Users/hideakikurata/Library/Arduino15/packages",
+  "otherLibrariesFolders": "/Users/hideakikurata/Documents/Arduino/libraries",
+  "sketchLocation": "/Users/hideakikurata/Library/CloudStorage/Dropbox/Mac (3)/Documents/aranea_ISMS/code/ESP32/is04a"
+}

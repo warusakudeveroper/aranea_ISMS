@@ -2,6 +2,9 @@
 .build/
 build/
 
+# Exception: Include ESP32 build artifacts for firmware distribution
+!code/ESP32/**/build/
+
 # macOS
 .DS_Store
 *.swp
