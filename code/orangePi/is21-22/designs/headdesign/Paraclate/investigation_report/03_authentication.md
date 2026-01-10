@@ -21,9 +21,9 @@ ESP32版AraneaRegister.cppおよびis21版aranea_register.pyを参照実装と�
 
 | 項目 | 値 | 根拠 |
 |------|-----|------|
-| TypeDomain | araneaDevices | 共通 |
-| Type | ar-is22Camserver | Paraclate設計書 |
-| Prefix | 3 | araneaDevices共通 |
+| TypeDomain | araneaDevice | araneaDevice共通（単数形が正） |
+| Type | ar-is22CamServer | Paraclate設計書 |
+| Prefix | 3 | araneaDevice共通 |
 | ProductType | 022 | is22用 |
 | ProductCode | 0000 | 追い番なし |
 
@@ -132,7 +132,7 @@ let payload = AraneaRegisterRequest {
         lacis_id: device_lacis_id.clone(),
         tid: tid.clone(),
         type_domain: "araneaDevice".to_string(),
-        device_type: "ar-is22Camserver".to_string(),
+        device_type: "ar-is22CamServer".to_string(),
     },
     device_meta: DeviceMeta {
         mac_address: mac.clone(),

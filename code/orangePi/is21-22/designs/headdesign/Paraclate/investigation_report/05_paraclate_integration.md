@@ -68,24 +68,39 @@ Content-Type: application/json
 POST /api/paraclate/summary
 {
   "lacisOath": {
-    "lacisID": "is22Device_lacisID",
+    "lacisID": "3022C0742BFCCF950000",
     "tid": "T2025120621041161827",
     "cic": "204965"
   },
   "summaryOverview": {
     "summaryID": "SUM-20260110-001",
     "firstDetectAt": "2026-01-10T00:00:00Z",
-    "fendDetectAt": "2026-01-10T01:00:00Z",
+    "lastDetectAt": "2026-01-10T01:00:00Z",
     "detectedEvents": 15
   },
   "cameraContext": {
-    "3801C0742BFCCF950001": ["Entrance", "入口監視", "0150", "R001", "balanced"]
+    "3801C0742BFCCF950001": {
+      "cameraName": "Entrance",
+      "cameraContext": "入口監視",
+      "fid": "0150",
+      "rid": "R001",
+      "preset": "balanced"
+    }
   },
   "cameraDetection": [
-    "2026-01-10T00:15:32Z,3801C0742BFCCF950001,human:2,vehicle:0,severity:2"
+    {
+      "timestamp": "2026-01-10T00:15:32Z",
+      "cameraLacisId": "3801C0742BFCCF950001",
+      "detectionDetail": "human:2,vehicle:0,severity:2"
+    }
   ]
 }
 ```
+
+**フォーマット仕様**（Paraclate_DesignOverview.mdと統一）:
+- `lastDetectAt`: 最終検出時刻（旧: fendDetectAt）
+- `cameraContext`: オブジェクト形式（キー=lacisID、値=カメラ情報オブジェクト）
+- `cameraDetection`: オブジェクト配列形式（timestamp/cameraLacisId/detectionDetail）
 
 ---
 

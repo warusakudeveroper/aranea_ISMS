@@ -16,7 +16,7 @@
   - 画像はLacisFiles、検知ログ/BQ同期、設定SSoTをmobes AI Model Settingsに固定
   - AI推論はParaclate APP側に委譲（is22は事実APIのみ）でSOLID/SRP保持
 - 齟齬・補足:
-  - TypeDomain表記: DesignOverviewは`araneaDevices`だが、実装仕様は`araneaDevice`が正。基本設計で正規化済み（変更不要）。
+  - TypeDomain表記: 当初DesignOverviewは`araneaDevices`だったが、第2回・第3回レビューで全ドキュメントを`araneaDevice`に統一済み。
   - Summaryペイロード保存: ai_summary_cacheに`summary_json`追加を要求→マイグレーション未作成。
   - is22登録/BQ同期/Paraclate送信APIは未実装 → 基本設計でAPI定義済みだが開発タスク化が必要。
   - blessing実装: Firestore/Cloud側の発行・監査ルールを別途詳細化する必要あり（設計ではサーバ側越境に限定）。
@@ -147,4 +147,44 @@
 
 ---
 
-**レビューステータス**: 第2回レビュー対応完了 ✅
+### 2026-01-10 第3回レビュー対応
+
+第2回レビュー対応後の整合性レビューで追加指摘された3点を修正。
+
+#### (A) P0相当: 03_authentication.md TypeDomain/Type旧表記
+| 修正箇所 | 修正前 | 修正後 |
+|---------|--------|--------|
+| 表2.2 TypeDomain | `araneaDevices` | `araneaDevice` |
+| 表2.2 Type | `ar-is22Camserver` | `ar-is22CamServer` |
+| 表2.2 Prefix根拠 | `araneaDevices共通` | `araneaDevice共通` |
+| Rust例 device_type | `ar-is22Camserver` | `ar-is22CamServer` |
+
+**対応内容**: DesignOverviewと同一値に統一。AraneaRegister実装時の参照元として整合性を確保。
+
+#### (B) P1: 05_paraclate_integration.md Summary例旧フォーマット
+| 修正箇所 | 修正前 | 修正後 |
+|---------|--------|--------|
+| summaryOverview | `fendDetectAt` | `lastDetectAt` |
+| cameraContext | 配列形式 | オブジェクト形式 |
+| cameraDetection | CSV文字列配列 | オブジェクト配列 |
+
+**対応内容**: DesignOverviewの新フォーマットと完全一致させ、フォーマット仕様の説明を追加。
+
+#### (C) P1: DesignOverview lacisOath JSON構文破損
+| 修正前 | 修正後 |
+|--------|--------|
+| JSONとして無効（`lacisOath:`キー未括弧、`cic/fid`混線） | 有効なJSON + フィールド説明表追加 |
+
+**対応内容**:
+- lacisOathを正規JSONオブジェクト形式に修正
+- フィールド説明表（lacisID/tid/cic/blessing）を追加
+- blessingの説明を引用ブロックに分離
+
+#### 確認済み項目（第3回）
+- ✅ P0相当指摘: 1件対応完了（03_authentication TypeDomain/Type統一）
+- ✅ P1指摘: 2件対応完了（Summary例更新、lacisOath JSON正規化）
+- ✅ ドキュメント間整合性: 全ファイルで統一確認
+
+---
+
+**レビューステータス**: 第3回レビュー対応完了 ✅ - ドキュメント間整合性OK

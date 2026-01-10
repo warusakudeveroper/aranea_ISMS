@@ -47,16 +47,29 @@ Paraclateはギリシア語由来のそこで見守る精霊を表し、この�
      ]
    }
 ```
-送信時には
+送信時には以下の`lacisOath`オブジェクトを含める：
+
 ```json
 {
-lacisOath:
-	"lacisID":"is22Device_lacisID",
-	"tid":"is22Device_tid",
-	"cic":"is22Device_fid},
-	"blessing":"///これはlacisOath側で実装予定の機能、permission91以上のユーザーの権限において特定のlacisIDに対してtid権限越境の権能を付与する、このblessによってis22はテナント越境したカメラへのアクセス権を得ることができる。このフィールドはis22がテナント越境での監視を行う場合にのみ使用する"
+  "lacisOath": {
+    "lacisID": "{is22_lacis_id}",
+    "tid": "{tenant_id}",
+    "cic": "{client_identification_code}",
+    "blessing": "{blessing_token_or_null}"
+  }
 }
 ```
+
+**lacisOathフィールド説明**:
+| フィールド | 必須 | 説明 |
+|-----------|------|------|
+| lacisID | ✅ | is22デバイスのLacisID（3022...形式） |
+| tid | ✅ | テナントID |
+| cic | ✅ | アクティベーション時に発行されるClient Identification Code |
+| blessing | ❌ | テナント越境時のみ使用。permission91+のユーザーが発行した越境許可トークン |
+
+> **注**: `blessing`はlacisOath側で実装予定の機能。permission91以上のユーザーの権限において特定のlacisIDに対してtid権限越境の権能を付与する。このフィールドはis22がテナント越境での監視を行う場合にのみ使用する。通常運用ではnullまたは省略。
+
 の形式でmobes2.0の認証を行う。
 - tid,fid,lacisID,cicの取り扱いなどについてはaraneaSDKのナレッジおよびMetatronコマンドなどを用いて確認必要
 - 現時点ではis22にaranearegistor系の機能実装を行なっていないのでここについても実装タスクを作成する。code/ESP32/global/src/AraneaRegister.cppの実装を参考にすること。現在位置としてはまだスキーマ整備も行われていない。
