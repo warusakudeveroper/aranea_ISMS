@@ -186,14 +186,24 @@ AI Mode Settings は tenant/facility override を持つ（正本）：
   "summaryOverview": {
     "summaryID": "{summaryID}",
     "firstDetectAt": "{timeStamp}",
-    "fendDetectAt": "{timeStamp}",
+    "lastDetectAt": "{timeStamp}",
     "detectedEvents": "n"
   },
   "cameraContext": {
-    "{camera_lacisID1}": ["{cameraName}", "{cameraContext}", "{fid}", "{rid}", "preset"]
+    "{camera_lacisID1}": {
+      "cameraName": "{cameraName}",
+      "cameraContext": "{cameraContext}",
+      "fid": "{fid}",
+      "rid": "{rid}",
+      "preset": "{preset}"
+    }
   },
   "cameraDetection": [
-    "{DetectionTimestamp},{camera_lacisID},{detectionDetail}"
+    {
+      "timestamp": "{DetectionTimestamp}",
+      "cameraLacisId": "{camera_lacisID}",
+      "detectionDetail": "{detectionDetail}"
+    }
   ]
 }
 ```

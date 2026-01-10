@@ -86,7 +86,7 @@ CREATE TABLE scheduled_reports (
   "summaryOverview": {
     "summaryID": "{summaryID}",
     "firstDetectAt": "{timestamp}",
-    "fendDetectAt": "{timestamp}",
+    "lastDetectAt": "{timestamp}",
     "detectedEvents": "n"
   }
 }
@@ -97,8 +97,20 @@ CREATE TABLE scheduled_reports (
 ```json
 {
   "cameraContext": {
-    "{camera_lacisID1}": ["{cameraName}", "{cameraContext}", "{fid}", "{rid}", "preset"],
-    "{camera_lacisID2}": ["{cameraName}", "{cameraContext}", "{fid}", "{rid}", "preset"]
+    "{camera_lacisID1}": {
+      "cameraName": "{cameraName}",
+      "cameraContext": "{cameraContext}",
+      "fid": "{fid}",
+      "rid": "{rid}",
+      "preset": "{preset}"
+    },
+    "{camera_lacisID2}": {
+      "cameraName": "{cameraName}",
+      "cameraContext": "{cameraContext}",
+      "fid": "{fid}",
+      "rid": "{rid}",
+      "preset": "{preset}"
+    }
   }
 }
 ```
@@ -108,8 +120,11 @@ CREATE TABLE scheduled_reports (
 ```json
 {
   "cameraDetection": [
-    "{DetectionTimestamp},{camera_lacisID},{detectionDetail}",
-    "{DetectionTimestamp},{camera_lacisID},{detectionDetail}"
+    {
+      "timestamp": "{DetectionTimestamp}",
+      "cameraLacisId": "{camera_lacisID}",
+      "detectionDetail": "{detectionDetail}"
+    }
   ]
 }
 ```

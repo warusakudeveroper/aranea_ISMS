@@ -182,7 +182,7 @@
   * ESP32: `AraneaRegister.cpp` の POST/レスポンス処理 
 * 実施内容（is22）
 
-  * is22 自身（ar-is22Camserver）の登録 → cic/stateEndpoint/mqttEndpoint を保持
+  * is22 自身（ar-is22CamServer）の登録 → cic/stateEndpoint/mqttEndpoint を保持
   * IpcamScan で “管理化（approve）” したカメラに対し、
 
     * まだ lacis_id が無ければ gate 登録して lacis_id を発行
