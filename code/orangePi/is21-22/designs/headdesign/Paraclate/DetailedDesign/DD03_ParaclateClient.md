@@ -218,10 +218,15 @@ Content-Type: application/json
   "ok": true,
   "eventId": "det_12345",
   "receivedAt": "2026-01-10T12:34:57Z",
-  "snapshotRef": "lacisFiles://T2025120621041161827/snapshot_det_12345.jpg"
+  "snapshot": {
+    "tid": "T2025120621041161827",
+    "fileId": "snapshot_det_12345",
+    "storagePath": "lacisFiles/T2025120621041161827/snapshot_det_12345.jpg"
+  }
 }
 ```
-`snapshotRef`はis22側で`detection_logs.snapshot_url`に保存し、BQ同期時に使用する。
+`snapshot.storagePath`はis22側で`detection_logs.snapshot_url`に保存し、BQ同期時に使用する。
+**注意**: 署名URLではなくstoragePath（恒久参照子）を使用。UI表示時はmobes2.0側でgetDownloadUrl()で署名URLを発行する。
 
 #### GET /api/paraclate/config/{tid}
 設定取得（SSoT同期用）
@@ -241,7 +246,7 @@ Content-Type: application/json
       "endpoint": "https://api.paraclate.com/v1",
       "reportIntervalMinutes": 60,
       "grandSummaryTimes": ["09:00", "17:00", "21:00"],
-      "retentionDays": 30,
+      "retentionDays": 60,
       "attunement": { ... },
       "updatedAt": "2026-01-10T00:00:00Z"
     }
@@ -306,7 +311,7 @@ Paraclate接続状態を取得
   "endpoint": "https://api.paraclate.com/v1",
   "reportIntervalMinutes": 60,
   "grandSummaryTimes": ["09:00", "17:00", "21:00"],
-  "retentionDays": 30,
+  "retentionDays": 60,
   "syncSourceTimestamp": "2026-01-10T00:00:00Z"
 }
 ```

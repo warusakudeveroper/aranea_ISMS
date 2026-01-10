@@ -159,18 +159,40 @@ is22側の詳細設計ドキュメント（DD01-DD05）とmobes2.0側のParaclat
 - [x] **DD04**: synced_to_bq 更新のPKマップ実装（テーブル別PK対応）✅
 - [x] **DD01**: serde rename_all = "camelCase" 追加 ✅
 
-### P1（品質改善）
+### P1（品質改善）✅ ddreview_2で全件確定
 
-- [ ] **DD03**: endpoint 定義を明確化（/api/paraclate まで含む）
-- [ ] **DD04**: snapshot_url 形式を storagePath に確定
-- [ ] **DD04**: dataset名を `paraclate` に明示
-- [ ] **DD03**: Pub/Sub受信フローの詳細設計追記
+- [x] **DD03**: endpoint 定義を明確化 ✅ → `endpoint + "/ingest/..."` 形式で確定
+- [x] **DD04**: snapshot_url 形式を storagePath に確定 ✅ → 恒久参照子使用、署名URLは禁止
+- [x] **DD04**: dataset名を `paraclate` に明示 ✅ → `mobesorder.paraclate.*`
+- [x] **DD03**: Pub/Sub受信フローの詳細設計追記 ✅ → Topic `paraclate-config-updates`、通知のみ
+
+---
+
+## ddreview_2 決定事項（2026-01-10確定）
+
+### endpoint定義
+- `paraclate.endpoint`は末尾スラッシュなしのルートURL
+- is22は `/ingest/summary` `/ingest/event` `/config/{tid}` `/connect` を付与
+
+### snapshot_url形式
+- 署名URL禁止、storagePath（恒久参照子）を使用
+- 形式: `lacisFiles/{tid}/{fileId}.{ext}`
+- UI表示時はmobes2.0側でgetDownloadUrl()発行
+
+### BQ dataset
+- `mobesorder.paraclate.semantic_events`
+- `mobesorder.paraclate.summaries`
+
+### Pub/Sub
+- Topic: `paraclate-config-updates`
+- 通知のみ（config本体は配らない）
+- is22はGET /config/{tid}でSSoTからpull
 
 ---
 
 ## 次のアクション
 
 1. ~~上記P0修正をDD01-DD05に反映~~ ✅ 2026-01-10完了
-2. コミット＆プッシュ
-3. mobes2.0側チームとの確定事項（endpoint形式、snapshot_url形式、dataset名）を協議
+2. ~~mobes2.0側チームとの確定事項（endpoint形式、snapshot_url形式、dataset名）を協議~~ ✅ ddreview_2で確定
+3. コミット＆プッシュ
 4. Issue #112 に整合性チェック結果を追記

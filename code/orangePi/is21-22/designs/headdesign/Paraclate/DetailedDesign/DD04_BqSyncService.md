@@ -88,9 +88,12 @@ ADD INDEX idx_synced (synced_to_bq);
 
 ### 3.3 BigQuery側テーブル（参考）
 
+> **決定事項**: dataset名は `paraclate` で固定（ddreview_2 P1-3確定）
+> 既存の `ai_logs.semantic_events`（SemanticTags用）との衝突を避けるため分離
+
 **semantic_events** (mobes2.0のBQプロジェクト)
 ```sql
-CREATE TABLE `project.dataset.semantic_events` (
+CREATE TABLE `mobesorder.paraclate.semantic_events` (
     event_id STRING NOT NULL,
     tid STRING NOT NULL,
     fid STRING NOT NULL,
@@ -112,7 +115,7 @@ CLUSTER BY tid, fid;
 
 **summaries** (mobes2.0のBQプロジェクト)
 ```sql
-CREATE TABLE `project.dataset.summaries` (
+CREATE TABLE `mobesorder.paraclate.summaries` (
     summary_id STRING NOT NULL,
     tid STRING NOT NULL,
     fid STRING NOT NULL,
