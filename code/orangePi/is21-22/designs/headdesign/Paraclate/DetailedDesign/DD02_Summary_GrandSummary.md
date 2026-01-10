@@ -398,6 +398,8 @@ pub struct LacisOath {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SummaryOverview {
+    /// DBのsummary_id（BIGINT AUTO_INCREMENT）を正本とし、"SUM-{id}" 形式で格納
+    /// Paraclate APP送信時もBQ同期時も同一の値を使用（SSoT）
     #[serde(rename = "summaryID")]
     pub summary_id: String,
     pub first_detect_at: String,
@@ -510,12 +512,23 @@ impl SummaryGenerator {
             period_start,
             period_end,
             summary_text,
-            summary_json: Some(summary_json),
+            summary_json: Some(summary_json.clone()),
             detection_count: logs.len() as i32,
             severity_max,
             camera_ids: serde_json::to_value(&camera_ids)?,
             expires_at: Utc::now() + chrono::Duration::days(30),
         }).await?;
+
+        // 7. summary_jsonのsummaryIDをDB正本値（SUM-{id}形式）で更新
+        //    ※UUIDではなく、DBのAUTO_INCREMENT値を正本とする（P1-1対応）
+        let mut updated_json = summary_json;
+        updated_json["summaryOverview"]["summaryID"] =
+            serde_json::Value::String(format!("SUM-{}", result.summary_id));
+        self.repository.update_summary_json(result.summary_id, &updated_json).await?;
+
+        // 更新されたsummary_jsonを結果に反映
+        let mut result = result;
+        result.summary_json = Some(updated_json);
 
         Ok(result)
     }
@@ -586,6 +599,8 @@ impl SummaryGenerator {
             })
             .collect();
 
+        // 注意: summary_idは後でDBのAUTO_INCREMENT値で上書きする
+        // ここでは一旦プレースホルダーを設定し、insert後に正しい値で更新
         let payload = SummaryPayload {
             lacis_oath: LacisOath {
                 lacis_id: registration.lacis_id,
@@ -594,7 +609,9 @@ impl SummaryGenerator {
                 blessing: None,
             },
             summary_overview: SummaryOverview {
-                summary_id: uuid::Uuid::new_v4().to_string(),
+                // DBのsummary_id（BIGINT AUTO_INCREMENT）を正本とする
+                // 実際のsummary_idはinsert後に "SUM-{db_summary_id}" 形式で設定
+                summary_id: "SUM-PLACEHOLDER".to_string(),
                 first_detect_at: first_detect.to_rfc3339(),
                 last_detect_at: last_detect.to_rfc3339(),
                 detected_events: logs.len().to_string(),
@@ -617,16 +634,24 @@ pub struct GrandSummaryGenerator {
 
 impl GrandSummaryGenerator {
     /// GrandSummary生成（複数Summaryを統合）
+    ///
+    /// # Note
+    /// 日次境界はAsia/Tokyo（JST）基準で計算する。
+    /// UTCで計算すると日本時間9時間ズレて日次サマリーが正しく集計されない。
     pub async fn generate(
         &self,
         tid: &str,
         fid: &str,
         date: NaiveDate,
     ) -> Result<SummaryResult, SummaryError> {
-        let period_start = date.and_hms_opt(0, 0, 0)
+        use chrono_tz::Asia::Tokyo;
+
+        // Asia/Tokyo（JST）基準で日次境界を設定
+        let period_start_jst = date.and_hms_opt(0, 0, 0)
             .unwrap()
-            .and_local_timezone(Utc)
+            .and_local_timezone(Tokyo)
             .unwrap();
+        let period_start = period_start_jst.with_timezone(&Utc);
         let period_end = period_start + chrono::Duration::days(1);
 
         // 1. 当日のhourly Summaryを全取得
@@ -807,33 +832,44 @@ impl SummaryScheduler {
     }
 
     /// 次のGrandSummary実行時刻を計算
+    ///
+    /// # Note
+    /// scheduled_times（09:00, 17:00等）はAsia/Tokyo（JST）基準で解釈する。
+    /// UTC基準で計算すると日本時間との9時間ズレで意図しない時刻に実行される。
     fn calculate_next_grand_summary_time(
         &self,
         times: &Option<Vec<String>>,
         now: DateTime<Utc>,
     ) -> Result<DateTime<Utc>, SummaryError> {
+        use chrono_tz::Asia::Tokyo;
+
         let times = times.as_ref()
             .ok_or(SummaryError::InvalidSchedule)?;
 
-        let today = now.date_naive();
+        // 現在時刻をJSTに変換
+        let now_jst = now.with_timezone(&Tokyo);
+        let today_jst = now_jst.date_naive();
 
-        // 本日の残り時刻をチェック
+        // 本日の残り時刻をチェック（JST基準）
         for time_str in times {
             let time = NaiveTime::parse_from_str(time_str, "%H:%M")?;
-            let scheduled = today.and_time(time);
-            let scheduled_utc = scheduled.and_local_timezone(Utc).unwrap();
+            let scheduled_jst = today_jst.and_time(time)
+                .and_local_timezone(Tokyo)
+                .unwrap();
 
-            if scheduled_utc > now {
-                return Ok(scheduled_utc);
+            if scheduled_jst > now_jst {
+                return Ok(scheduled_jst.with_timezone(&Utc));
             }
         }
 
-        // 翌日の最初の時刻
-        let tomorrow = today + chrono::Duration::days(1);
+        // 翌日の最初の時刻（JST基準）
+        let tomorrow_jst = today_jst + chrono::Duration::days(1);
         let first_time = NaiveTime::parse_from_str(&times[0], "%H:%M")?;
-        let next = tomorrow.and_time(first_time).and_local_timezone(Utc).unwrap();
+        let next_jst = tomorrow_jst.and_time(first_time)
+            .and_local_timezone(Tokyo)
+            .unwrap();
 
-        Ok(next)
+        Ok(next_jst.with_timezone(&Utc))
     }
 }
 ```

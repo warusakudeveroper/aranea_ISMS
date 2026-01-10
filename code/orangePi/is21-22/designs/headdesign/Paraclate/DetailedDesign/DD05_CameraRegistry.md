@@ -64,7 +64,7 @@ lacisIDを付与してParaclate連携およびtid/fid権限境界に準拠した
 | MAC | 12 | (カメラMAC) | コロン除去、大文字 |
 | ProductCode | 4 | (ブランドコード) | camera_brands参照 |
 
-**例**: MAC=11:22:33:44:55:66, Brand=Tapo → LacisID=`3801112233445566T001`
+**例**: MAC=11:22:33:44:55:66, Brand=Tapo → LacisID=`38011122334455660001`
 
 ### 3.2 ブランドコード割当
 
@@ -76,12 +76,14 @@ ADD COLUMN product_code VARCHAR(4) UNIQUE;
 
 | ブランド | ProductCode | 備考 |
 |---------|-------------|------|
-| Tapo | T001 | TP-Link Tapo |
-| Hikvision | H001 | |
-| Dahua | D001 | |
-| Reolink | R001 | |
-| Axis | A001 | |
-| Generic | G000 | 不明ブランド |
+| Tapo | 0001 | TP-Link Tapo |
+| Hikvision | 0002 | |
+| Dahua | 0003 | |
+| Reolink | 0004 | |
+| Axis | 0005 | |
+| Generic | 0000 | 不明ブランド |
+
+> **注意**: ProductCodeはmobes2.0のlacisIDバリデーション（`^[34]\d{3}[0-9A-F]{12}\d{4}$`）に準拠し、4桁数字のみとする。
 
 ### 3.3 cameras テーブル拡張
 
@@ -158,7 +160,7 @@ CREATE TABLE cameras (
 ```json
 {
   "ok": true,
-  "lacisId": "3801112233445566T001",
+  "lacisId": "38011122334455660001",
   "cic": "654321",
   "registeredAt": "2026-01-10T12:00:00Z"
 }
@@ -180,7 +182,7 @@ CREATE TABLE cameras (
 {
   "cameraId": 1,
   "mac": "11:22:33:44:55:66",
-  "lacisId": "3801112233445566T001",
+  "lacisId": "38011122334455660001",
   "tid": "T2025120621041161827",
   "fid": "0150",
   "rid": "R001",
@@ -209,7 +211,7 @@ CREATE TABLE cameras (
 ```json
 {
   "cameraId": 1,
-  "lacisId": "3801112233445566T001",
+  "lacisId": "38011122334455660001",
   "cameraName": "エントランスカメラ",
   "cameraContext": "建物正面入口。来訪者の検出を重視。夜間照明あり。",
   "fid": "0150",
@@ -260,7 +262,7 @@ CREATE TABLE cameras (
       "ip": "192.168.125.100",
       "name": "エントランスカメラ",
       "brand": "Tapo",
-      "lacisId": "3801112233445566T001",
+      "lacisId": "38011122334455660001",
       "tid": "T2025120621041161827",
       "fid": "0150",
       "rid": "R001",
@@ -354,7 +356,7 @@ pub const CAMERA_TYPE: &str = "ar-is801Camera";
 pub const CAMERA_TYPE_DOMAIN: &str = "araneaDevice";
 pub const CAMERA_PREFIX: &str = "3";
 pub const CAMERA_PRODUCT_TYPE: &str = "801";
-pub const DEFAULT_PRODUCT_CODE: &str = "G000";
+pub const DEFAULT_PRODUCT_CODE: &str = "0000";
 ```
 
 ### 5.3 カメラlacisID生成 (lacis_id.rs)
@@ -431,7 +433,7 @@ mod tests {
             "112233445566",
             "T001"
         );
-        assert_eq!(lacis_id, "3801112233445566T001");
+        assert_eq!(lacis_id, "38011122334455660001");
         assert_eq!(lacis_id.len(), 20);
     }
 }
@@ -863,13 +865,13 @@ impl CameraContextService {
 ALTER TABLE camera_brands
 ADD COLUMN product_code VARCHAR(4) UNIQUE;
 
--- 初期ブランドコード設定
-UPDATE camera_brands SET product_code = 'T001' WHERE name LIKE '%Tapo%';
-UPDATE camera_brands SET product_code = 'H001' WHERE name LIKE '%Hikvision%';
-UPDATE camera_brands SET product_code = 'D001' WHERE name LIKE '%Dahua%';
-UPDATE camera_brands SET product_code = 'R001' WHERE name LIKE '%Reolink%';
-UPDATE camera_brands SET product_code = 'A001' WHERE name LIKE '%Axis%';
-UPDATE camera_brands SET product_code = 'G000' WHERE product_code IS NULL;
+-- 初期ブランドコード設定（mobes2.0 lacisID検証に準拠：4桁数字のみ）
+UPDATE camera_brands SET product_code = '0001' WHERE name LIKE '%Tapo%';
+UPDATE camera_brands SET product_code = '0002' WHERE name LIKE '%Hikvision%';
+UPDATE camera_brands SET product_code = '0003' WHERE name LIKE '%Dahua%';
+UPDATE camera_brands SET product_code = '0004' WHERE name LIKE '%Reolink%';
+UPDATE camera_brands SET product_code = '0005' WHERE name LIKE '%Axis%';
+UPDATE camera_brands SET product_code = '0000' WHERE product_code IS NULL;
 
 -- cameras テーブル拡張
 ALTER TABLE cameras

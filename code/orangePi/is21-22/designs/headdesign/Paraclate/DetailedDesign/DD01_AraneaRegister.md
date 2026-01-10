@@ -101,11 +101,11 @@ CREATE TABLE aranea_registration (
 ```json
 {
   "tenantPrimaryAuth": {
-    "lacisId": "18217487937895888001",
-    "userId": "soejim@mijeos.com",
-    "cic": "204965"
+    "lacisId": "{TENANT_PRIMARY_LACIS_ID}",
+    "userId": "{TENANT_PRIMARY_EMAIL}",
+    "cic": "{TENANT_PRIMARY_CIC}"
   },
-  "tid": "T2025120621041161827"
+  "tid": "{TENANT_ID}"
 }
 ```
 
@@ -161,14 +161,14 @@ CREATE TABLE aranea_registration (
 ```json
 {
   "lacisOath": {
-    "lacisId": "18217487937895888001",
-    "userId": "soejim@mijeos.com",
-    "cic": "204965",
+    "lacisId": "{TENANT_PRIMARY_LACIS_ID}",
+    "userId": "{TENANT_PRIMARY_EMAIL}",
+    "cic": "{TENANT_PRIMARY_CIC}",
     "method": "register"
   },
   "userObject": {
     "lacisID": "3022AABBCCDDEEFF0000",
-    "tid": "T2025120621041161827",
+    "tid": "{TENANT_ID}",
     "typeDomain": "araneaDevice",
     "type": "ar-is22CamServer"
   },
@@ -341,17 +341,16 @@ impl AraneaRegisterService {
         request: RegisterRequest,
     ) -> Result<RegisterResult, AraneaRegisterError> {
         // 1. 既存登録チェック
-        if let Some(existing) = self.get_registration_status().await? {
-            if existing.registered {
-                return Ok(RegisterResult {
-                    ok: true,
-                    lacis_id: existing.lacis_id,
-                    cic: self.config_store.get("aranea.cic").await.ok(),
-                    state_endpoint: self.config_store.get("aranea.state_endpoint").await.ok(),
-                    mqtt_endpoint: None,
-                    error: None,
-                });
-            }
+        let existing = self.get_registration_status().await?;
+        if existing.registered {
+            return Ok(RegisterResult {
+                ok: true,
+                lacis_id: existing.lacis_id,
+                cic: self.config_store.get("aranea.cic").await.ok(),
+                state_endpoint: self.config_store.get("aranea.state_endpoint").await.ok(),
+                mqtt_endpoint: None,
+                error: None,
+            });
         }
 
         // 2. MACアドレス取得

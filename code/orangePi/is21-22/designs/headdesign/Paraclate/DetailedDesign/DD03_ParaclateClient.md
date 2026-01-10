@@ -435,52 +435,81 @@ impl ParaclateClient {
     }
 
     /// Summary送信
+    ///
+    /// # Arguments
+    /// * `payload` - Summaryペイロード
+    /// * `tid` - テナントID（scheduler/configから取得した確定値）
+    /// * `fid` - 施設ID（scheduler/configから取得した確定値、推測禁止）
     pub async fn send_summary(
         &self,
         payload: serde_json::Value,
+        tid: &str,
+        fid: &str,
     ) -> Result<ParaclateResponse, ParaclateError> {
-        self.send_payload(PayloadType::Summary, payload).await
+        self.send_payload(PayloadType::Summary, payload, tid, fid).await
     }
 
     /// GrandSummary送信
+    ///
+    /// # Arguments
+    /// * `payload` - GrandSummaryペイロード
+    /// * `tid` - テナントID
+    /// * `fid` - 施設ID（推測禁止）
     pub async fn send_grand_summary(
         &self,
         payload: serde_json::Value,
+        tid: &str,
+        fid: &str,
     ) -> Result<ParaclateResponse, ParaclateError> {
-        self.send_payload(PayloadType::GrandSummary, payload).await
+        self.send_payload(PayloadType::GrandSummary, payload, tid, fid).await
     }
 
     /// Emergency Event送信
+    ///
+    /// # Arguments
+    /// * `payload` - Eventペイロード
+    /// * `tid` - テナントID
+    /// * `fid` - 施設ID（推測禁止）
     pub async fn send_emergency(
         &self,
         payload: serde_json::Value,
+        tid: &str,
+        fid: &str,
     ) -> Result<ParaclateResponse, ParaclateError> {
-        self.send_payload(PayloadType::Emergency, payload).await
+        self.send_payload(PayloadType::Emergency, payload, tid, fid).await
     }
 
     /// ペイロード送信（共通処理）
+    ///
+    /// # Arguments
+    /// * `payload_type` - 送信種別
+    /// * `payload` - 送信データ（lacisOath.fidを必須で含むこと）
+    /// * `tid` - テナントID（呼び出し側から明示的に渡す）
+    /// * `fid` - 施設ID（呼び出し側から明示的に渡す、推測禁止）
     async fn send_payload(
         &self,
         payload_type: PayloadType,
         payload: serde_json::Value,
+        tid: &str,
+        fid: &str,
     ) -> Result<ParaclateResponse, ParaclateError> {
         // エンドポイント取得
         let endpoint = self.get_endpoint().await?;
 
-        // lacisOath情報を確認（payloadに含まれている前提）
-        let tid = payload["lacisOath"]["tid"]
-            .as_str()
-            .ok_or(ParaclateError::MissingField("tid"))?;
-        let fid = payload["summaryOverview"]["summaryID"]
-            .as_str()
-            .map(|_| "0150") // TODO: payloadからfid取得
-            .unwrap_or("0000");
+        // tid/fidバリデーション（空文字やfallback値は禁止）
+        if tid.is_empty() {
+            return Err(ParaclateError::MissingField("tid"));
+        }
+        if fid.is_empty() || fid == "0000" {
+            // fid="0000"（全施設）への送信は禁止（権限境界違反）
+            return Err(ParaclateError::InvalidFid("fid must be explicitly specified, not 0000"));
+        }
 
-        // キューに追加
+        // キューに追加（tid/fidはenqueue時点で確定、推測禁止）
         let queue_id = self.repository.enqueue(SendQueueItem {
             queue_id: 0,
             tid: tid.to_string(),
-            fid: fid.to_string(),
+            fid: fid.to_string(),  // scheduler/configから確定値として渡される
             payload_type,
             payload: payload.clone(),
             status: SendStatus::Pending,
@@ -914,6 +943,8 @@ impl SendQueueProcessor {
 |-------|------|------|
 | EndpointNotConfigured | エンドポイント未設定 | 設定UIでエンドポイント入力を促す |
 | NotRegistered | デバイス未登録 | AraneaRegister完了を待つ |
+| MissingField | 必須フィールド未指定 | 呼び出し側でtid/fid等を明示的に指定 |
+| InvalidFid | fid不正（空、0000等） | scheduler/configから正しいfidを取得して渡す |
 | AuthenticationFailed | lacisOath認証失敗 | CIC再取得、再登録を検討 |
 | RateLimited | API制限 | 指数バックオフで再試行 |
 | NetworkError | 接続失敗 | キューに保持、自動再試行 |
