@@ -308,6 +308,34 @@ def create_router(
             "events": events,
         }
 
+    @router.get("/api/capture/statistics")
+    async def get_capture_statistics(request: Request, primary_only: bool = True, exclude_tracker: bool = False):
+        """
+        全ログファイルから統計を集計して返す
+        - room別・category別・service別の件数
+        - 統計期間（min/max timestamp）
+        - 総イベント数
+
+        Args:
+            primary_only: Trueの場合、auxiliary通信を集計から除外（デフォルト: True）
+            exclude_tracker: Trueの場合、Trackerカテゴリを集計から除外（デフォルト: False）
+        """
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        if not capture_manager:
+            return {"ok": False, "error": "capture not configured"}
+        if not capture_manager.file_logger:
+            return {"ok": False, "error": "file logging not enabled"}
+
+        # ログファイルから統計を集計
+        stats = capture_manager.file_logger.aggregate_statistics(
+            get_service_func=get_service_by_domain_full,
+            primary_only=primary_only,
+            exclude_tracker=exclude_tracker
+        )
+        return {"ok": True, "primary_only": primary_only, "exclude_tracker": exclude_tracker, **stats}
+
     # ========== 脅威インテリジェンスAPI ==========
 
     @router.get("/api/threat/status")

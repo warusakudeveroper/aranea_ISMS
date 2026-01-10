@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 
+from collections import OrderedDict
+
 from .asn_services import get_service_by_asn, ASN_SERVICE_MAP
 
 logger = logging.getLogger(__name__)
@@ -23,28 +25,34 @@ logger = logging.getLogger(__name__)
 # キャッシュファイル
 ASN_CACHE_FILE = Path("/var/lib/is20s/asn_cache.json")
 CACHE_TTL_HOURS = 24 * 7  # 1週間キャッシュ
+MAX_CACHE_SIZE = 50000  # 最大キャッシュエントリ数（メモリリーク防止）
 
 
 class ASNLookup:
     """IP→ASN検索（Team Cymru DNS + ローカルキャッシュ）"""
 
     def __init__(self):
-        self.cache: Dict[str, Tuple[int, str, float]] = {}  # ip -> (asn, org, timestamp)
+        self.cache: OrderedDict[str, Tuple[int, str, float]] = OrderedDict()  # ip -> (asn, org, timestamp) LRU管理
         self._load_cache()
         self.stats = {"hits": 0, "misses": 0, "errors": 0}
 
     def _load_cache(self):
-        """キャッシュファイルを読み込み"""
+        """キャッシュファイルを読み込み（LRU、上限付き）"""
         if ASN_CACHE_FILE.exists():
             try:
                 data = json.loads(ASN_CACHE_FILE.read_text())
                 now = datetime.now().timestamp()
                 ttl_sec = CACHE_TTL_HOURS * 3600
-                # 期限切れでないエントリのみ読み込み
+                # 期限切れでないエントリのみ読み込み、タイムスタンプ順でソート
+                valid_entries = []
                 for ip, entry in data.items():
                     if now - entry[2] < ttl_sec:
-                        self.cache[ip] = tuple(entry)
-                logger.info("Loaded %d ASN cache entries", len(self.cache))
+                        valid_entries.append((ip, tuple(entry)))
+                # タイムスタンプ順（古い順）でソートしてOrderedDictに追加
+                valid_entries.sort(key=lambda x: x[1][2])
+                for ip, entry in valid_entries[-MAX_CACHE_SIZE:]:  # 最新のMAX_CACHE_SIZE件のみ
+                    self.cache[ip] = entry
+                logger.info("Loaded %d ASN cache entries (max: %d)", len(self.cache), MAX_CACHE_SIZE)
             except Exception as e:
                 logger.warning("Failed to load ASN cache: %s", e)
 
@@ -129,10 +137,12 @@ class ASNLookup:
         if not ip or not self._is_public_ip(ip):
             return (None, None)
 
-        # キャッシュチェック
+        # キャッシュチェック（LRU更新）
         if ip in self.cache:
-            asn, org, _ = self.cache[ip]
+            asn, org, ts = self.cache[ip]
             self.stats["hits"] += 1
+            # LRU: 末尾に移動
+            self.cache.move_to_end(ip)
             return (asn, org)
 
         # DNS検索
@@ -142,8 +152,11 @@ class ASNLookup:
         if result:
             asn, org = result
             self.cache[ip] = (asn, org, datetime.now().timestamp())
-            # 定期的にキャッシュ保存（100件ごと）
-            if len(self.cache) % 100 == 0:
+            # キャッシュサイズ制限（LRU削除）
+            while len(self.cache) > MAX_CACHE_SIZE:
+                self.cache.popitem(last=False)  # 最も古いエントリを削除
+            # 定期的にキャッシュ保存（1000件ごと、SDカード保護）
+            if len(self.cache) % 1000 == 0:
                 self._save_cache()
             return (asn, org)
 

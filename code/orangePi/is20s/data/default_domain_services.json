@@ -1522,7 +1522,8 @@
     },
     "cymru.com": {
       "service": "Cymru ASN",
-      "category": "Infrastructure"
+      "category": "Infrastructure",
+      "role": "auxiliary"
     },
     "tplinknbu.com": {
       "service": "TP-Link Omada",
@@ -1530,7 +1531,8 @@
     },
     "netconnect.co.jp": {
       "service": "Netconnect",
-      "category": "Infrastructure"
+      "category": "Infrastructure",
+      "role": "auxiliary"
     },
     "connectivitycheck.gstatic.com": {
       "service": "NCSI",
@@ -1554,27 +1556,33 @@
     },
     "time.nist.gov": {
       "service": "NIST NTP",
-      "category": "NTP"
+      "category": "NTP",
+      "role": "auxiliary"
     },
     "ntp.nict.jp": {
       "service": "NICT NTP",
-      "category": "NTP"
+      "category": "NTP",
+      "role": "auxiliary"
     },
     "pool.ntp.org": {
       "service": "NTP Pool",
-      "category": "NTP"
+      "category": "NTP",
+      "role": "auxiliary"
     },
     "time.google.com": {
       "service": "Google NTP",
-      "category": "NTP"
+      "category": "NTP",
+      "role": "auxiliary"
     },
     "time.windows.com": {
       "service": "Windows NTP",
-      "category": "NTP"
+      "category": "NTP",
+      "role": "auxiliary"
     },
     "time.apple.com": {
       "service": "Apple NTP",
-      "category": "NTP"
+      "category": "NTP",
+      "role": "auxiliary"
     },
     "curacao-egaming": {
       "service": "Curacao eGaming",

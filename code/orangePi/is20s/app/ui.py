@@ -67,8 +67,9 @@ th{background:var(--bg);font-weight:500;color:var(--text-muted);position:sticky;
 .stats-bar-label{min-width:60px;font-size:12px;font-weight:500;text-align:right}
 .stats-bar-wrap{flex:1;height:24px;background:var(--bg);border-radius:4px;overflow:hidden;position:relative}
 .stats-bar{height:100%;display:flex;transition:width .6s ease-out;border-radius:4px}
-.stats-bar-segment{height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:500;overflow:hidden;white-space:nowrap;transition:width .6s ease-out}
-.stats-bar-segment:last-child{border-radius:0 4px 4px 0}
+.stats-bar-segment{height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:500;overflow:hidden;white-space:nowrap;transition:width .6s ease-out;border-right:1px solid rgba(255,255,255,0.7);box-sizing:border-box;cursor:pointer}
+.stats-bar-segment:last-child{border-radius:0 4px 4px 0;border-right:none}
+.stats-tooltip{position:fixed;background:#1e293b;color:#fff;padding:6px 10px;border-radius:4px;font-size:12px;white-space:nowrap;pointer-events:none;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
 .stats-loading{display:flex;align-items:center;justify-content:center;padding:20px;color:var(--text-muted)}
 .stats-spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;margin-right:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -556,8 +557,12 @@ gzip=true</pre>
 <span>Room別アクセス状況 <span id="stats-room-count" style="color:var(--text-muted);font-weight:normal"></span></span>
 <div style="display:flex;align-items:center;gap:12px">
 <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
-<input type="checkbox" id="stats-primary-only" checked onchange="updateStatsFromCache()">
+<input type="checkbox" id="stats-primary-only" checked onchange="refreshStatistics()">
 <span>一次通信のみ</span>
+</label>
+<label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
+<input type="checkbox" id="stats-exclude-tracker" checked onchange="refreshStatistics()">
+<span>Tracker除外</span>
 </label>
 <span id="stats-aux-count" style="font-size:11px;color:var(--text-muted)"></span>
 <span id="stats-period" style="font-size:11px;color:var(--text-muted);font-weight:normal"></span>
@@ -1570,80 +1575,98 @@ function getCatColor(cat){{
 }}
 let statsFirstLoad=true;
 let captureEventsCache=null;
+let logFileStatsCache=null;
 function showStatsLoading(){{
   if(!statsFirstLoad)return;
   const rc=document.getElementById('stats-room-chart');
   const oc=document.getElementById('stats-overall-chart');
-  if(rc&&!rc.querySelector('.stats-loading'))rc.innerHTML='<div class="stats-loading"><div class="stats-spinner"></div>読み込み中...</div>';
-  if(oc&&!oc.querySelector('.stats-loading'))oc.innerHTML='<div class="stats-loading"><div class="stats-spinner"></div>読み込み中...</div>';
+  if(rc&&!rc.querySelector('.stats-loading'))rc.innerHTML='<div class="stats-loading"><div class="stats-spinner"></div>ログファイル集計中...</div>';
+  if(oc&&!oc.querySelector('.stats-loading'))oc.innerHTML='<div class="stats-loading"><div class="stats-spinner"></div>ログファイル集計中...</div>';
 }}
-function updateStatsFromCache(){{
-  if(!captureEventsCache)return;
-  const allEvents=statsFilterEvents(captureEventsCache);
+async function refreshStatistics(){{
+  try{{
+    const primaryOnly=document.getElementById('stats-primary-only')?.checked??true;
+    const excludeTracker=document.getElementById('stats-exclude-tracker')?.checked??true;
+    const r=await fetch('/api/capture/statistics?primary_only='+(primaryOnly?'true':'false')+'&exclude_tracker='+(excludeTracker?'true':'false'));
+    const d=await r.json();
+    if(!d.ok){{console.error('Statistics API error:',d.error);return;}}
+    logFileStatsCache=d;
+    updateStatsFromLogFiles();
+  }}catch(e){{console.error('Failed to fetch statistics:',e);}}
+}}
+function updateStatsFromLogFiles(){{
+  if(!logFileStatsCache)return;
+  const d=logFileStatsCache;
   const primaryOnly=document.getElementById('stats-primary-only')?.checked??true;
+  const excludeTracker=document.getElementById('stats-exclude-tracker')?.checked??true;
 
-  // auxiliary件数カウント
-  let auxCount=0;
-  const events=allEvents.filter(e=>{{
-    const role=e.domain_role||'primary';
-    if(role==='auxiliary'){{auxCount++;return !primaryOnly;}}
-    return true;
-  }});
-
-  // auxiliary件数表示
+  // 除外件数表示
   const auxEl=document.getElementById('stats-aux-count');
-  if(auxEl)auxEl.textContent=primaryOnly?'(補助通信 '+auxCount+'件 除外中)':'';
+  const auxCount=d.auxiliary_count||0;
+  const trackerCount=d.tracker_count||0;
+  let excludeText='';
+  if(primaryOnly&&auxCount>0)excludeText+='補助通信 '+auxCount+'件';
+  if(excludeTracker&&trackerCount>0){{
+    if(excludeText)excludeText+=', ';
+    excludeText+='Tracker '+trackerCount+'件';
+  }}
+  if(auxEl)auxEl.textContent=excludeText?'('+excludeText+' 除外中)':'';
 
+  // APIから取得したrooms/categoriesを使用
   const rooms={{}};const categories={{}};
+
   // 設定済みroom全件を0件で初期化（登録順を保持）
   configuredRooms.forEach(r=>{{
     rooms[r]={{total:0,cats:{{}},order:configuredRooms.indexOf(r)}};
   }});
-  // 統計期間計算用
-  let minTs=null,maxTs=null;
-  events.forEach(e=>{{
-    const room=e.room_no||'UNK';
-    const cat=e.domain_category||'Unknown';
-    const svc=e.domain_service||e.http_host||e.tls_sni||e.resolved_domain||'Unknown';
-    if(!rooms[room])rooms[room]={{total:0,cats:{{}},order:9999}};
-    rooms[room].total++;
-    if(!rooms[room].cats[cat])rooms[room].cats[cat]={{total:0,svcs:{{}}}};
-    rooms[room].cats[cat].total++;
-    if(!rooms[room].cats[cat].svcs[svc])rooms[room].cats[cat].svcs[svc]=0;
-    rooms[room].cats[cat].svcs[svc]++;
-    if(!categories[cat])categories[cat]={{total:0,svcs:{{}}}};
-    categories[cat].total++;
-    if(!categories[cat].svcs[svc])categories[cat].svcs[svc]=0;
-    categories[cat].svcs[svc]++;
-    // タイムスタンプ更新
-    if(e.time){{
-      const ts=new Date(e.time);
-      if(!minTs||ts<minTs)minTs=ts;
-      if(!maxTs||ts>maxTs)maxTs=ts;
-    }}
-  }});
+
+  // APIからのroomsデータをマージ
+  if(d.rooms){{
+    Object.entries(d.rooms).forEach(([room,data])=>{{
+      if(!rooms[room])rooms[room]={{total:0,cats:{{}},order:9999}};
+      rooms[room].total=data.total||0;
+      rooms[room].cats=data.cats||{{}};
+    }});
+  }}
+
+  // APIからのcategoriesデータをコピー
+  if(d.categories){{
+    Object.entries(d.categories).forEach(([cat,data])=>{{
+      categories[cat]={{total:data.total||0,svcs:data.svcs||{{}}}};
+    }});
+  }}
+
   statsData={{rooms,categories}};
   statsFirstLoad=false;
+
   // 統計期間表示
   const periodEl=document.getElementById('stats-period');
   if(periodEl){{
+    const minTs=d.min_timestamp?new Date(d.min_timestamp):null;
+    const maxTs=d.max_timestamp?new Date(d.max_timestamp):null;
     if(minTs&&maxTs){{
-      const fmt=d=>{{
-        const yy=String(d.getFullYear()).slice(-2);
-        const mm=String(d.getMonth()+1).padStart(2,'0');
-        const dd=String(d.getDate()).padStart(2,'0');
-        const hh=String(d.getHours()).padStart(2,'0');
-        const mi=String(d.getMinutes()).padStart(2,'0');
+      const fmt=dt=>{{
+        const yy=String(dt.getFullYear()).slice(-2);
+        const mm=String(dt.getMonth()+1).padStart(2,'0');
+        const dd=String(dt.getDate()).padStart(2,'0');
+        const hh=String(dt.getHours()).padStart(2,'0');
+        const mi=String(dt.getMinutes()).padStart(2,'0');
         return yy+'/'+mm+'/'+dd+' '+hh+':'+mi;
       }};
-      periodEl.textContent='統計期間: '+fmt(minTs)+' - '+fmt(maxTs);
+      const totalEvents=d.total_events||0;
+      const fileCount=d.file_count||0;
+      periodEl.textContent='統計期間: '+fmt(minTs)+' - '+fmt(maxTs)+' ('+totalEvents.toLocaleString()+'件 / '+fileCount+'ファイル)';
     }}else{{
-      periodEl.textContent='';
+      periodEl.textContent='データなし';
     }}
   }}
   updateRoomChart();
   updateOverallChart();
   if(statsSelectedRoom)updateRoomDetail(statsSelectedRoom);
+}}
+function updateStatsFromCache(){{
+  // 旧方式（display_bufferベース）- refreshStatistics()に置き換え
+  refreshStatistics();
 }}
 function updateRoomChart(){{
   const container=document.getElementById('stats-room-chart');
@@ -1693,9 +1716,9 @@ function updateRoomChart(){{
       row.style.opacity='1';
       top3.forEach(([cat,cd])=>{{
         const segPct=(cd.total/data.total*100);
-        segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+getCatColor(cat)+'" title="'+cat+': '+cd.total+'">'+cat+'</div>';
+        segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+getCatColor(cat)+'" data-tip="'+cat+': '+cd.total+'件">'+cat+'</div>';
       }});
-      if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/data.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+      if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/data.total*100)+'%;background:#94a3b8" data-tip="その他: '+otherTotal+'件">...</div>';
     }}
     bar.innerHTML=segsHtml;
     row.querySelector('.stats-bar-count').textContent=data.total;
@@ -1743,9 +1766,9 @@ function updateRoomDetail(room){{
     let segsHtml='';
     top3.forEach(([svc,cnt])=>{{
       const segPct=(cnt/cd.total*100);
-      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+color+'" title="'+svc+': '+cnt+'">'+svc.substring(0,15)+'</div>';
+      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+color+'" data-tip="'+svc+': '+cnt+'件">'+svc.substring(0,15)+'</div>';
     }});
-    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/cd.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/cd.total*100)+'%;background:#94a3b8" data-tip="その他: '+otherTotal+'件">...</div>';
     bar.innerHTML=segsHtml;
     row.querySelector('.stats-bar-count').textContent=cd.total;
   }});
@@ -1784,9 +1807,9 @@ function updateOverallChart(){{
     let segsHtml='';
     top3.forEach(([svc,cnt])=>{{
       const segPct=(cnt/cd.total*100);
-      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+color+'" title="'+svc+': '+cnt+'">'+svc.substring(0,15)+'</div>';
+      segsHtml+='<div class="stats-bar-segment" style="width:'+segPct+'%;background:'+color+'" data-tip="'+svc+': '+cnt+'件">'+svc.substring(0,15)+'</div>';
     }});
-    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/cd.total*100)+'%;background:#94a3b8" title="その他: '+otherTotal+'">...</div>';
+    if(otherTotal>0)segsHtml+='<div class="stats-bar-segment" style="width:'+(otherTotal/cd.total*100)+'%;background:#94a3b8" data-tip="その他: '+otherTotal+'件">...</div>';
     bar.innerHTML=segsHtml;
     row.querySelector('.stats-bar-count').textContent=cd.total;
   }});
@@ -1799,6 +1822,22 @@ window.onload=()=>{{
   document.addEventListener('click',(e)=>{{
     const dd=document.getElementById('filter-dropdown');
     if(dd&&dd.open&&!dd.contains(e.target))dd.open=false;
+  }});
+  // セグメントツールチップ
+  let tooltip=null;
+  document.addEventListener('mouseover',(e)=>{{
+    const seg=e.target.closest('.stats-bar-segment[data-tip]');
+    if(seg){{
+      if(!tooltip){{tooltip=document.createElement('div');tooltip.className='stats-tooltip';document.body.appendChild(tooltip);}}
+      tooltip.textContent=seg.getAttribute('data-tip');
+      tooltip.style.display='block';
+      const rect=seg.getBoundingClientRect();
+      tooltip.style.left=(rect.left+rect.width/2-tooltip.offsetWidth/2)+'px';
+      tooltip.style.top=(rect.top-tooltip.offsetHeight-6)+'px';
+    }}
+  }});
+  document.addEventListener('mouseout',(e)=>{{
+    if(e.target.closest('.stats-bar-segment[data-tip]')&&tooltip)tooltip.style.display='none';
   }});
   refreshEvents();
   loadLogs(200);
@@ -1814,10 +1853,12 @@ window.onload=()=>{{
   refreshSync();
   refreshSpeedDial();
   showStatsLoading();
+  refreshStatistics();
   setInterval(refreshStatus,5000);
   setInterval(refreshCaptureStatus,5000);
   setInterval(refreshCaptureEvents,3000);
   setInterval(refreshHardware,10000);
+  setInterval(refreshStatistics,30000);
 }};
 </script>
 </body></html>"""

@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import gc
 import logging
 import shutil
 from contextlib import asynccontextmanager
@@ -24,7 +25,12 @@ from .forwarder import Forwarder
 from .mqtt_handlers import build_mqtt_handlers
 from .api import create_router
 from .capture import CaptureManager, load_watch_config, save_watch_config
+from .hardware_info import get_memory_info
 from . import ui
+
+# メモリ管理設定
+MEMORY_CHECK_INTERVAL_SEC = 30  # メモリチェック間隔
+MEMORY_THRESHOLD_PERCENT = 80  # GCトリガー閾値
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +98,80 @@ async def _mqtt_watchdog(stop_event: asyncio.Event) -> None:
 
 config_lock = asyncio.Lock()
 heartbeat_task: Optional[PeriodicTask] = None
+memory_watchdog_task: Optional[asyncio.Task] = None
+
+
+async def _memory_watchdog(stop_event: asyncio.Event) -> None:
+    """
+    メモリ監視タスク: 80%超過時にGCとキャッシュクリアを実行
+    """
+    gc_count = 0
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=MEMORY_CHECK_INTERVAL_SEC)
+        except asyncio.TimeoutError:
+            pass
+
+        if stop_event.is_set():
+            break
+
+        try:
+            mem = get_memory_info()
+            if mem.usage_percent >= MEMORY_THRESHOLD_PERCENT:
+                gc_count += 1
+                logger.warning(
+                    "Memory usage %.1f%% >= %.1f%% threshold, running GC (#%d)",
+                    mem.usage_percent, MEMORY_THRESHOLD_PERCENT, gc_count
+                )
+
+                # 1. DNSキャッシュの古いエントリを削減（50%削減）
+                if capture_manager.dns_cache:
+                    cache_size = len(capture_manager.dns_cache.cache)
+                    if cache_size > 10000:
+                        # 古い半分を削除
+                        to_remove = cache_size // 2
+                        for _ in range(to_remove):
+                            if capture_manager.dns_cache.cache:
+                                capture_manager.dns_cache.cache.popitem(last=False)
+                        logger.info("DNS cache reduced: %d -> %d entries", cache_size, len(capture_manager.dns_cache.cache))
+
+                # 2. ASNキャッシュの古いエントリを削減
+                if capture_manager.asn_lookup:
+                    asn_cache_size = len(capture_manager.asn_lookup.cache)
+                    if asn_cache_size > 10000:
+                        to_remove = asn_cache_size // 2
+                        for _ in range(to_remove):
+                            if capture_manager.asn_lookup.cache:
+                                capture_manager.asn_lookup.cache.popitem(last=False)
+                        logger.info("ASN cache reduced: %d -> %d entries", asn_cache_size, len(capture_manager.asn_lookup.cache))
+
+                # 3. PTR pending setの古いエントリを安全にクリア
+                # 注意: 完全クリアは処理中のIPに影響するため、キューのみクリア
+                if capture_manager._ptr_queue:
+                    cleared = 0
+                    while not capture_manager._ptr_queue.empty():
+                        try:
+                            ip = capture_manager._ptr_queue.get_nowait()
+                            capture_manager._ptr_pending.discard(ip)
+                            cleared += 1
+                        except asyncio.QueueEmpty:
+                            break
+                    if cleared > 0:
+                        logger.info("PTR queue cleared: %d pending IPs removed", cleared)
+
+                # 4. 強制GC実行
+                collected = gc.collect()
+                logger.info("GC collected %d objects", collected)
+
+                # 5. 結果確認
+                mem_after = get_memory_info()
+                logger.info(
+                    "Memory after GC: %.1f%% (was %.1f%%, freed %dMB)",
+                    mem_after.usage_percent, mem.usage_percent,
+                    mem.used_mb - mem_after.used_mb
+                )
+        except Exception as e:
+            logger.error("Memory watchdog error: %s", e)
 
 
 async def _restart_mqtt_if_needed(prev_mqtt_cfg, new_mqtt_cfg) -> None:
@@ -189,6 +269,8 @@ async def _start_heartbeat():
 
 
 async def lifespan(app: FastAPI):
+    global memory_watchdog_task
+
     await store.init_db()
     await store.start_flush_task(cfg.store.flush_interval_sec)
     await forwarder.start()
@@ -196,6 +278,11 @@ async def lifespan(app: FastAPI):
 
     watchdog_stop = asyncio.Event()
     watchdog_task = asyncio.create_task(_mqtt_watchdog(watchdog_stop))
+
+    # メモリ監視タスク起動
+    memory_stop = asyncio.Event()
+    memory_watchdog_task = asyncio.create_task(_memory_watchdog(memory_stop))
+    logger.info("Memory watchdog started (threshold: %d%%)", MEMORY_THRESHOLD_PERCENT)
 
     if mqtt_client:
         handlers = build_mqtt_handlers(cfg, state.lacis_id, state, forwarder, mqtt_client, apply_config_updates)
@@ -218,6 +305,11 @@ async def lifespan(app: FastAPI):
         if capture_manager.running:
             await capture_manager.flush_remaining()
             await capture_manager.stop()
+
+        # メモリ監視停止
+        memory_stop.set()
+        if memory_watchdog_task:
+            await memory_watchdog_task
 
         watchdog_stop.set()
         await watchdog_task

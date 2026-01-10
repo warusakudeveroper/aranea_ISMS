@@ -174,32 +174,62 @@ class DomainServiceManager:
         self._load()
 
     def _load(self) -> None:
-        """JSONファイルからロード"""
+        """JSONファイルからロード（デフォルト辞書を常にマージ）"""
         with self._lock:
+            # 1. デフォルト辞書を基盤としてロード
+            defaults = _load_default_services()
+            if not defaults:
+                logger.error("No default services available")
+                defaults = {}
+
+            # 2. ユーザーカスタマイズをロード
+            user_data: Dict[str, Dict[str, str]] = {}
             if self.data_file.exists():
                 try:
                     with self.data_file.open() as f:
                         loaded = json.load(f)
-                        # バージョン2: services直下にマップ
                         if isinstance(loaded, dict) and "services" in loaded:
-                            self._data = loaded["services"]
+                            user_data = loaded["services"]
                         else:
-                            # 旧形式互換
-                            self._data = loaded if isinstance(loaded, dict) else {}
-                    logger.info("Loaded %d domain services from file", len(self._data))
+                            user_data = loaded if isinstance(loaded, dict) else {}
+                    logger.info("Loaded %d user domain services from file", len(user_data))
                 except Exception as e:
-                    logger.warning("Failed to load domain services: %s", e)
-                    self._data = {}
+                    logger.warning("Failed to load user domain services: %s", e)
 
-            # 空の場合はデフォルトJSONから読み込み
-            if not self._data:
-                self._data = _load_default_services()
-                if self._data:
-                    self._dirty = True
-                    self._save_internal()
-                    logger.info("Initialized with %d default domain services", len(self._data))
+            # 3. マージ: デフォルトをベースに、ユーザーカスタマイズを上書き
+            # ただし role はデフォルト辞書を優先（システム管理項目）
+            self._data = {}
+            merged_count = 0
+            added_count = 0
+
+            # デフォルトエントリをすべて追加
+            for pattern, default_info in defaults.items():
+                if pattern in user_data:
+                    # ユーザーカスタマイズあり: service/categoryはユーザー優先、roleはデフォルト優先
+                    merged = dict(user_data[pattern])
+                    if "role" in default_info:
+                        merged["role"] = default_info["role"]
+                    self._data[pattern] = merged
+                    merged_count += 1
                 else:
-                    logger.error("No default services available")
+                    # デフォルトのみ
+                    self._data[pattern] = dict(default_info)
+
+            # ユーザー独自エントリを追加（デフォルトにないもの）
+            for pattern, user_info in user_data.items():
+                if pattern not in defaults:
+                    self._data[pattern] = dict(user_info)
+                    added_count += 1
+
+            logger.info(
+                "Domain services loaded: %d total (%d defaults, %d merged, %d user-added)",
+                len(self._data), len(defaults), merged_count, added_count
+            )
+
+            # ユーザーファイルがない場合は保存
+            if not self.data_file.exists() and self._data:
+                self._dirty = True
+                self._save_internal()
 
     def _save_internal(self) -> bool:
         """内部保存（ロック取得済み前提）"""

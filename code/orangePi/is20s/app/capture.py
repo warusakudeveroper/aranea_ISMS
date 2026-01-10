@@ -14,7 +14,7 @@ import socket
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from collections import deque
+from collections import deque, OrderedDict
 from typing import Any, Dict, Deque, List, Optional, Set
 from zoneinfo import ZoneInfo
 
@@ -129,13 +129,13 @@ class DnsCache:
     """
     DNSキャッシュ: IP → ドメイン のマッピングを保持（LRU管理）
     DNSクエリから学習し、TCP SYN時に逆引きに使用
+    OrderedDictを使用してO(1)でLRU管理
     """
 
     def __init__(self, cache_file: str = DEFAULT_DNS_CACHE_FILE, max_entries: int = DNS_CACHE_MAX_ENTRIES):
         self.cache_file = Path(cache_file)
         self.max_entries = max_entries
-        self.cache: Dict[str, str] = {}  # IP -> domain
-        self._access_order: List[str] = []  # LRU用アクセス順序
+        self.cache: OrderedDict[str, str] = OrderedDict()  # IP -> domain (LRU管理)
         self._load()
 
     def _load(self) -> None:
@@ -143,42 +143,37 @@ class DnsCache:
         if self.cache_file.exists():
             try:
                 with self.cache_file.open() as f:
-                    self.cache = json.load(f)
-                self._access_order = list(self.cache.keys())
-                logger.info("DNS cache loaded: %d entries", len(self.cache))
+                    data = json.load(f)
+                # 最新のmax_entries件のみロード
+                items = list(data.items())[-self.max_entries:]
+                self.cache = OrderedDict(items)
+                logger.info("DNS cache loaded: %d entries (max: %d)", len(self.cache), self.max_entries)
             except Exception as e:
                 logger.warning("Failed to load DNS cache: %s", e)
-                self.cache = {}
-                self._access_order = []
+                self.cache = OrderedDict()
         else:
-            self.cache = {}
-            self._access_order = []
+            self.cache = OrderedDict()
 
     def save(self) -> None:
         """キャッシュファイルに保存"""
         try:
             self.cache_file.parent.mkdir(parents=True, exist_ok=True)
             with self.cache_file.open("w") as f:
-                json.dump(self.cache, f, ensure_ascii=False)
+                json.dump(dict(self.cache), f, ensure_ascii=False)
         except Exception as e:
             logger.warning("Failed to save DNS cache: %s", e)
 
     def add(self, ip: str, domain: str) -> None:
-        """IP→ドメインのマッピングを追加"""
+        """IP→ドメインのマッピングを追加（O(1)）"""
         if not ip or not domain:
             return
-        # 既存エントリの場合はLRU更新
+        # 既存エントリの場合はLRU更新（末尾に移動）
         if ip in self.cache:
-            try:
-                self._access_order.remove(ip)
-            except ValueError:
-                pass
+            self.cache.move_to_end(ip)
         self.cache[ip] = domain
-        self._access_order.append(ip)
         # 最大エントリ数を超えたらLRUで削除
-        while len(self.cache) > self.max_entries and self._access_order:
-            oldest_ip = self._access_order.pop(0)
-            self.cache.pop(oldest_ip, None)
+        while len(self.cache) > self.max_entries:
+            self.cache.popitem(last=False)  # 最も古いエントリを削除
 
     def add_multiple(self, ips: str, domain: str) -> None:
         """複数IP（カンマ区切り）を一括登録"""
@@ -190,16 +185,12 @@ class DnsCache:
                 self.add(ip, domain)
 
     def get(self, ip: str) -> Optional[str]:
-        """IPからドメインを取得（LRU更新）"""
-        domain = self.cache.get(ip)
-        if domain:
-            # アクセス順序を更新（LRU）
-            try:
-                self._access_order.remove(ip)
-                self._access_order.append(ip)
-            except ValueError:
-                pass
-        return domain
+        """IPからドメインを取得（LRU更新、O(1)）"""
+        if ip not in self.cache:
+            return None
+        # アクセス順序を更新（LRU）
+        self.cache.move_to_end(ip)
+        return self.cache[ip]
 
     def get_stats(self) -> Dict[str, Any]:
         """統計情報を取得"""
@@ -618,6 +609,132 @@ class CaptureFileLogger:
             "current_file": self.current_file.name if self.current_file else None,
             "current_file_size": self.current_size,
             "log_dir": str(self.log_dir),
+        }
+
+    def aggregate_statistics(self, get_service_func=None, primary_only: bool = True, exclude_tracker: bool = False) -> Dict[str, Any]:
+        """
+        全ログファイルから統計を集計
+        - room別・category別・service別の件数
+        - 統計期間（min/max timestamp）
+        - 総イベント数
+
+        Args:
+            get_service_func: ドメインからservice/category/roleを取得する関数
+            primary_only: Trueの場合、auxiliary通信を集計から除外（カウントは行う）
+            exclude_tracker: Trueの場合、Trackerカテゴリを集計から除外（カウントは行う）
+        """
+        from collections import defaultdict
+
+        rooms: Dict[str, Dict] = defaultdict(lambda: {"total": 0, "cats": defaultdict(lambda: {"total": 0, "svcs": defaultdict(int)})})
+        categories: Dict[str, Dict] = defaultdict(lambda: {"total": 0, "svcs": defaultdict(int)})
+        total_events = 0
+        min_ts = None
+        max_ts = None
+        aux_count = 0
+        tracker_count = 0
+
+        files = self._get_log_files()
+        for fpath in files:
+            try:
+                with fpath.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        total_events += 1
+
+                        # ドメイン特定
+                        domain = (
+                            event.get("http_host")
+                            or event.get("tls_sni")
+                            or event.get("resolved_domain")
+                            or event.get("dns_qry")
+                            or ""
+                        )
+
+                        # service/category/role解決
+                        # 常に辞書から最新のroleを取得（辞書更新に対応）
+                        service = event.get("domain_service", "")
+                        category = event.get("domain_category", "")
+                        role = "primary"  # デフォルト
+
+                        # 辞書から動的に解決（roleは常に辞書から取得）
+                        if get_service_func and domain:
+                            svc, cat, r = get_service_func(domain)
+                            if svc:
+                                service = svc
+                                category = cat
+                                role = r or "primary"
+                            elif not service:
+                                # 辞書にもログにもない場合
+                                service = domain or "Unknown"
+                                category = "Unknown"
+
+                        if not service:
+                            service = domain or "Unknown"
+                        if not category:
+                            category = "Unknown"
+
+                        # auxiliary カウント
+                        is_auxiliary = (role == "auxiliary")
+                        if is_auxiliary:
+                            aux_count += 1
+
+                        # Tracker カウント
+                        is_tracker = (category == "Tracker")
+                        if is_tracker:
+                            tracker_count += 1
+
+                        room = event.get("room_no") or "UNK"
+
+                        # 集計（除外条件: auxiliary or Tracker）
+                        skip_aux = (primary_only and is_auxiliary)
+                        skip_tracker = (exclude_tracker and is_tracker)
+                        if not skip_aux and not skip_tracker:
+                            rooms[room]["total"] += 1
+                            rooms[room]["cats"][category]["total"] += 1
+                            rooms[room]["cats"][category]["svcs"][service] += 1
+                            categories[category]["total"] += 1
+                            categories[category]["svcs"][service] += 1
+
+                        # タイムスタンプ
+                        ts_str = event.get("time")
+                        if ts_str:
+                            try:
+                                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                if min_ts is None or ts < min_ts:
+                                    min_ts = ts
+                                if max_ts is None or ts > max_ts:
+                                    max_ts = ts
+                            except (ValueError, TypeError):
+                                pass
+
+            except Exception as e:
+                logger.warning("Failed to read log file %s: %s", fpath.name, e)
+                continue
+
+        # defaultdictを通常のdictに変換
+        def convert_defaultdict(d):
+            if isinstance(d, defaultdict):
+                d = {k: convert_defaultdict(v) for k, v in d.items()}
+            elif isinstance(d, dict):
+                d = {k: convert_defaultdict(v) for k, v in d.items()}
+            return d
+
+        return {
+            "rooms": convert_defaultdict(rooms),
+            "categories": convert_defaultdict(categories),
+            "total_events": total_events,
+            "auxiliary_count": aux_count,
+            "tracker_count": tracker_count,
+            "min_timestamp": min_ts.isoformat() if min_ts else None,
+            "max_timestamp": max_ts.isoformat() if max_ts else None,
+            "file_count": len(files),
         }
 
 
