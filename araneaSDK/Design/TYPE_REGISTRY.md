@@ -17,7 +17,10 @@ TypeDomain: araneaDevice
 ├── Type: ISMS_ar-is05a (8ch検出器)
 ├── Type: ISMS_ar-is06a (6ch出力)
 ├── Type: ISMS_ar-is10 (ルーター検査)
-└── Type: ISMS_ar-is20s (ネットワーク監視)
+├── Type: ISMS_ar-is20s (ネットワーク監視)
+├── Type: ar-is21ParaclateEdge (AI推論エッジサーバー)
+├── Type: ar-is22CamServer (RTSPカメラ管理サーバー)
+└── Type: ar-is801ParaclateCamera (仮想RTSPカメラ)
 ```
 
 ---
@@ -39,6 +42,9 @@ TypeDomain: araneaDevice
 | 009 | is09 | ISMS_ar-is09 | (Reserved) | Reserved |
 | 010 | is10 | ISMS_ar-is10 | ルーター検査デバイス | Active |
 | 020 | is20 | ISMS_ar-is20s | ネットワーク監視 (Orange Pi) | Active |
+| 021 | is21 | ar-is21ParaclateEdge | AI推論エッジサーバー (ParaclateEdge) | Active |
+| 022 | is22 | ar-is22CamServer | RTSPカメラ管理サーバー (Paraclate) | Active |
+| 801 | is801 | ar-is801ParaclateCamera | 仮想RTSPカメラデバイス | Active |
 
 ### 3.2 ProductCode Convention
 
@@ -370,6 +376,249 @@ semanticTags:
   - 窓
   - ドア
   - Webhook
+```
+
+### 5.4 ar-is22CamServer (Paraclate CamServer)
+
+```yaml
+name: ar-is22CamServer
+displayName: Paraclate CamServer
+description: RTSPカメラ総合管理サーバー（最大30台）
+productType: "022"
+productCodes: ["0000"]
+
+features:
+  - RTSP カメラ管理 (最大30台)
+  - AI推論連携 (is21 ParaclateEdge)
+  - go2rtc ストリーミング
+  - Paraclate サマリーレポート
+  - Web Dashboard
+  - OTA対応
+
+stateSchema:
+  serverStatus:
+    type: string
+    enum: ["running", "stopped", "error", "maintenance"]
+  cameraStats:
+    type: object
+    properties:
+      total:
+        type: integer
+      online:
+        type: integer
+      offline:
+        type: integer
+      error:
+        type: integer
+  inference:
+    type: object
+    properties:
+      status:
+        type: string
+        enum: ["idle", "processing", "error", "disabled"]
+      queueSize:
+        type: integer
+  storage:
+    type: object
+    properties:
+      usagePercent:
+        type: number
+        range: [0, 100]
+      snapshotCount:
+        type: integer
+  pollingCycle:
+    type: object
+    properties:
+      currentCycle:
+        type: integer
+      lastCycleAt:
+        type: string
+        format: date-time
+
+configSchema:
+  polling:
+    type: object
+    properties:
+      intervalSec:
+        type: integer
+        default: 60
+        range: [5, 300]
+      timeoutMainSec:
+        type: integer
+        default: 10
+      timeoutSubSec:
+        type: integer
+        default: 20
+  inference:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      mode:
+        type: string
+        enum: ["all", "differential", "motion_only"]
+      maxConcurrent:
+        type: integer
+        default: 4
+  paraclate:
+    type: object
+    properties:
+      endpoint:
+        type: string
+        format: uri
+      summaryIntervalMinutes:
+        type: integer
+        default: 60
+      grandSummaryTimes:
+        type: array
+        items:
+          type: string
+      reportDetailLevel:
+        type: string
+        enum: ["concise", "standard", "detailed"]
+
+capabilities:
+  - camera_management
+  - rtsp_capture
+  - ai_inference
+  - event_detection
+  - paraclate_reporting
+  - go2rtc_streaming
+  - web_dashboard
+
+semanticTags:
+  - カメラ監視
+  - AI推論
+  - イベント検出
+  - サマリーレポート
+  - RTSPストリーミング
+```
+
+### 5.5 ar-is801ParaclateCamera (仮想カメラデバイス)
+
+```yaml
+name: ar-is801ParaclateCamera
+displayName: Paraclate Camera
+description: is22 CamServerに接続されるRTSPカメラの仮想araneaDevice表現
+productType: "801"
+productCodes: ["0001", "0010", "0011", "0012", "0020", "0021", "0022", "0030", "0031", "0032", "0040", "0041", "0050", "0096"]
+
+productCodeMapping:
+  "0001": Generic/Unknown
+  "0010": Hikvision
+  "0011": Dahua
+  "0012": Uniview
+  "0020": Axis
+  "0021": Hanwha (Samsung)
+  "0022": Bosch
+  "0030": TP-Link (Tapo)
+  "0031": Reolink
+  "0032": Amcrest
+  "0040": Panasonic
+  "0041": Sony
+  "0050": EZVIZ
+  "0096": ISMS Custom
+
+features:
+  - RTSP ストリーミング
+  - スナップショットキャプチャ
+  - AI推論連携
+  - ONVIF制御 (対応機種)
+  - 動体検知
+
+stateSchema:
+  connectionStatus:
+    type: string
+    enum: ["online", "offline", "error", "unknown"]
+  lastCapturedAt:
+    type: string
+    format: date-time
+  lastDetection:
+    type: object
+    properties:
+      timestamp:
+        type: string
+        format: date-time
+      tags:
+        type: array
+        items:
+          type: string
+      confidence:
+        type: number
+        range: [0, 1]
+  streamHealth:
+    type: object
+    properties:
+      fps:
+        type: number
+      bitrate:
+        type: integer
+      resolution:
+        type: string
+      codec:
+        type: string
+  errorCount24h:
+    type: integer
+
+configSchema:
+  rtsp:
+    type: object
+    required: ["mainStreamUrl"]
+    properties:
+      mainStreamUrl:
+        type: string
+      subStreamUrl:
+        type: string
+      username:
+        type: string
+      password:
+        type: string
+  inference:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      preset:
+        type: string
+        enum: ["detection_general", "detection_person", "detection_vehicle", "motion_only", "disabled"]
+      confidenceThreshold:
+        type: number
+        default: 0.5
+        range: [0, 1]
+      customThresholds:
+        type: object
+        additionalProperties:
+          type: number
+  context:
+    type: object
+    properties:
+      name:
+        type: string
+      location:
+        type: string
+      purpose:
+        type: string
+      notes:
+        type: string
+  fitMode:
+    type: string
+    enum: ["contain", "cover", "fill"]
+    default: "contain"
+
+capabilities:
+  - rtsp_streaming
+  - snapshot_capture
+  - ai_inference
+  - motion_detection
+  - onvif_control
+
+semanticTags:
+  - カメラ
+  - RTSP
+  - 映像監視
+  - AI検出
 ```
 
 ---

@@ -1,0 +1,256 @@
+{
+  "_description": "Firestore typeSettings/araneaDevice/ に登録するスキーマ定義",
+  "_usage": "mobes2.0側でFirestoreに登録してください",
+  "_created": "2026-01-10",
+  "_author": "IS21/22開発ライン",
+
+  "ar-is22CamServer": {
+    "displayName": "Paraclate CamServer",
+    "description": "RTSPカメラ総合管理サーバー。最大30台のカメラを監視・インデックス化・AI推論・通知を行う",
+    "version": 1,
+    "productType": "022",
+    "productCodes": ["0000"],
+
+    "stateSchema": {
+      "type": "object",
+      "properties": {
+        "serverStatus": {
+          "type": "string",
+          "enum": ["running", "stopped", "error", "maintenance"],
+          "description": "サーバー稼働状態"
+        },
+        "cameraStats": {
+          "type": "object",
+          "properties": {
+            "total": { "type": "integer", "description": "登録カメラ総数" },
+            "online": { "type": "integer", "description": "オンラインカメラ数" },
+            "offline": { "type": "integer", "description": "オフラインカメラ数" },
+            "error": { "type": "integer", "description": "エラー状態カメラ数" }
+          },
+          "required": ["total", "online", "offline"]
+        },
+        "inference": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["idle", "processing", "error", "disabled"]
+            },
+            "queueSize": { "type": "integer" },
+            "lastProcessedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "usagePercent": { "type": "number", "minimum": 0, "maximum": 100 },
+            "snapshotCount": { "type": "integer" }
+          }
+        },
+        "pollingCycle": {
+          "type": "object",
+          "properties": {
+            "currentCycle": { "type": "integer" },
+            "lastCycleAt": { "type": "string", "format": "date-time" },
+            "avgCycleDurationMs": { "type": "integer" }
+          }
+        }
+      },
+      "required": ["serverStatus", "cameraStats"]
+    },
+
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "polling": {
+          "type": "object",
+          "properties": {
+            "intervalSec": { "type": "integer", "minimum": 5, "maximum": 300, "default": 60 },
+            "timeoutMainSec": { "type": "integer", "minimum": 5, "maximum": 30, "default": 10 },
+            "timeoutSubSec": { "type": "integer", "minimum": 10, "maximum": 60, "default": 20 }
+          }
+        },
+        "inference": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "mode": { "type": "string", "enum": ["all", "differential", "motion_only"], "default": "differential" },
+            "maxConcurrent": { "type": "integer", "minimum": 1, "maximum": 10, "default": 4 }
+          }
+        },
+        "paraclate": {
+          "type": "object",
+          "properties": {
+            "endpoint": { "type": "string", "format": "uri" },
+            "summaryIntervalMinutes": { "type": "integer", "minimum": 15, "maximum": 1440, "default": 60 },
+            "grandSummaryTimes": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
+              "default": ["09:00", "17:00", "21:00"]
+            },
+            "reportDetailLevel": { "type": "string", "enum": ["concise", "standard", "detailed"], "default": "standard" }
+          }
+        }
+      }
+    },
+
+    "capabilities": [
+      "camera_management",
+      "rtsp_capture",
+      "ai_inference",
+      "event_detection",
+      "paraclate_reporting",
+      "go2rtc_streaming",
+      "web_dashboard"
+    ],
+
+    "semanticTags": [
+      "カメラ監視",
+      "AI推論",
+      "イベント検出",
+      "サマリーレポート",
+      "RTSPストリーミング"
+    ],
+
+    "features": [
+      "RTSP カメラ管理 (最大30台)",
+      "AI推論連携 (is21 ParaclateEdge)",
+      "go2rtc ストリーミング",
+      "Paraclate サマリーレポート",
+      "Web Dashboard"
+    ]
+  },
+
+  "ar-is801ParaclateCamera": {
+    "displayName": "Paraclate Camera",
+    "description": "is22 CamServerに接続されるRTSPカメラの仮想araneaDevice表現",
+    "version": 1,
+    "productType": "801",
+    "productCodes": ["0001", "0010", "0011", "0012", "0020", "0021", "0022", "0030", "0031", "0032", "0040", "0041", "0050", "0096"],
+
+    "productCodeMapping": {
+      "0001": "Generic/Unknown",
+      "0010": "Hikvision",
+      "0011": "Dahua",
+      "0012": "Uniview",
+      "0020": "Axis",
+      "0021": "Hanwha (Samsung)",
+      "0022": "Bosch",
+      "0030": "TP-Link (Tapo)",
+      "0031": "Reolink",
+      "0032": "Amcrest",
+      "0040": "Panasonic",
+      "0041": "Sony",
+      "0050": "EZVIZ",
+      "0096": "ISMS Custom"
+    },
+
+    "stateSchema": {
+      "type": "object",
+      "properties": {
+        "connectionStatus": {
+          "type": "string",
+          "enum": ["online", "offline", "error", "unknown"],
+          "description": "接続状態"
+        },
+        "lastCapturedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "最終キャプチャ時刻"
+        },
+        "lastDetection": {
+          "type": "object",
+          "properties": {
+            "timestamp": { "type": "string", "format": "date-time" },
+            "tags": { "type": "array", "items": { "type": "string" } },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "streamHealth": {
+          "type": "object",
+          "properties": {
+            "fps": { "type": "number" },
+            "bitrate": { "type": "integer" },
+            "resolution": { "type": "string", "pattern": "^[0-9]+x[0-9]+$" },
+            "codec": { "type": "string" }
+          }
+        },
+        "errorCount24h": {
+          "type": "integer",
+          "description": "24時間以内のエラー回数"
+        }
+      },
+      "required": ["connectionStatus"]
+    },
+
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "rtsp": {
+          "type": "object",
+          "properties": {
+            "mainStreamUrl": { "type": "string" },
+            "subStreamUrl": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": "string" }
+          },
+          "required": ["mainStreamUrl"]
+        },
+        "inference": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "preset": {
+              "type": "string",
+              "enum": ["detection_general", "detection_person", "detection_vehicle", "motion_only", "disabled"],
+              "default": "detection_general"
+            },
+            "confidenceThreshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 },
+            "customThresholds": {
+              "type": "object",
+              "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "location": { "type": "string" },
+            "purpose": { "type": "string" },
+            "notes": { "type": "string" }
+          }
+        },
+        "fitMode": {
+          "type": "string",
+          "enum": ["contain", "cover", "fill"],
+          "default": "contain"
+        }
+      },
+      "required": ["rtsp"]
+    },
+
+    "capabilities": [
+      "rtsp_streaming",
+      "snapshot_capture",
+      "ai_inference",
+      "motion_detection",
+      "onvif_control"
+    ],
+
+    "semanticTags": [
+      "カメラ",
+      "RTSP",
+      "映像監視",
+      "AI検出"
+    ],
+
+    "features": [
+      "RTSP ストリーミング",
+      "スナップショットキャプチャ",
+      "AI推論連携",
+      "ONVIF制御 (対応機種)",
+      "動体検知"
+    ]
+  }
+}
