@@ -16,6 +16,7 @@ use is22_camserver::{
     inference_stats_service::InferenceStatsService,
     ipcam_scan::IpcamScan,
     overdetection_analyzer::OverdetectionAnalyzer,
+    paraclate_client::{ConfigSyncService, FidValidator, ParaclateClient, PubSubSubscriber},
     polling_orchestrator::PollingOrchestrator,
     prev_frame_cache::PrevFrameCache,
     preset_loader::PresetLoader,
@@ -228,6 +229,32 @@ async fn main() -> anyhow::Result<()> {
     let grand_summary_generator = Arc::new(GrandSummaryGenerator::new(summary_repository.clone()));
     tracing::info!("Summary Service initialized (SummaryGenerator, GrandSummaryGenerator, Repositories)");
 
+    // Initialize ParaclateClient (Phase 4: Issue #117)
+    let paraclate_client = Arc::new(ParaclateClient::new(
+        pool.clone(),
+        config_store.clone(),
+    ));
+    tracing::info!("ParaclateClient initialized (Phase 4)");
+
+    // Initialize ConfigSyncService and PubSubSubscriber (Phase 4 T4-7: Issue #117)
+    let config_sync_service = Arc::new(ConfigSyncService::new(
+        pool.clone(),
+        config_store.clone(),
+    ));
+    let pubsub_subscriber = Arc::new(PubSubSubscriber::new(config_sync_service));
+    tracing::info!("PubSubSubscriber initialized (Phase 4 T4-7)");
+
+    // Initialize FidValidator (Issue #119: テナント-FID所属検証)
+    let fid_validator = Arc::new(FidValidator::new(
+        pool.clone(),
+        config_store.clone(),
+    ));
+    tracing::info!("FidValidator initialized (Issue #119: Tenant-FID ownership validation)");
+
+    // Set FidValidator on PubSubSubscriber (Issue #119)
+    pubsub_subscriber.set_fid_validator(fid_validator.clone()).await;
+    tracing::info!("FidValidator integrated with PubSubSubscriber");
+
     // Create application state
     let state = AppState {
         pool,
@@ -255,6 +282,9 @@ async fn main() -> anyhow::Result<()> {
         grand_summary_generator,
         summary_repository,
         schedule_repository,
+        paraclate_client,
+        pubsub_subscriber,
+        fid_validator,
     };
 
     // Create router

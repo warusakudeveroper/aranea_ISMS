@@ -23,6 +23,7 @@ use crate::suggest_engine::SuggestEngine;
 use crate::summary_service::{
     GrandSummaryGenerator, ScheduleRepository, SummaryGenerator, SummaryRepository,
 };
+use crate::paraclate_client::{FidValidator, ParaclateClient, PubSubSubscriber};
 use sqlx::MySqlPool;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -128,6 +129,12 @@ pub struct AppState {
     pub summary_repository: SummaryRepository,
     /// ScheduleRepository (Phase 3: Issue #116)
     pub schedule_repository: ScheduleRepository,
+    /// ParaclateClient (Phase 4: Issue #117)
+    pub paraclate_client: Arc<ParaclateClient>,
+    /// PubSubSubscriber (Phase 4 T4-7: Issue #117)
+    pub pubsub_subscriber: Arc<PubSubSubscriber>,
+    /// FidValidator (Issue #119: テナント-FID所属検証)
+    pub fid_validator: Arc<FidValidator>,
 }
 
 /// System health metrics
