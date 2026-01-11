@@ -31,6 +31,7 @@ use tracing::{debug, error, info, warn};
 use super::config_sync::ConfigSyncService;
 use super::fid_validator::FidValidator;
 use super::types::ParaclateError;
+use crate::camera_sync::{CameraParaclateSettings, CameraSyncService};
 
 /// 設定変更通知ペイロード
 ///
@@ -132,6 +133,8 @@ pub struct PubSubSubscriber {
     allowed_fids: Vec<String>,
     /// FID Validator (Issue #119)
     fid_validator: RwLock<Option<Arc<FidValidator>>>,
+    /// Camera Sync Service (Phase 8)
+    camera_sync: RwLock<Option<Arc<CameraSyncService>>>,
 }
 
 impl PubSubSubscriber {
@@ -142,6 +145,7 @@ impl PubSubSubscriber {
             allowed_tid: None,
             allowed_fids: vec![],
             fid_validator: RwLock::new(None),
+            camera_sync: RwLock::new(None),
         }
     }
 
@@ -161,6 +165,12 @@ impl PubSubSubscriber {
     pub async fn set_fid_validator(&self, validator: Arc<FidValidator>) {
         let mut guard = self.fid_validator.write().await;
         *guard = Some(validator);
+    }
+
+    /// CameraSyncServiceを設定 (Phase 8)
+    pub async fn set_camera_sync(&self, service: Arc<CameraSyncService>) {
+        let mut guard = self.camera_sync.write().await;
+        *guard = Some(service);
     }
 
     /// FID所属検証を実行 (Issue #119)
@@ -440,22 +450,64 @@ impl PubSubSubscriber {
             return Ok(());
         }
 
-        // 各カメラの設定を同期（GetConfig経由で最新設定を取得）
-        // TODO: CameraSyncServiceを注入してsync_camera_settings_from_mobesを呼び出す
-        // 現時点ではログ出力のみ
+        // CameraSyncServiceを取得
+        let camera_sync = {
+            let guard = self.camera_sync.read().await;
+            guard.clone()
+        };
+
+        let camera_sync = match camera_sync {
+            Some(service) => service,
+            None => {
+                warn!("CameraSyncService not configured, skipping camera settings sync");
+                return Ok(());
+            }
+        };
+
+        // 各カメラの設定を同期
+        let mut success_count = 0;
+        let mut error_count = 0;
 
         for camera in &notification.changed_cameras {
             info!(
                 lacis_id = %camera.lacis_id,
                 changed_fields = ?camera.changed_fields,
-                "Camera settings changed - need to sync from mobes2.0"
+                "Syncing camera settings from mobes2.0"
             );
+
+            // TODO: GetConfig APIから最新のカメラ設定を取得する必要がある
+            // 現時点では通知に含まれる情報でダミー設定を作成
+            let settings = CameraParaclateSettings::default();
+
+            match camera_sync
+                .sync_camera_settings_from_mobes(&camera.lacis_id, settings)
+                .await
+            {
+                Ok(()) => {
+                    success_count += 1;
+                    info!(lacis_id = %camera.lacis_id, "Camera settings synced successfully");
+                }
+                Err(e) => {
+                    error_count += 1;
+                    error!(lacis_id = %camera.lacis_id, error = %e, "Failed to sync camera settings");
+                }
+            }
         }
 
-        // GetConfigを呼び出してカメラ設定を取得・保存
-        // self.config_sync.sync_camera_settings(...)
+        info!(
+            success_count = success_count,
+            error_count = error_count,
+            "Camera settings sync completed"
+        );
 
-        Ok(())
+        if error_count > 0 && success_count == 0 {
+            Err(ParaclateError::Sync(format!(
+                "All {} camera settings sync attempts failed",
+                error_count
+            )))
+        } else {
+            Ok(())
+        }
     }
 
     /// カメラ削除通知を処理（Phase 8: T8-7）
@@ -473,19 +525,60 @@ impl PubSubSubscriber {
             return Ok(());
         }
 
+        // CameraSyncServiceを取得
+        let camera_sync = {
+            let guard = self.camera_sync.read().await;
+            guard.clone()
+        };
+
+        let camera_sync = match camera_sync {
+            Some(service) => service,
+            None => {
+                warn!("CameraSyncService not configured, skipping camera removal sync");
+                return Ok(());
+            }
+        };
+
         // 各カメラを論理削除
-        // TODO: CameraSyncServiceを注入してhandle_camera_remove_from_mobesを呼び出す
-        // 現時点ではログ出力のみ
+        let mut success_count = 0;
+        let mut error_count = 0;
 
         for camera in &notification.removed_cameras {
             warn!(
                 lacis_id = %camera.lacis_id,
                 reason = %camera.reason,
-                "Camera marked for removal by mobes2.0"
+                "Processing camera removal from mobes2.0"
             );
+
+            match camera_sync
+                .handle_camera_remove_from_mobes(&camera.lacis_id, &camera.reason)
+                .await
+            {
+                Ok(()) => {
+                    success_count += 1;
+                    info!(lacis_id = %camera.lacis_id, "Camera removed successfully");
+                }
+                Err(e) => {
+                    error_count += 1;
+                    error!(lacis_id = %camera.lacis_id, error = %e, "Failed to remove camera");
+                }
+            }
         }
 
-        Ok(())
+        info!(
+            success_count = success_count,
+            error_count = error_count,
+            "Camera removal sync completed"
+        );
+
+        if error_count > 0 && success_count == 0 {
+            Err(ParaclateError::Sync(format!(
+                "All {} camera removal attempts failed",
+                error_count
+            )))
+        } else {
+            Ok(())
+        }
     }
 }
 

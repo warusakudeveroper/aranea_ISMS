@@ -52,7 +52,7 @@ pub mod repository;
 pub mod types;
 
 // Re-exports
-pub use client::ParaclateClient;
+pub use client::{CameraMetadataResponse, ParaclateClient};
 pub use config_sync::{ConfigSyncService, SyncResult};
 pub use fid_validator::{FidValidationError, FidValidator};
 pub use pubsub_subscriber::{

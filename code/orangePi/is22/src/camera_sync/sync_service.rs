@@ -513,7 +513,6 @@ impl CameraSyncService {
         fid: &str,
         payload: &CameraMetadataPayload,
     ) -> crate::Result<()> {
-        // ParaclateClientがない場合はスキップ（プレースホルダー）
         let client = match &self.paraclate_client {
             Some(c) => c,
             None => {
@@ -522,19 +521,33 @@ impl CameraSyncService {
             }
         };
 
-        // TODO: mobes2.0に paraclateCameraMetadata エンドポイント実装後に有効化
-        // 現時点ではログ出力のみ
-        info!(
-            tid = %tid,
-            fid = %fid,
-            camera_count = payload.cameras.len(),
-            "Would send camera metadata to mobes2.0 (endpoint not yet implemented)"
-        );
-
-        // デバッグ用にペイロードをログ
-        debug!(payload = ?serde_json::to_string(&payload), "Metadata payload");
-
-        Ok(())
+        // mobes2.0 paraclateCameraMetadata APIを呼び出し
+        match client.send_camera_metadata(tid, fid, payload).await {
+            Ok(response) => {
+                if response.success {
+                    info!(
+                        tid = %tid,
+                        fid = %fid,
+                        synced_count = response.synced_count,
+                        "Camera metadata sent to mobes2.0 successfully"
+                    );
+                    Ok(())
+                } else {
+                    let error_msg = response.error.unwrap_or_else(|| "Unknown error".to_string());
+                    warn!(
+                        tid = %tid,
+                        fid = %fid,
+                        error = %error_msg,
+                        "Camera metadata send failed"
+                    );
+                    Err(crate::Error::Api(format!("mobes2.0 API error: {}", error_msg)))
+                }
+            }
+            Err(e) => {
+                error!(tid = %tid, fid = %fid, error = %e, "Failed to send camera metadata");
+                Err(crate::Error::Api(e.to_string()))
+            }
+        }
     }
 
     /// mobes2.0へ削除通知を送信
@@ -544,8 +557,7 @@ impl CameraSyncService {
         fid: &str,
         payload: &CameraDeletedPayload,
     ) -> crate::Result<()> {
-        // ParaclateClientがない場合はスキップ
-        let _client = match &self.paraclate_client {
+        let client = match &self.paraclate_client {
             Some(c) => c,
             None => {
                 warn!("ParaclateClient not configured, skipping delete notification");
@@ -553,15 +565,33 @@ impl CameraSyncService {
             }
         };
 
-        // TODO: mobes2.0に削除通知エンドポイント実装後に有効化
-        info!(
-            tid = %tid,
-            fid = %fid,
-            deleted_count = payload.deleted_cameras.len(),
-            "Would send delete notification to mobes2.0 (endpoint not yet implemented)"
-        );
-
-        Ok(())
+        // mobes2.0へ削除通知を送信
+        match client.send_camera_deleted(tid, fid, payload).await {
+            Ok(response) => {
+                if response.success {
+                    info!(
+                        tid = %tid,
+                        fid = %fid,
+                        deleted_count = payload.deleted_cameras.len(),
+                        "Camera deletion notification sent to mobes2.0 successfully"
+                    );
+                    Ok(())
+                } else {
+                    let error_msg = response.error.unwrap_or_else(|| "Unknown error".to_string());
+                    warn!(
+                        tid = %tid,
+                        fid = %fid,
+                        error = %error_msg,
+                        "Camera deletion notification failed"
+                    );
+                    Err(crate::Error::Api(format!("mobes2.0 API error: {}", error_msg)))
+                }
+            }
+            Err(e) => {
+                error!(tid = %tid, fid = %fid, error = %e, "Failed to send deletion notification");
+                Err(crate::Error::Api(e.to_string()))
+            }
+        }
     }
 }
 

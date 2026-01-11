@@ -18,6 +18,7 @@ use crate::paraclate_client::{
     types::*,
 };
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
@@ -29,6 +30,8 @@ mod endpoints {
     pub const INGEST_SUMMARY: &str = "https://paraclateingestsummary-vm44u3kpua-an.a.run.app";
     pub const INGEST_EVENT: &str = "https://paraclateingestevent-vm44u3kpua-an.a.run.app";
     pub const GET_CONFIG: &str = "https://paraclategetconfig-vm44u3kpua-an.a.run.app";
+    /// Phase 8: カメラメタデータ同期 (Issue #121)
+    pub const CAMERA_METADATA: &str = "https://paraclatecamerametadata-vm44u3kpua-an.a.run.app";
 }
 
 /// ParaclateClient
@@ -826,6 +829,184 @@ impl ParaclateClient {
     pub fn log_repo(&self) -> &ConnectionLogRepository {
         &self.log_repo
     }
+
+    // ========================================
+    // Phase 8: カメラメタデータ同期 (Issue #121)
+    // ========================================
+
+    /// カメラメタデータをmobes2.0へ送信
+    ///
+    /// IS22で管理するカメラのメタデータ（名前、場所、コンテキスト等）を
+    /// mobes2.0側のparaclateCameraMetadata APIへ送信する
+    pub async fn send_camera_metadata(
+        &self,
+        tid: &str,
+        fid: &str,
+        payload: &crate::camera_sync::CameraMetadataPayload,
+    ) -> Result<CameraMetadataResponse, ParaclateError> {
+        info!(
+            tid = %tid,
+            fid = %fid,
+            camera_count = payload.cameras.len(),
+            sync_type = ?payload.sync_type,
+            "Sending camera metadata to mobes2.0"
+        );
+
+        let oath = self.get_lacis_oath(tid).await?;
+        let url = endpoints::CAMERA_METADATA;
+
+        // mobes2.0 ペイロード形式: { fid, payload: { cameras, syncType, updatedAt } }
+        let wrapped_payload = serde_json::json!({
+            "fid": fid,
+            "payload": payload
+        });
+
+        debug!(payload = %serde_json::to_string(&wrapped_payload).unwrap_or_default(), "Camera metadata payload");
+
+        let mut req = self.http.post(url)
+            .header("Content-Type", "application/json")
+            .json(&wrapped_payload);
+
+        for (key, value) in oath.to_headers() {
+            req = req.header(&key, &value);
+        }
+
+        match req.send().await {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    let body: serde_json::Value = response.json().await.map_err(|e| {
+                        ParaclateError::Http(format!("Failed to parse response: {}", e))
+                    })?;
+
+                    let synced_count = body.get("syncedCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+
+                    info!(
+                        tid = %tid,
+                        fid = %fid,
+                        synced_count = synced_count,
+                        "Camera metadata sent successfully"
+                    );
+
+                    Ok(CameraMetadataResponse {
+                        success: true,
+                        synced_count,
+                        error: None,
+                    })
+                } else {
+                    let error_body = response.text().await.unwrap_or_default();
+                    let error_msg = format!("HTTP {}: {}", status.as_u16(), error_body);
+
+                    warn!(
+                        tid = %tid,
+                        fid = %fid,
+                        status = %status,
+                        error = %error_msg,
+                        "Camera metadata send failed"
+                    );
+
+                    Ok(CameraMetadataResponse {
+                        success: false,
+                        synced_count: 0,
+                        error: Some(error_msg),
+                    })
+                }
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                error!(tid = %tid, fid = %fid, error = %error_msg, "Camera metadata send error");
+
+                Err(ParaclateError::Http(error_msg))
+            }
+        }
+    }
+
+    /// カメラ削除通知をmobes2.0へ送信
+    pub async fn send_camera_deleted(
+        &self,
+        tid: &str,
+        fid: &str,
+        payload: &crate::camera_sync::CameraDeletedPayload,
+    ) -> Result<CameraMetadataResponse, ParaclateError> {
+        info!(
+            tid = %tid,
+            fid = %fid,
+            deleted_count = payload.deleted_cameras.len(),
+            "Sending camera deletion notification to mobes2.0"
+        );
+
+        let oath = self.get_lacis_oath(tid).await?;
+        let url = endpoints::CAMERA_METADATA;
+
+        // 削除通知も同じエンドポイント（syncType=partialで判別）
+        let wrapped_payload = serde_json::json!({
+            "fid": fid,
+            "payload": {
+                "deletedCameras": payload.deleted_cameras,
+                "syncType": "partial",
+                "updatedAt": payload.updated_at
+            }
+        });
+
+        let mut req = self.http.post(url)
+            .header("Content-Type", "application/json")
+            .json(&wrapped_payload);
+
+        for (key, value) in oath.to_headers() {
+            req = req.header(&key, &value);
+        }
+
+        match req.send().await {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    info!(
+                        tid = %tid,
+                        fid = %fid,
+                        "Camera deletion notification sent successfully"
+                    );
+
+                    Ok(CameraMetadataResponse {
+                        success: true,
+                        synced_count: payload.deleted_cameras.len(),
+                        error: None,
+                    })
+                } else {
+                    let error_body = response.text().await.unwrap_or_default();
+                    let error_msg = format!("HTTP {}: {}", status.as_u16(), error_body);
+
+                    warn!(
+                        tid = %tid,
+                        fid = %fid,
+                        status = %status,
+                        "Camera deletion notification failed"
+                    );
+
+                    Ok(CameraMetadataResponse {
+                        success: false,
+                        synced_count: 0,
+                        error: Some(error_msg),
+                    })
+                }
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                error!(tid = %tid, fid = %fid, error = %error_msg, "Camera deletion notification error");
+
+                Err(ParaclateError::Http(error_msg))
+            }
+        }
+    }
+}
+
+/// カメラメタデータAPIレスポンス
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraMetadataResponse {
+    pub success: bool,
+    pub synced_count: usize,
+    pub error: Option<String>,
 }
 
 #[cfg(test)]
