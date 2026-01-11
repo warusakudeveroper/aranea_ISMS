@@ -12,7 +12,12 @@
 //! 2. sync_source_timestamp比較
 //! 3. 新しい場合のみローカル更新
 //! 4. ScheduledReportsにも反映
+//!
+//! ## Phase 8拡張 (Issue #121)
+//! - カメラ個別設定の同期 (`cameras` フィールド)
+//! - CameraSyncRepositoryとの連携
 
+use crate::camera_sync::{CameraParaclateSettings, CameraSyncRepository};
 use crate::config_store::ConfigStore;
 use crate::paraclate_client::{
     repository::ConfigRepository,
@@ -27,6 +32,8 @@ pub struct ConfigSyncService {
     http: reqwest::Client,
     config_repo: ConfigRepository,
     config_store: Arc<ConfigStore>,
+    /// Phase 8: カメラ同期リポジトリ (Issue #121)
+    camera_sync_repo: Option<CameraSyncRepository>,
 }
 
 impl ConfigSyncService {
@@ -39,9 +46,16 @@ impl ConfigSyncService {
 
         Self {
             http,
-            config_repo: ConfigRepository::new(pool),
+            config_repo: ConfigRepository::new(pool.clone()),
             config_store,
+            camera_sync_repo: Some(CameraSyncRepository::new(pool)),
         }
+    }
+
+    /// CameraSyncRepositoryを設定（テスト用）
+    pub fn with_camera_sync_repo(mut self, repo: CameraSyncRepository) -> Self {
+        self.camera_sync_repo = Some(repo);
+        self
     }
 
     /// 設定同期を実行
@@ -115,6 +129,9 @@ impl ConfigSyncService {
             _ => false,
         };
 
+        // Phase 8: カメラ個別設定を同期 (Issue #121)
+        let synced_cameras = self.sync_camera_settings(&sync_response.cameras).await;
+
         if needs_update {
             // ローカル設定を更新
             let update = ParaclateConfigUpdate {
@@ -134,6 +151,7 @@ impl ConfigSyncService {
             info!(
                 tid = %tid,
                 fid = %fid,
+                camera_settings_synced = synced_cameras,
                 "Config synced from mobes2.0"
             );
 
@@ -146,16 +164,116 @@ impl ConfigSyncService {
                     "attunement".to_string(),
                 ],
                 mobes_config: Some(mobes_config),
+                synced_camera_count: synced_cameras,
             })
         } else {
-            debug!(tid = %tid, fid = %fid, "Config already up to date");
+            debug!(
+                tid = %tid,
+                fid = %fid,
+                camera_settings_synced = synced_cameras,
+                "Config already up to date"
+            );
 
             Ok(SyncResult {
-                synced: false,
-                updated_fields: vec![],
+                synced: synced_cameras > 0,
+                updated_fields: if synced_cameras > 0 {
+                    vec!["camera_settings".to_string()]
+                } else {
+                    vec![]
+                },
                 mobes_config: None,
+                synced_camera_count: synced_cameras,
             })
         }
+    }
+
+    /// カメラ個別設定を同期（Phase 8: Issue #121）
+    ///
+    /// mobes2.0からのカメラ設定をローカルDBに保存
+    async fn sync_camera_settings(&self, camera_settings: &[MobesCameraSettings]) -> usize {
+        let camera_sync_repo = match &self.camera_sync_repo {
+            Some(repo) => repo,
+            None => {
+                warn!("CameraSyncRepository not configured, skipping camera settings sync");
+                return 0;
+            }
+        };
+
+        if camera_settings.is_empty() {
+            debug!("No camera settings in response");
+            return 0;
+        }
+
+        let mut synced_count = 0;
+
+        for mobes_settings in camera_settings {
+            // mobes2.0の設定をIS22のCameraParaclateSettingsに変換
+            let settings = CameraParaclateSettings {
+                sensitivity: mobes_settings.sensitivity,
+                detection_zone: mobes_settings.detection_zone.clone(),
+                alert_threshold: mobes_settings.alert_threshold,
+                custom_preset: mobes_settings.custom_preset.clone(),
+            };
+
+            // camera_idを決定（mobesから送られてくる場合と、lacis_idから検索する場合がある）
+            let camera_id = match &mobes_settings.camera_id {
+                Some(id) => id.clone(),
+                None => {
+                    // lacis_idからcamera_idを取得（sync_stateテーブルから）
+                    match camera_sync_repo.get_sync_state_by_lacis_id(&mobes_settings.lacis_id).await {
+                        Ok(Some(state)) => state.camera_id,
+                        Ok(None) => {
+                            debug!(
+                                lacis_id = %mobes_settings.lacis_id,
+                                "Camera not found in sync state, skipping settings sync"
+                            );
+                            continue;
+                        }
+                        Err(e) => {
+                            error!(
+                                lacis_id = %mobes_settings.lacis_id,
+                                error = %e,
+                                "Failed to lookup camera by lacis_id"
+                            );
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            // 設定を保存
+            match camera_sync_repo
+                .upsert_paraclate_settings(&camera_id, &mobes_settings.lacis_id, &settings)
+                .await
+            {
+                Ok(_) => {
+                    debug!(
+                        camera_id = %camera_id,
+                        lacis_id = %mobes_settings.lacis_id,
+                        "Synced camera paraclate settings"
+                    );
+                    synced_count += 1;
+                }
+                Err(e) => {
+                    error!(
+                        camera_id = %camera_id,
+                        lacis_id = %mobes_settings.lacis_id,
+                        error = %e,
+                        "Failed to save camera paraclate settings"
+                    );
+                }
+            }
+        }
+
+        if synced_count > 0 {
+            info!(
+                count = synced_count,
+                total = camera_settings.len(),
+                "Camera paraclate settings synced from mobes2.0"
+            );
+        }
+
+        synced_count
     }
 
     /// 定期同期を開始（バックグラウンドタスク用）
@@ -228,4 +346,6 @@ pub struct SyncResult {
     pub updated_fields: Vec<String>,
     /// mobes2.0からの設定（更新された場合）
     pub mobes_config: Option<MobesConfig>,
+    /// Phase 8: 同期されたカメラ設定数 (Issue #121)
+    pub synced_camera_count: usize,
 }

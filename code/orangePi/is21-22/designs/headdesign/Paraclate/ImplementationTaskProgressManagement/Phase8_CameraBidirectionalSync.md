@@ -32,12 +32,12 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 | T8-1 | DBマイグレーション（026_camera_sync_extension.sql） | ✅ COMPLETED | Claude |
 | T8-2 | camera_sync モジュール作成（types, repository, sync_service） | ✅ COMPLETED | Claude |
 | T8-3 | IS22→mobes メタデータ送信機能 | ✅ COMPLETED | Claude |
-| T8-4 | カメラ名変更トリガー実装 | 🔄 IN_PROGRESS | Claude |
+| T8-4 | カメラ名変更トリガー実装 | ✅ COMPLETED | Claude |
 | T8-5 | カメラ削除通知機能（IS22→mobes） | ✅ COMPLETED | Claude |
 | T8-6 | Pub/Sub camera_settings ハンドラー | ✅ COMPLETED | Claude |
 | T8-7 | Pub/Sub camera_remove ハンドラー | ✅ COMPLETED | Claude |
-| T8-8 | GetConfig カメラ個別設定取得拡張 | ⬜ NOT_STARTED | - |
-| T8-9 | 定期同期スケジューラ | ⬜ NOT_STARTED | - |
+| T8-8 | GetConfig カメラ個別設定取得拡張 | ✅ COMPLETED | Claude |
+| T8-9 | 定期同期スケジューラ | 🔄 IN_PROGRESS | Claude |
 | T8-10 | 統合テスト | ⬜ NOT_STARTED | - |
 
 ---
@@ -105,16 +105,17 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 
 ### T8-4: カメラ名変更トリガー実装
 
-**ファイル**: `src/camera_registry/service.rs` (修正)
+**ファイル**: `src/web_api/routes.rs` (修正)
 
 **内容**:
-- `update_camera_name()` で同期トリガー追加
-- `update_camera_context()` で同期トリガー追加
-- 変更検出ロジック
+- `update_camera()` API handler で同期トリガー追加
+- `soft_delete_camera()` で削除通知トリガー追加
+- tokio::spawn による非同期バックグラウンド処理
 
 **完了条件**:
-- [ ] 名前変更時の自動同期
-- [ ] コンテキスト変更時の自動同期
+- [x] 名前変更時の自動同期（push_single_camera）
+- [x] コンテキスト変更時の自動同期
+- [x] 削除時の通知（notify_camera_deleted）
 - [ ] 統合テスト（IT8-1）パス
 
 ---
@@ -174,16 +175,21 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 
 ### T8-8: GetConfig カメラ個別設定取得拡張
 
-**ファイル**: `src/paraclate_client/config_sync.rs` (修正)
+**ファイル**:
+- `src/paraclate_client/types.rs` (修正)
+- `src/paraclate_client/config_sync.rs` (修正)
 
 **内容**:
-- GetConfigレスポンスの `cameras` フィールドパース
-- カメラ個別設定の抽出・保存
-- `camera_paraclate_settings` テーブル更新
+- `MobesSyncResponse` に `cameras: Vec<MobesCameraSettings>` フィールド追加
+- `MobesCameraSettings` 型定義（lacis_id, sensitivity, detection_zone, alert_threshold, custom_preset）
+- `ConfigSyncService` に `CameraSyncRepository` 統合
+- `sync_camera_settings()` メソッド追加
+- `SyncResult` に `synced_camera_count` フィールド追加
 
 **完了条件**:
-- [ ] レスポンスパーサー拡張
-- [ ] カメラ設定保存実装
+- [x] レスポンスパーサー拡張（MobesCameraSettings型追加）
+- [x] カメラ設定保存実装（upsert_paraclate_settings呼び出し）
+- [x] lacis_idからcamera_id検索機能
 - [ ] 統合テスト（IT8-3）パス
 
 ---
@@ -222,10 +228,10 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 | 項目 | 値 |
 |------|-----|
 | 全タスク数 | 10 |
-| 完了タスク | 7 |
+| 完了タスク | 8 |
 | 進行中タスク | 1 |
-| 未着手タスク | 2 |
-| 進捗率 | 70% |
+| 未着手タスク | 1 |
+| 進捗率 | 80% |
 
 ### 実装済みファイル一覧（2026-01-12）
 
@@ -238,6 +244,11 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 | `src/camera_sync/sync_service.rs` | 同期サービス（push_all_cameras, notify_camera_deleted, API呼び出し統合） |
 | `src/paraclate_client/client.rs` | 拡張（send_camera_metadata, send_camera_deleted メソッド追加） |
 | `src/paraclate_client/pubsub_subscriber.rs` | 拡張（CameraSettings, CameraRemove通知タイプ + CameraSyncService統合） |
+| `src/paraclate_client/types.rs` | 拡張（MobesCameraSettings型追加、MobesSyncResponse.camerasフィールド追加） |
+| `src/paraclate_client/config_sync.rs` | 拡張（sync_camera_settings、CameraSyncRepository統合） |
+| `src/web_api/routes.rs` | 拡張（update_camera/soft_delete_cameraで同期トリガー追加） |
+| `src/state.rs` | 拡張（camera_sync: Option<Arc<CameraSyncService>>追加） |
+| `src/main.rs` | 拡張（CameraSyncService初期化追加） |
 
 ---
 
@@ -265,3 +276,4 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 |------|---------|
 | 2026-01-11 | 初版作成 |
 | 2026-01-12 | ParaclateClient API呼び出し実装、PubSubSubscriber CameraSyncService統合 |
+| 2026-01-12 | T8-4完了（カメラ更新/削除トリガー）、T8-8完了（GetConfigカメラ設定拡張） |

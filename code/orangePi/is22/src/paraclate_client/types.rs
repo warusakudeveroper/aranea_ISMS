@@ -627,8 +627,52 @@ pub struct MobesSyncResponse {
     pub success: bool,
     pub config: Option<MobesConfig>,
     pub updated_at: Option<DateTime<Utc>>,
+    /// Phase 8: カメラ個別設定 (Issue #121)
+    #[serde(default)]
+    pub cameras: Vec<MobesCameraSettings>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// mobes2.0カメラ個別設定（Phase 8: Issue #121）
+///
+/// GetConfigレスポンスの `cameras` フィールドに含まれる
+/// カメラごとのParaclate設定
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobesCameraSettings {
+    /// カメラのLacisID
+    pub lacis_id: String,
+    /// カメラID（IS22内部ID）オプショナル
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub camera_id: Option<String>,
+    /// 検出感度 (0.0-1.0)
+    #[serde(default = "default_camera_sensitivity")]
+    pub sensitivity: f32,
+    /// 検出ゾーン設定
+    #[serde(default = "default_camera_detection_zone")]
+    pub detection_zone: String,
+    /// アラート閾値
+    #[serde(default = "default_camera_alert_threshold")]
+    pub alert_threshold: i32,
+    /// カスタムプリセット名
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_preset: Option<String>,
+    /// 更新日時
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+fn default_camera_sensitivity() -> f32 {
+    0.6
+}
+
+fn default_camera_detection_zone() -> String {
+    "full".to_string()
+}
+
+fn default_camera_alert_threshold() -> i32 {
+    3
 }
 
 /// mobes2.0設定構造体
