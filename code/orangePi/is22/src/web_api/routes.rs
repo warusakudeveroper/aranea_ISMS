@@ -41,6 +41,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/cameras/:id/rescan", post(rescan_camera))
         .route("/api/cameras/:id/auth-test", post(auth_test_camera))
         .route("/api/cameras/:id/sync-preset", post(sync_preset_to_is21))
+        .route("/api/cameras/:id/reactivate", post(reactivate_camera))
         .route("/api/cameras/restore-by-mac", post(restore_camera_by_mac))
         // Modal Leases
         .route("/api/modal/lease", post(request_lease))
@@ -643,6 +644,85 @@ async fn sync_preset_to_is21(
                 "lacis_id": lacis_id,
                 "is21_url": is21_url
             }))).into_response()
+        }
+    }
+}
+
+/// Reactivate camera (clear current CIC and re-register with DeviceGate)
+/// POST /api/cameras/:id/reactivate
+///
+/// Clears the current CIC and registration state, then re-registers the camera
+/// with araneaDeviceGate to obtain a new CIC.
+///
+/// # Use Cases
+/// - Device replacement (same MAC, need new CIC)
+/// - Registration error recovery
+/// - Forced re-sync with DeviceGate
+async fn reactivate_camera(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+) -> impl IntoResponse {
+    use crate::camera_registry::{
+        CameraRegistrationRepository, CameraRegistryService,
+    };
+
+    tracing::info!(camera_id = %camera_id, "Camera reactivation requested");
+
+    // Check if ARANEA_GATE_URL is configured
+    let gate_url = match &state.config.aranea_gate_url {
+        Some(url) => url.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": "araneaDeviceGate URL not configured (ARANEA_GATE_URL)"
+                })),
+            ).into_response();
+        }
+    };
+
+    // Create CameraRegistryService
+    let repository = CameraRegistrationRepository::new(state.pool.clone());
+    let service = CameraRegistryService::new(
+        gate_url,
+        repository,
+        state.config_store.clone(),
+    );
+
+    // Execute reactivation
+    match service.reactivate_camera(&camera_id).await {
+        Ok(result) => {
+            if result.ok {
+                Json(serde_json::json!({
+                    "ok": true,
+                    "lacis_id": result.lacis_id,
+                    "cic": result.cic,
+                    "message": "カメラを再アクティベートしました"
+                })).into_response()
+            } else {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "ok": false,
+                        "error": result.error.unwrap_or_else(|| "Unknown error".to_string())
+                    })),
+                ).into_response()
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                camera_id = %camera_id,
+                error = %e,
+                "Camera reactivation failed"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": e.to_string()
+                })),
+            ).into_response()
         }
     }
 }

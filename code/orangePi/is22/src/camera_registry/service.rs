@@ -270,6 +270,94 @@ impl CameraRegistryService {
         self.repository.clear_registration(camera_id).await
     }
 
+    /// カメラを再アクティベート（登録クリア→再登録）
+    ///
+    /// # Arguments
+    /// * `camera_id` - カメラID
+    ///
+    /// # Returns
+    /// 新しいCIC付きの登録結果
+    pub async fn reactivate_camera(
+        &self,
+        camera_id: &str,
+    ) -> crate::Result<CameraRegisterResponse> {
+        info!(camera_id = %camera_id, "Reactivating camera (clear + re-register)");
+
+        // 1. 現在の登録をクリア
+        self.clear_registration(camera_id).await?;
+
+        // 2. カメラ情報を取得
+        let camera_info = self.get_camera_for_registration(camera_id).await?;
+        let Some(info) = camera_info else {
+            return Ok(CameraRegisterResponse::error(format!(
+                "Camera {} not found or has no MAC address",
+                camera_id
+            )));
+        };
+
+        // 3. 再登録
+        let request = CameraRegisterRequest {
+            camera_id: camera_id.to_string(),
+            mac_address: info.mac_address,
+            product_code: info.product_code.unwrap_or_else(|| "0000".to_string()),
+            fid: info.fid,
+            rid: info.rid,
+        };
+
+        let result = self.register_camera(request).await?;
+
+        if result.ok {
+            info!(
+                camera_id = %camera_id,
+                new_cic = %result.cic.as_deref().unwrap_or(""),
+                "Camera reactivated successfully"
+            );
+        } else {
+            warn!(
+                camera_id = %camera_id,
+                error = %result.error.as_deref().unwrap_or("unknown"),
+                "Camera reactivation failed"
+            );
+        }
+
+        Ok(result)
+    }
+
+    /// 登録用カメラ情報を取得
+    async fn get_camera_for_registration(
+        &self,
+        camera_id: &str,
+    ) -> crate::Result<Option<CameraRegistrationInfo>> {
+        let row = sqlx::query_as::<_, CameraRegistrationInfoRow>(
+            r#"
+            SELECT
+                c.camera_id,
+                c.mac_address,
+                cb.product_code,
+                c.fid,
+                c.rid
+            FROM cameras c
+            LEFT JOIN oui_entries oe ON UPPER(SUBSTRING(c.mac_address, 1, 8)) = oe.oui_prefix
+            LEFT JOIN camera_brands cb ON oe.brand_id = cb.id
+            WHERE c.camera_id = ? AND c.deleted_at IS NULL
+            "#,
+        )
+        .bind(camera_id)
+        .fetch_optional(self.repository.pool())
+        .await
+        .map_err(|e| crate::Error::Database(e.to_string()))?;
+
+        Ok(row.and_then(|r| {
+            r.mac_address.map(|mac| CameraRegistrationInfo {
+                camera_id: r.camera_id,
+                mac_address: mac,
+                product_code: r.product_code,
+                fid: r.fid,
+                rid: r.rid,
+            })
+        }))
+    }
+
     /// カメラのMACアドレスからLacisIDを生成（登録せずに確認用）
     pub async fn preview_lacis_id(
         &self,
@@ -366,6 +454,25 @@ impl CameraRegistryService {
 struct PendingCamera {
     camera_id: String,
     mac_address: String,
+    product_code: Option<String>,
+    fid: Option<String>,
+    rid: Option<String>,
+}
+
+/// 登録用カメラ情報
+#[derive(Debug)]
+struct CameraRegistrationInfo {
+    camera_id: String,
+    mac_address: String,
+    product_code: Option<String>,
+    fid: Option<String>,
+    rid: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct CameraRegistrationInfoRow {
+    camera_id: String,
+    mac_address: Option<String>,
     product_code: Option<String>,
     fid: Option<String>,
     rid: Option<String>,
