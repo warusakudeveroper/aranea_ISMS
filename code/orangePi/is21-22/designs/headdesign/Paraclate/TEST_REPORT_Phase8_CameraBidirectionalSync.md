@@ -35,12 +35,14 @@ Phase 8「カメラ双方向同期」機能のIS22-mobes2.0間連携テストを
 | 設定同期取得 | ✅ PASS | reportInterval, grandSummaryTimes取得OK |
 | カメラ一覧取得 | ✅ PASS | 17台登録確認、LacisID付与済み |
 | カメラ更新API | ✅ PASS | コンテキスト更新成功 |
-| Phase 8 DBマイグレーション | ⚠️ PENDING | 026_camera_sync_extension.sql 未デプロイ |
-| カメラ同期テーブル | ⚠️ PENDING | camera_sync_state等 未作成 |
-| IS22→mobes メタデータ送信 | 🔄 待機中 | DB依存のため保留 |
-| 定期同期スケジューラ | 🔄 待機中 | DB依存のため保留 |
+| Phase 8 DBマイグレーション | ✅ PASS | 026_camera_sync_extension.sql 適用完了 |
+| カメラ同期テーブル | ✅ PASS | camera_sync_state, camera_paraclate_settings, camera_sync_logs 作成済み |
+| カメラTID設定 | ✅ PASS | 全17台にTID設定完了 |
+| IS22→mobes 同期トリガー | ✅ PASS | カメラ更新時に`push_single_camera()`実行確認 |
+| IS22→mobes メタデータ送信 | 🔄 E2Eテスト待ち | mobes2.0側受信確認が必要 |
+| 定期同期スケジューラ | ✅ PASS | `start_periodic_sync()`実装完了 |
 
-### 総合評価: **部分的成功（デプロイ待ち）**
+### 総合評価: **実装完了・E2Eテスト待ち**
 
 ---
 

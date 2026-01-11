@@ -544,13 +544,13 @@ impl CameraSyncService {
             r#"
             SELECT
                 c.camera_id, c.lacis_id, c.name, c.location, c.mac_address,
-                c.camera_context, c.is_online, c.last_seen,
+                c.camera_context, c.enabled as is_online, c.updated_at as last_seen,
                 cb.name as brand_name, c.onvif_device_info
             FROM cameras c
             LEFT JOIN oui_entries oe ON UPPER(SUBSTRING(c.mac_address, 1, 8)) = oe.oui_prefix
             LEFT JOIN camera_brands cb ON oe.brand_id = cb.id
-            WHERE c.tid = ? AND c.registration_state = 'registered'
-            AND c.lacis_id IS NOT NULL AND c.deleted_at IS NULL
+            WHERE c.tid = ? AND c.deleted_at IS NULL
+            AND c.lacis_id IS NOT NULL
             "#,
         )
         .bind(tid)
@@ -567,7 +567,7 @@ impl CameraSyncService {
             r#"
             SELECT
                 c.camera_id, c.lacis_id, c.name, c.location, c.mac_address,
-                c.camera_context, c.is_online, c.last_seen,
+                c.camera_context, c.enabled as is_online, c.updated_at as last_seen,
                 cb.name as brand_name, c.onvif_device_info
             FROM cameras c
             LEFT JOIN oui_entries oe ON UPPER(SUBSTRING(c.mac_address, 1, 8)) = oe.oui_prefix
