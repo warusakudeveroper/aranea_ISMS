@@ -180,6 +180,10 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/api/register", super::register_routes::register_routes())
         // Summary/GrandSummary (Phase 3: Issue #116)
         .nest("/api", super::summary_routes::summary_routes())
+        // ParaclateClient (Phase 4: Issue #117)
+        .nest("/api/paraclate", super::paraclate_routes::paraclate_routes())
+        // BqSyncService (Phase 5: Issue #118)
+        .nest("/api/bq-sync", super::bq_sync_routes::bq_sync_routes())
         .with_state(state)
 }
 
@@ -236,6 +240,30 @@ async fn update_camera(
                 state.polling.spawn_subnet_loop_if_needed(ip).await;
             }
 
+            // Phase 8: Trigger camera metadata sync to mobes2.0 (Issue #121)
+            if let Some(ref camera_sync) = state.camera_sync {
+                if let (Some(ref tid), Some(ref fid), Some(_)) = (&camera.tid, &camera.fid, &camera.lacis_id) {
+                    let sync = camera_sync.clone();
+                    let tid_clone = tid.clone();
+                    let fid_clone = fid.clone();
+                    let camera_id = camera.camera_id.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = sync.push_single_camera(&tid_clone, &fid_clone, &camera_id).await {
+                            tracing::warn!(
+                                camera_id = %camera_id,
+                                error = %e,
+                                "Failed to sync camera metadata to mobes2.0"
+                            );
+                        } else {
+                            tracing::info!(
+                                camera_id = %camera_id,
+                                "Camera metadata synced to mobes2.0"
+                            );
+                        }
+                    });
+                }
+            }
+
             Json(ApiResponse::success(camera)).into_response()
         }
         Err(e) => e.into_response(),
@@ -265,6 +293,39 @@ async fn soft_delete_camera(
         Ok(camera) => {
             // go2rtc cleanup is handled by polling_orchestrator at cycle start
             let _ = state.config_store.refresh_cache().await;
+
+            // Phase 8: Notify mobes2.0 of camera deletion (Issue #121)
+            if let Some(ref camera_sync) = state.camera_sync {
+                if let (Some(ref tid), Some(ref fid), Some(ref lacis_id)) = (&camera.tid, &camera.fid, &camera.lacis_id) {
+                    let sync = camera_sync.clone();
+                    let tid_clone = tid.clone();
+                    let fid_clone = fid.clone();
+                    let camera_id = camera.camera_id.clone();
+                    let lacis_id_clone = lacis_id.clone();
+                    tokio::spawn(async move {
+                        use crate::camera_sync::DeleteReason;
+                        if let Err(e) = sync.notify_camera_deleted(
+                            &tid_clone,
+                            &fid_clone,
+                            &camera_id,
+                            &lacis_id_clone,
+                            DeleteReason::UserRequest,
+                        ).await {
+                            tracing::warn!(
+                                camera_id = %camera_id,
+                                error = %e,
+                                "Failed to notify mobes2.0 of camera deletion"
+                            );
+                        } else {
+                            tracing::info!(
+                                camera_id = %camera_id,
+                                "Camera deletion notified to mobes2.0"
+                            );
+                        }
+                    });
+                }
+            }
+
             Json(ApiResponse::success(serde_json::json!({
                 "ok": true,
                 "camera_id": camera.camera_id,

@@ -16,6 +16,8 @@ use is22_camserver::{
     inference_stats_service::InferenceStatsService,
     ipcam_scan::IpcamScan,
     overdetection_analyzer::OverdetectionAnalyzer,
+    bq_sync_service::{BqSyncConfig, BqSyncService},
+    camera_sync::{CameraSyncRepository, CameraSyncService},
     paraclate_client::{ConfigSyncService, FidValidator, ParaclateClient, PubSubSubscriber},
     polling_orchestrator::PollingOrchestrator,
     prev_frame_cache::PrevFrameCache,
@@ -255,6 +257,33 @@ async fn main() -> anyhow::Result<()> {
     pubsub_subscriber.set_fid_validator(fid_validator.clone()).await;
     tracing::info!("FidValidator integrated with PubSubSubscriber");
 
+    // Initialize BqSyncService (Phase 5: Issue #118)
+    // Disabled by default until credentials are configured
+    let bq_sync_config = BqSyncConfig {
+        enabled: std::env::var("BQ_SYNC_ENABLED").ok().map(|v| v == "true").unwrap_or(false),
+        credentials_path: std::env::var("BQ_CREDENTIALS_PATH").ok(),
+        ..Default::default()
+    };
+    let bq_sync_service = if bq_sync_config.enabled {
+        tracing::info!(
+            project_id = %bq_sync_config.project_id,
+            dataset_id = %bq_sync_config.dataset_id,
+            "BqSyncService enabled"
+        );
+        Some(Arc::new(BqSyncService::new(pool.clone(), bq_sync_config)))
+    } else {
+        tracing::info!("BqSyncService disabled (set BQ_SYNC_ENABLED=true to enable)");
+        None
+    };
+
+    // Phase 8: CameraSyncService initialization (Issue #121)
+    let camera_sync_repository = CameraSyncRepository::new(pool.clone());
+    let camera_sync = Some(Arc::new(
+        CameraSyncService::new(camera_sync_repository, config_store.clone())
+            .with_paraclate_client(paraclate_client.clone())
+    ));
+    tracing::info!("CameraSyncService initialized");
+
     // Create application state
     let state = AppState {
         pool,
@@ -285,7 +314,16 @@ async fn main() -> anyhow::Result<()> {
         paraclate_client,
         pubsub_subscriber,
         fid_validator,
+        bq_sync_service: bq_sync_service.clone(),
+        camera_sync,
     };
+
+    // Start BqSyncService background task if enabled (Phase 5: Issue #118)
+    if let Some(ref bq_sync) = bq_sync_service {
+        if let Err(e) = bq_sync.start_background_sync().await {
+            tracing::error!(error = %e, "Failed to start BqSyncService background task");
+        }
+    }
 
     // Create router
     let app = web_api::create_router(state.clone())

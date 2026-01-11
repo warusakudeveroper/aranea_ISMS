@@ -6,7 +6,9 @@ use crate::admission_controller::AdmissionController;
 use crate::ai_client::AIClient;
 use crate::aranea_register::AraneaRegisterService;
 use crate::auto_attunement::AutoAttunementService;
+use crate::bq_sync_service::BqSyncService;
 use crate::camera_brand::CameraBrandService;
+use crate::camera_sync::CameraSyncService;
 use crate::config_store::ConfigStore;
 use crate::detection_log_service::DetectionLogService;
 use crate::event_log_service::EventLogService;
@@ -135,6 +137,10 @@ pub struct AppState {
     pub pubsub_subscriber: Arc<PubSubSubscriber>,
     /// FidValidator (Issue #119: テナント-FID所属検証)
     pub fid_validator: Arc<FidValidator>,
+    /// BqSyncService (Phase 5: Issue #118)
+    pub bq_sync_service: Option<Arc<BqSyncService>>,
+    /// CameraSyncService (Phase 8: Issue #121)
+    pub camera_sync: Option<Arc<CameraSyncService>>,
 }
 
 /// System health metrics
