@@ -303,7 +303,47 @@ pub struct LacisOath {
 
 impl LacisOath {
     /// HTTPヘッダを生成
+    ///
+    /// mobes2.0 Paraclate API認証形式:
+    /// Authorization: LacisOath <base64-encoded-json>
+    ///
+    /// JSON構造:
+    /// {
+    ///   "lacisId": "...",
+    ///   "tid": "...",
+    ///   "cic": "...",
+    ///   "timestamp": "<ISO8601>"
+    /// }
     pub fn to_headers(&self) -> Vec<(String, String)> {
+        use base64::Engine;
+
+        // 認証ペイロードを構築
+        let auth_payload = serde_json::json!({
+            "lacisId": self.lacis_id,
+            "tid": self.tid,
+            "cic": self.cic,
+            "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        });
+
+        // Base64エンコード
+        let json_str = serde_json::to_string(&auth_payload).unwrap_or_default();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(json_str.as_bytes());
+
+        let mut headers = vec![
+            ("Authorization".to_string(), format!("LacisOath {}", encoded)),
+        ];
+
+        // blessingがある場合は追加ヘッダとして付与（越境アクセス用）
+        if let Some(blessing) = &self.blessing {
+            headers.push(("X-Lacis-Blessing".to_string(), blessing.clone()));
+        }
+
+        headers
+    }
+
+    /// 旧形式ヘッダを生成（後方互換性用）
+    #[allow(dead_code)]
+    pub fn to_legacy_headers(&self) -> Vec<(String, String)> {
         let mut headers = vec![
             ("X-Lacis-ID".to_string(), self.lacis_id.clone()),
             ("X-Lacis-TID".to_string(), self.tid.clone()),
@@ -456,6 +496,34 @@ impl From<SendQueueItem> for QueueItemResponse {
 // Snapshot / Event Structures (T4-3: LacisFiles連携)
 // ============================================================
 
+/// カメラ不調種別
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CameraMalfunctionType {
+    /// カメラオフライン
+    Offline,
+    /// ストリームエラー
+    StreamError,
+    /// 高レイテンシ
+    HighLatency,
+    /// 低FPS
+    LowFps,
+    /// フレーム取得不可
+    NoFrames,
+}
+
+impl std::fmt::Display for CameraMalfunctionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Offline => write!(f, "offline"),
+            Self::StreamError => write!(f, "stream_error"),
+            Self::HighLatency => write!(f, "high_latency"),
+            Self::LowFps => write!(f, "low_fps"),
+            Self::NoFrames => write!(f, "no_frames"),
+        }
+    }
+}
+
 /// Event送信ペイロード
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -481,6 +549,19 @@ pub struct EventPayload {
     /// 検出詳細（JSONシリアライズ済み）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
+    /// スナップショット画像（Base64エンコード）
+    /// mobes2.0 LacisFiles連携: JSON bodyに含めて送信
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_base64: Option<String>,
+    /// スナップショットのMIMEタイプ（例: image/jpeg）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_mime_type: Option<String>,
+    /// カメラ不調種別（不調報告時のみ）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub malfunction_type: Option<CameraMalfunctionType>,
+    /// 不調詳細情報
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub malfunction_details: Option<serde_json::Value>,
 }
 
 /// Event送信レスポンス (Paraclate APPからの応答)

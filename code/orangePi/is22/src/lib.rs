@@ -23,14 +23,17 @@
 //! - MECE: Mutually exclusive, collectively exhaustive
 
 pub mod aranea_register;
+pub mod bq_sync_service;
 pub mod camera_registry;
 pub mod camera_brand;
 pub mod summary_service;
+pub mod paraclate_client;
 pub mod config_store;
 pub mod sdm_integration;
 pub mod admission_controller;
 pub mod ai_client;
 pub mod camera_status_tracker;
+pub mod camera_malfunction_reporter;
 pub mod detection_log_service;
 pub mod event_log_service;
 pub mod suggest_engine;
@@ -47,6 +50,7 @@ pub mod models;
 pub mod inference_stats_service;
 pub mod auto_attunement;
 pub mod overdetection_analyzer;
+pub mod is21_activation;
 pub mod error;
 pub mod state;
 

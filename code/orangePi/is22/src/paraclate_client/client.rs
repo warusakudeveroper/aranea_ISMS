@@ -8,6 +8,9 @@
 //! - LacisOath認証ヘッダ付与
 //! - Summary/Event送信
 //! - 設定同期
+//!
+//! ## mobes2.0 Cloud Run Endpoints
+//! E2Eテスト結果に基づき実際のエンドポイントを使用
 
 use crate::config_store::ConfigStore;
 use crate::paraclate_client::{
@@ -18,6 +21,15 @@ use reqwest::Client;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
+
+/// mobes2.0 Cloud Run エンドポイント定数
+/// E2Eテスト結果に基づく実際のURL
+mod endpoints {
+    pub const CONNECT: &str = "https://paraclateconnect-vm44u3kpua-an.a.run.app";
+    pub const INGEST_SUMMARY: &str = "https://paraclateingestsummary-vm44u3kpua-an.a.run.app";
+    pub const INGEST_EVENT: &str = "https://paraclateingestevent-vm44u3kpua-an.a.run.app";
+    pub const GET_CONFIG: &str = "https://paraclategetconfig-vm44u3kpua-an.a.run.app";
+}
 
 /// ParaclateClient
 ///
@@ -40,6 +52,8 @@ impl ParaclateClient {
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
+            // mobes2.0 Cloud RunはHTTPS必須、リダイレクトでPOSTがGETに変わる問題を回避
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("Failed to build HTTP client");
 
@@ -54,34 +68,93 @@ impl ParaclateClient {
 
     /// LacisOathを取得
     ///
-    /// ConfigStoreから is22 デバイスの LacisID/CIC を取得
+    /// ConfigStoreから is22 デバイスの LacisID/TID/CIC を取得
     /// AraneaRegister (Phase 1) で登録されたキーを参照
-    async fn get_lacis_oath(&self, tid: &str) -> Result<LacisOath, ParaclateError> {
+    async fn get_lacis_oath(&self, _tid: &str) -> Result<LacisOath, ParaclateError> {
         // AraneaRegister で定義されたconfig keys
         const LACIS_ID_KEY: &str = "aranea.lacis_id";
+        const TID_KEY: &str = "aranea.tid";
         const CIC_KEY: &str = "aranea.cic";
 
-        let lacis_id = self
+        info!("get_lacis_oath: Fetching credentials from config_store");
+
+        let lacis_id_result = self
             .config_store
             .service()
             .get_setting(LACIS_ID_KEY)
-            .await
-            .map_err(|e| ParaclateError::Config(format!("Failed to get lacis_id: {}", e)))?
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .ok_or_else(|| ParaclateError::Auth("LacisID not configured. Run AraneaRegister first.".to_string()))?;
+            .await;
 
-        let cic = self
+        let lacis_id = match lacis_id_result {
+            Ok(Some(v)) => {
+                let id = v.as_str().map(|s| s.to_string());
+                info!(lacis_id = ?id, "get_lacis_oath: Got lacis_id");
+                id.ok_or_else(|| ParaclateError::Auth("LacisID value is not a string".to_string()))?
+            }
+            Ok(None) => {
+                error!("get_lacis_oath: LacisID not found in config");
+                return Err(ParaclateError::Auth("LacisID not configured. Run AraneaRegister first.".to_string()));
+            }
+            Err(e) => {
+                error!(error = %e, "get_lacis_oath: Failed to get lacis_id");
+                return Err(ParaclateError::Config(format!("Failed to get lacis_id: {}", e)));
+            }
+        };
+
+        // TIDも設定から取得（AraneaRegisterで登録済み）
+        let tid_result = self
+            .config_store
+            .service()
+            .get_setting(TID_KEY)
+            .await;
+
+        let tid = match tid_result {
+            Ok(Some(v)) => {
+                let t = v.as_str().map(|s| s.to_string());
+                info!(tid = ?t, "get_lacis_oath: Got tid");
+                t.ok_or_else(|| ParaclateError::Auth("TID value is not a string".to_string()))?
+            }
+            Ok(None) => {
+                error!("get_lacis_oath: TID not found in config");
+                return Err(ParaclateError::Auth("TID not configured. Run AraneaRegister first.".to_string()));
+            }
+            Err(e) => {
+                error!(error = %e, "get_lacis_oath: Failed to get tid");
+                return Err(ParaclateError::Config(format!("Failed to get tid: {}", e)));
+            }
+        };
+
+        let cic_result = self
             .config_store
             .service()
             .get_setting(CIC_KEY)
-            .await
-            .map_err(|e| ParaclateError::Config(format!("Failed to get cic: {}", e)))?
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .ok_or_else(|| ParaclateError::Auth("CIC not configured. Run AraneaRegister first.".to_string()))?;
+            .await;
+
+        let cic = match cic_result {
+            Ok(Some(v)) => {
+                let c = v.as_str().map(|s| s.to_string());
+                info!(cic = ?c, "get_lacis_oath: Got cic");
+                c.ok_or_else(|| ParaclateError::Auth("CIC value is not a string".to_string()))?
+            }
+            Ok(None) => {
+                error!("get_lacis_oath: CIC not found in config");
+                return Err(ParaclateError::Auth("CIC not configured. Run AraneaRegister first.".to_string()));
+            }
+            Err(e) => {
+                error!(error = %e, "get_lacis_oath: Failed to get cic");
+                return Err(ParaclateError::Config(format!("Failed to get cic: {}", e)));
+            }
+        };
+
+        info!(
+            lacis_id = %lacis_id,
+            tid = %tid,
+            cic = %cic,
+            "get_lacis_oath: Successfully retrieved all credentials"
+        );
 
         Ok(LacisOath {
             lacis_id,
-            tid: tid.to_string(),
+            tid,
             cic,
             blessing: None,
         })
@@ -96,19 +169,57 @@ impl ParaclateClient {
     ) -> Result<ConnectResponse, ParaclateError> {
         info!(tid = %tid, fid = %fid, endpoint = %endpoint, "Connecting to Paraclate APP");
 
-        let oath = self.get_lacis_oath(tid).await?;
+        let oath = match self.get_lacis_oath(tid).await {
+            Ok(o) => o,
+            Err(e) => {
+                error!(error = %e, "connect: Failed to get LacisOath");
+                return Err(e);
+            }
+        };
 
-        // 接続テストエンドポイント
-        let url = format!("{}/api/health", endpoint);
+        // mobes2.0 Connect エンドポイント
+        // 引数endpointは設定保存用に使用
+        let url = endpoints::CONNECT;
 
-        let mut req = self.http.get(&url);
-        for (key, value) in oath.to_headers() {
-            req = req.header(&key, &value);
+        // mobes2.0 ペイロード形式
+        let connect_body = serde_json::json!({
+            "fid": fid,
+            "payload": {
+                "deviceType": "is22",
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        });
+
+        // INFO: 実際に送信されるリクエスト内容を確認
+        info!(
+            url = %url,
+            lacis_id = %oath.lacis_id,
+            tid = %oath.tid,
+            cic = %oath.cic,
+            body = %connect_body,
+            "Preparing Connect request"
+        );
+
+        let mut req = self.http.post(url).json(&connect_body);
+        let headers = oath.to_headers();
+        for (key, value) in &headers {
+            info!(header_key = %key, header_value = %value, "Adding header");
+            req = req.header(key, value);
         }
+
+        info!("Sending POST request to {}", url);
 
         match req.send().await {
             Ok(response) => {
-                if response.status().is_success() {
+                let status = response.status();
+                let response_headers = response.headers().clone();
+                info!(
+                    status = %status,
+                    headers = ?response_headers,
+                    "Received response"
+                );
+
+                if status.is_success() {
                     // 設定を保存/更新
                     let config = self.config_repo.get(tid, fid).await.map_err(|e| {
                         ParaclateError::Database(format!("Failed to get config: {}", e))
@@ -148,7 +259,7 @@ impl ParaclateClient {
                             event_type: ConnectionEventType::Connect,
                             event_detail: Some(format!("Connected to {}", endpoint)),
                             error_code: None,
-                            http_status_code: Some(response.status().as_u16() as i32),
+                            http_status_code: Some(status.as_u16() as i32),
                         })
                         .await;
 
@@ -161,7 +272,9 @@ impl ParaclateClient {
                         error: None,
                     })
                 } else {
-                    let status = response.status();
+                    // エラーレスポンスの詳細をログ出力
+                    let error_body = response.text().await.unwrap_or_default();
+                    info!(status = %status, body = %error_body, "Error response body");
                     let error_msg = format!("HTTP {}", status.as_u16());
 
                     self.config_repo
@@ -345,17 +458,20 @@ impl ParaclateClient {
 
     /// Event送信（snapshot付き）
     ///
-    /// T4-3: LacisFiles連携
-    /// multipart/form-dataでsnapshotを含めてEvent送信
+    /// T5-2: LacisFiles連携（mobes2.0回答に基づく実装）
+    /// snapshotをBase64エンコードしてJSON bodyに含めて送信
+    /// mobes2.0側でLacisFilesに自動保存
     /// 成功時はstoragePath（恒久参照子）を返す
     pub async fn send_event_with_snapshot(
         &self,
         tid: &str,
         fid: &str,
-        event_payload: EventPayload,
+        mut event_payload: EventPayload,
         snapshot_data: Option<Vec<u8>>,
         log_id: u64,
     ) -> Result<EventSendResult, ParaclateError> {
+        use base64::Engine;
+
         let config = self
             .config_repo
             .get(tid, fid)
@@ -363,8 +479,20 @@ impl ParaclateClient {
             .map_err(|e| ParaclateError::Database(format!("Failed to get config: {}", e)))?
             .ok_or_else(|| ParaclateError::Config("Config not found".to_string()))?;
 
+        // snapshotがあればBase64エンコードしてpayloadに含める
+        if let Some(data) = &snapshot_data {
+            let base64_encoded = base64::engine::general_purpose::STANDARD.encode(data);
+            event_payload.snapshot_base64 = Some(base64_encoded);
+            event_payload.snapshot_mime_type = Some("image/jpeg".to_string());
+            debug!(
+                log_id = log_id,
+                snapshot_size = data.len(),
+                "Snapshot attached as Base64"
+            );
+        }
+
         if config.connection_status != ConnectionStatus::Connected {
-            // オフライン時はキューに追加
+            // オフライン時はキューに追加（snapshot含むpayload）
             let payload = serde_json::to_value(&event_payload)
                 .map_err(|e| ParaclateError::Queue(format!("Failed to serialize: {}", e)))?;
 
@@ -393,26 +521,23 @@ impl ParaclateClient {
         }
 
         let oath = self.get_lacis_oath(tid).await?;
-        let url = format!("{}/api/paraclate/ingest/event", config.endpoint);
 
-        // multipart/form-data を構築
-        let event_json = serde_json::to_string(&event_payload)
-            .map_err(|e| ParaclateError::Queue(format!("Failed to serialize: {}", e)))?;
+        // mobes2.0 Cloud Run エンドポイント
+        let url = endpoints::INGEST_EVENT;
 
-        let mut form = reqwest::multipart::Form::new()
-            .text("event", event_json);
+        // mobes2.0 ペイロード形式: { fid, payload: { event: {...} } }
+        // snapshotはevent_payload.snapshot_base64に含まれる
+        let wrapped_payload = serde_json::json!({
+            "fid": fid,
+            "payload": {
+                "event": &event_payload
+            }
+        });
 
-        // snapshotがあれば添付
-        if let Some(data) = snapshot_data {
-            let file_name = format!("snapshot_{}.jpg", log_id);
-            let part = reqwest::multipart::Part::bytes(data)
-                .file_name(file_name)
-                .mime_str("image/jpeg")
-                .map_err(|e| ParaclateError::Http(format!("Failed to create multipart: {}", e)))?;
-            form = form.part("snapshot", part);
-        }
+        let mut req = self.http.post(url)
+            .header("Content-Type", "application/json")
+            .json(&wrapped_payload);
 
-        let mut req = self.http.post(&url).multipart(form);
         for (key, value) in oath.to_headers() {
             req = req.header(&key, &value);
         }
@@ -594,15 +719,19 @@ impl ParaclateClient {
                 .await
                 .ok();
 
-            let endpoint_path = match item.payload_type {
-                PayloadType::Summary | PayloadType::GrandSummary => "/api/paraclate/summary",
-                PayloadType::Event => "/api/paraclate/event",
-                PayloadType::Emergency => "/api/paraclate/emergency",
+            // mobes2.0 Cloud Run エンドポイントを選択
+            let url = match item.payload_type {
+                PayloadType::Summary | PayloadType::GrandSummary => endpoints::INGEST_SUMMARY,
+                PayloadType::Event | PayloadType::Emergency => endpoints::INGEST_EVENT,
             };
 
-            let url = format!("{}{}", config.endpoint, endpoint_path);
+            // mobes2.0 ペイロード形式: { fid, payload: {...} }
+            let wrapped_payload = serde_json::json!({
+                "fid": fid,
+                "payload": item.payload
+            });
 
-            let mut req = self.http.post(&url).json(&item.payload);
+            let mut req = self.http.post(url).json(&wrapped_payload);
             for (key, value) in oath.to_headers() {
                 req = req.header(&key, &value);
             }
@@ -713,9 +842,33 @@ mod tests {
         };
 
         let headers = oath.to_headers();
-        assert_eq!(headers.len(), 3);
-        assert!(headers.iter().any(|(k, _)| k == "X-Lacis-ID"));
-        assert!(headers.iter().any(|(k, _)| k == "X-Lacis-TID"));
-        assert!(headers.iter().any(|(k, _)| k == "X-Lacis-CIC"));
+        // mobes2.0形式: Authorization: LacisOath <base64-json>
+        assert!(headers.iter().any(|(k, v)| {
+            k == "Authorization" && v.starts_with("LacisOath ")
+        }));
+    }
+
+    #[test]
+    fn test_lacis_oath_headers_with_blessing() {
+        let oath = LacisOath {
+            lacis_id: "3022AABBCCDDEEFF0000".to_string(),
+            tid: "T123".to_string(),
+            cic: "123456".to_string(),
+            blessing: Some("test_blessing".to_string()),
+        };
+
+        let headers = oath.to_headers();
+        assert!(headers.iter().any(|(k, _)| k == "Authorization"));
+        assert!(headers.iter().any(|(k, v)| {
+            k == "X-Lacis-Blessing" && v == "test_blessing"
+        }));
+    }
+
+    #[test]
+    fn test_mobes_endpoints() {
+        assert!(endpoints::CONNECT.contains("paraclateconnect"));
+        assert!(endpoints::INGEST_SUMMARY.contains("paraclateingestsummary"));
+        assert!(endpoints::INGEST_EVENT.contains("paraclateingestevent"));
+        assert!(endpoints::GET_CONFIG.contains("paraclategetconfig"));
     }
 }

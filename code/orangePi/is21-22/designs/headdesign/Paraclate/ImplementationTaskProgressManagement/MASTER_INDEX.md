@@ -1,8 +1,8 @@
 # Paraclate実装タスク進捗管理 マスターインデックス
 
 作成日: 2026-01-10
-最終更新: 2026-01-10
-バージョン: 1.5.0
+最終更新: 2026-01-11
+バージョン: 2.0.0
 
 ---
 
@@ -21,6 +21,7 @@
 | Phase 4 | DD03 | ParaclateClient | Phase 1,2,3 | #117 |
 | Phase 5 | DD04 | BqSyncService | Phase 3,4 | #118 |
 | Phase 6 | DD06,DD07 | IS21 Baseline | Phase 1 | #119 |
+| Phase 7 | mobes2.0回答 | mobes2.0統合 | Phase 1,4 | #120 |
 
 **親Issue**: #113
 
@@ -36,6 +37,7 @@
 | [Phase4_ParaclateClient.md](./Phase4_ParaclateClient.md) | mobes2.0連携クライアント | 7 |
 | [Phase5_BqSyncService.md](./Phase5_BqSyncService.md) | BigQuery同期 | 7 |
 | [Phase6_IS21_Baseline.md](./Phase6_IS21_Baseline.md) | IS21基盤・推論サービス | 9 |
+| [Phase5_mobes20_Integration.md](./Phase5_mobes20_Integration.md) | mobes2.0統合（Phase 7） | 3 |
 | [COMPLETENESS_CHECK.md](./COMPLETENESS_CHECK.md) | 完全性チェック結果 | - |
 
 ---
@@ -58,11 +60,12 @@
 |-------|------|-----------|---------|-------|
 | Phase 1 | ✅ | 7 | 7 | 100% |
 | Phase 2 | ✅ | 7 | 7 | 100% |
-| Phase 3 | 🔄 | 7 | 8 | 88% |
-| Phase 4 | ⬜ | 0 | 7 | 0% |
-| Phase 5 | ⬜ | 0 | 7 | 0% |
-| Phase 6 | 🔄 | 8 | 9 | 89% |
-| **合計** | | **29** | **45** | **64%** |
+| Phase 3 | ✅ | 8 | 8 | 100% |
+| Phase 4 | ✅ | 7 | 7 | 100% |
+| Phase 5 | ✅ | 7 | 7 | 100% |
+| Phase 6 | ✅ | 9 | 9 | 100% |
+| Phase 7 | ✅ | 3 | 3 | 100% |
+| **合計** | | **48** | **48** | **100%** |
 
 ### Phase 1 タスク詳細
 
@@ -99,7 +102,31 @@
 | T3-5 | Summary API実装 | ✅ COMPLETED |
 | T3-6 | GrandSummary設計 | ✅ COMPLETED |
 | T3-7 | grand_summary.rs 実装 | ✅ COMPLETED |
-| T3-8 | Summary→GrandSummary統合テスト | 🔄 IN_PROGRESS |
+| T3-8 | Summary→GrandSummary統合テスト | ✅ COMPLETED (2026-01-11 E2E全API成功) |
+
+### Phase 4 タスク詳細
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T4-1 | client.rs HTTPクライアント | ✅ COMPLETED (2026-01-10) |
+| T4-2 | lacisOath認証ヘッダ | ✅ COMPLETED (2026-01-10) |
+| T4-3 | snapshot連携（LacisFiles） | ✅ COMPLETED (2026-01-11) |
+| T4-4 | enqueuer.rs 送信キュー管理 | ✅ COMPLETED (2026-01-10) |
+| T4-5 | config_sync.rs 設定同期 | ✅ COMPLETED (2026-01-10) |
+| T4-6 | リトライ・offline対応 | ✅ COMPLETED (2026-01-10) |
+| T4-7 | Pub/Sub受信フロー | ✅ COMPLETED (2026-01-11) |
+
+### Phase 5 タスク詳細
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T5-1 | BQテーブル定義確認・連携準備 | ✅ COMPLETED (2026-01-11) |
+| T5-2 | bq_sync.rs サービス実装 | ✅ COMPLETED (2026-01-11) |
+| T5-3 | バッチ同期処理（非ブロッキング） | ✅ COMPLETED (2026-01-11) |
+| T5-4 | synced_to_bq管理・PKマップ | ✅ COMPLETED (2026-01-11) |
+| T5-5 | 冪等性保証 | ✅ COMPLETED (2026-01-11) |
+| T5-6 | retention連携 | ✅ COMPLETED (2026-01-11) |
+| T5-7 | 同期ログ・監視 | ✅ COMPLETED (2026-01-11) |
 
 ### Phase 6 タスク詳細
 
@@ -113,7 +140,21 @@
 | T6-6 | MQTTコマンドハンドラ | ✅ COMPLETED |
 | T6-7 | 推論APIエンドポイント | ✅ COMPLETED (/v1/analyze) |
 | T6-8 | systemdサービス設定 | ✅ COMPLETED |
-| T6-9 | 統合テスト | 🔄 IN_PROGRESS |
+| T6-9 | 統合テスト | ✅ COMPLETED (2026-01-11) |
+
+### Phase 7 タスク詳細（mobes2.0統合）
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T7-1 | IS21アクティベート（araneaDeviceGate経由） | ✅ COMPLETED (2026-01-11) |
+| T7-2 | LacisFiles対応（snapshot Base64送信） | ✅ COMPLETED (2026-01-11) |
+| T7-3 | カメラ不調報告（IngestEvent拡張） | ✅ COMPLETED (2026-01-11) |
+
+**注記**: Phase 7はmobes2.0チームからのSPEC_CONFIRMATION_RESPONSE_2026-01-11.mdに基づく実装
+- IS21アクティベート: araneaDeviceGate API経由
+- LacisFiles: Event APIにsnapshot（Base64）を送信
+- カメラ不調: IngestEvent APIにmalfunction_type含めて送信
+- BQ同期: mobes2.0側で自動処理のためIS22側対応不要
 
 ---
 
@@ -249,6 +290,91 @@ T1-1 → T1-2 → T1-3 → T2-1 → T2-2 → T3-1 → T3-2 → T4-1 → T4-4 →
 
 ---
 
+## IS22-mobes2.0 E2Eテスト結果（2026-01-11実施）
+
+### テスト環境
+
+| 項目 | 値 |
+|------|-----|
+| IS22サーバー | 192.168.125.246:8080 |
+| テスト用LacisID | 3022E051D815448B0001 |
+| テスト用TID | T2025120621041161827 |
+| テスト用CIC | 605123 |
+| テスト用FID | 0099 |
+
+### mobes2.0 Cloud Run エンドポイント
+
+| API | URL |
+|-----|-----|
+| Connect | https://paraclateconnect-vm44u3kpua-an.a.run.app |
+| IngestSummary | https://paraclateingestsummary-vm44u3kpua-an.a.run.app |
+| IngestEvent | https://paraclateingestevent-vm44u3kpua-an.a.run.app |
+| GetConfig | https://paraclategetconfig-vm44u3kpua-an.a.run.app/config/{tid}?fid={fid} |
+
+### 認証形式
+
+```
+Authorization: LacisOath <base64-encoded-json>
+
+JSON構造:
+{
+  "lacisId": "...",
+  "tid": "...",
+  "cic": "...",
+  "timestamp": "<ISO8601>"
+}
+```
+
+### テスト結果
+
+| テストID | 内容 | 結果 | 備考 |
+|---------|------|------|------|
+| T-CONN | Connect API | ✅ SUCCESS | 初回接続成功 |
+| T-SUM | IngestSummary API | ✅ SUCCESS | ペイロード形式修正後成功 |
+| T-EVT | IngestEvent API | ✅ SUCCESS | 正常受付 |
+| T-CFG | GetConfig API | ✅ SUCCESS | パスパラメータ形式修正後成功 |
+| T-ERR-1 | 認証なしテスト | ✅ EXPECTED | AUTH_FAILED正常返却 |
+
+### 追加テスト結果（FID=0150）
+
+| テストID | 内容 | 結果 | 備考 |
+|---------|------|------|------|
+| T-CONN-150 | Connect API (FID=0150) | ✅ SUCCESS | `{"connected":true,"configId":1}` |
+| T-SUM-150 | IngestSummary API | ✅ SUCCESS | `{"success":true,"summaryId":"sum_is22_test_001"}` |
+| T-EVT-150 | IngestEvent API | ✅ SUCCESS | `{"success":true,"eventId":"det_evt_is22_test_001"}` |
+| T-CFG-150 | GetConfig API | ✅ SUCCESS | `{"success":true,"config":{...},"resolvedFrom":"hardcoded"}` |
+
+### コード修正内容
+
+1. **LacisOath認証ヘッダ形式**
+   - 旧: 個別ヘッダ（X-Lacis-ID, X-Lacis-TID, X-Lacis-CIC）
+   - 新: `Authorization: LacisOath <base64-json>`
+
+2. **IngestSummary/Eventペイロード形式**
+   ```json
+   {
+     "fid": "0099",
+     "payload": {
+       "summary": { "summaryId": "..." },
+       "periodStart": "...",
+       "periodEnd": "..."
+     }
+   }
+   ```
+
+3. **GetConfig URLパターン**
+   - 旧: クエリパラメータのみ
+   - 新: `/config/{tid}?fid={fid}` パスパラメータ形式
+
+### 修正ファイル
+
+| ファイル | 修正内容 |
+|---------|---------|
+| `src/paraclate_client/types.rs` | LacisOath.to_headers() - Authorization形式に変更 |
+| `src/paraclate_client/client.rs` | mobes2.0エンドポイント定数追加、ペイロードラッピング |
+
+---
+
 ## 関連ドキュメント
 
 ### 設計ドキュメント（../DetailedDesign/）
@@ -283,3 +409,8 @@ T1-1 → T1-2 → T1-3 → T2-1 → T2-2 → T3-1 → T3-2 → T4-1 → T4-4 →
 | 2026-01-10 | 1.3.0 | **Phase 6 実装完了（8/9）**: MqttManager, StateReporter, 設定スキーマ, MQTTハンドラ実装。統合テスト待ち | Claude |
 | 2026-01-10 | 1.4.0 | **Phase 2 完了（7/7）**: CameraRegistry全タスク完了。camera_registry module (service, repository, lacis_id, context, ipcam_connector)、detection_log_service拡張、camera_status_tracker拡張 | Claude |
 | 2026-01-10 | 1.5.0 | **Phase 3 進行中（7/8）**: Summary/GrandSummary実装完了。summary_service module (types, repository, generator, grand_summary, scheduler, payload_builder)、summary_routes.rs API実装。統合テスト待ち | Claude |
+| 2026-01-11 | 1.6.0 | **Phase 4 完了（7/7）**: ParaclateClient全タスク完了。paraclate_client module (client, config_sync, pubsub_subscriber, repository, types)、paraclate_routes.rs API実装、Pub/Sub通知受信フロー実装。**重大Issue #119**: テナント-FID所属検証未実装を発行 | Claude |
+| 2026-01-11 | 1.7.0 | **IS22-mobes2.0 E2Eテスト完了**: 全API正常動作確認。LacisOath認証形式を`Authorization: LacisOath <base64-json>`に変更、ペイロードを`{fid, payload}`形式にラッピング。mobes2.0 Cloud Runエンドポイント定数追加。Issue #119（FID検証）解決済み | Claude |
+| 2026-01-11 | 1.8.0 | **Phase 3 完了（8/8）**: T3-8 Summary→GrandSummary統合テスト完了。IS22からmobes2.0全4API（Connect/IngestSummary/IngestEvent/GetConfig）正常動作確認。types.rsのto_headers()をAuthorization形式に修正、IS22デプロイ完了。進捗率82%に向上 | Claude |
+| 2026-01-11 | 1.9.0 | **Phase 5 完了（7/7）**: BqSyncService全タスク完了。bq_sync_service module (processor, bq_client, types)、bq_sync_routes.rs API実装、migration/024_bq_sync_extension.sql。非ブロッキングバッチ処理、PKマップ、冪等性チェック、retention連携、ヘルスチェックAPI実装。進捗率98%に向上 | Claude |
+| 2026-01-11 | 2.0.0 | **🎉 Paraclate実装100%完了**: Phase 6 T6-9統合テスト完了。IS21サーバー（192.168.3.240:9000）全API動作確認。/v1/analyze推論API、/api/hardware、/api/status、/v1/capabilities全て正常動作。全45タスク完了、進捗率100%達成 | Claude |
