@@ -31,7 +31,8 @@ mod endpoints {
     pub const INGEST_EVENT: &str = "https://paraclateingestevent-vm44u3kpua-an.a.run.app";
     pub const GET_CONFIG: &str = "https://paraclategetconfig-vm44u3kpua-an.a.run.app";
     /// Phase 8: カメラメタデータ同期 (Issue #121)
-    pub const CAMERA_METADATA: &str = "https://paraclatecamerametadata-vm44u3kpua-an.a.run.app";
+    /// mobes2.0チーム回答に基づき訂正 (2026-01-12)
+    pub const CAMERA_METADATA: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateCameraMetadata";
 }
 
 /// ParaclateClient

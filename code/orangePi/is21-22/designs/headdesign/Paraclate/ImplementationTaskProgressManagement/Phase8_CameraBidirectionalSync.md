@@ -94,7 +94,8 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 - `CameraSyncService.push_single_camera()` 単一カメラ同期
 - `ParaclateClient.send_camera_metadata()` API呼び出し
 
-**エンドポイント**: `POST https://paraclatecamerametadata-vm44u3kpua-an.a.run.app`
+**エンドポイント**: `POST https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateCameraMetadata`
+> URL訂正済み（2026-01-12 mobes2.0チーム回答）
 
 **完了条件**:
 - [x] SyncService実装
@@ -269,13 +270,16 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 - IS22サーバーデプロイ済み（192.168.125.246:8080）
 - mobes2.0 Connect API疎通確認済み
 
-### mobes2.0側対応必要事項
+### mobes2.0側対応状況（2026-01-12 回答確認済み）
 
 | 項目 | 状態 | 備考 |
 |------|------|------|
-| paraclateCameraMetadata Cloud Function | ⚠️ 確認中 | IS22側実装完了、mobes2.0側API待ち |
-| Pub/Sub通知タイプ拡張 | ⚠️ 確認中 | camera_settings, camera_remove |
-| GetConfigレスポンス拡張 | ⬜ 未実装 | cameras フィールド追加 |
+| paraclateCameraMetadata Cloud Function | ✅ 実装済み | URL訂正済み |
+| Pub/Sub通知タイプ拡張 | ✅ 実装済み | camera_settings, camera_remove |
+| GetConfigレスポンス拡張 | ✅ 実装済み | cameras フィールド追加 |
+| Firestoreトリガー | ✅ 実装済み | 追加確認項目 |
+
+**結論: 連携テスト開始可能**
 
 ---
 
@@ -287,3 +291,4 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 | 2026-01-12 | ParaclateClient API呼び出し実装、PubSubSubscriber CameraSyncService統合 |
 | 2026-01-12 | T8-4完了（カメラ更新/削除トリガー）、T8-8完了（GetConfigカメラ設定拡張） |
 | 2026-01-12 | T8-9完了（定期同期スケジューラ: PeriodicSyncState, start_periodic_sync, trigger_full_sync） |
+| 2026-01-12 | mobes2.0チーム回答受領、全API実装済み確認、エンドポイントURL訂正、連携テスト開始可能 |

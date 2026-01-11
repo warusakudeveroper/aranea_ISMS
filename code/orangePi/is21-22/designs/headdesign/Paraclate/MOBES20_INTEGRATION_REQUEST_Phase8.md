@@ -64,7 +64,9 @@ IS22（カメラ管理サーバー）とmobes2.0（Paraclate APP）間で、カ�
 
 IS22がカメラメタデータを送信するエンドポイントです。
 
-**エンドポイント**: `POST https://paraclatecamerametadata-vm44u3kpua-an.a.run.app`
+**エンドポイント**: `POST https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateCameraMetadata`
+
+> **注**: 2026-01-12 mobes2.0チーム回答に基づきURL訂正済み
 
 #### リクエストヘッダー
 
