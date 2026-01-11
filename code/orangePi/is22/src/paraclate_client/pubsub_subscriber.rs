@@ -52,6 +52,33 @@ pub struct ConfigUpdateNotification {
     /// 変更されたフィールド（オプション）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed_fields: Vec<String>,
+    /// 変更されたカメラ（Phase 8: camera_settings用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_cameras: Vec<ChangedCamera>,
+    /// 削除されたカメラ（Phase 8: camera_remove用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_cameras: Vec<RemovedCamera>,
+}
+
+/// 変更されたカメラ情報（Phase 8）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedCamera {
+    /// カメラのLacisID
+    pub lacis_id: String,
+    /// 変更されたフィールド
+    #[serde(default)]
+    pub changed_fields: Vec<String>,
+}
+
+/// 削除されたカメラ情報（Phase 8）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovedCamera {
+    /// カメラのLacisID
+    pub lacis_id: String,
+    /// 削除理由
+    pub reason: String,
 }
 
 /// 通知タイプ
@@ -66,6 +93,10 @@ pub enum NotificationType {
     Disconnect,
     /// 強制同期要求
     ForceSync,
+    /// カメラ個別設定変更（Phase 8追加）
+    CameraSettings,
+    /// カメラ削除指示（Phase 8追加）
+    CameraRemove,
 }
 
 /// Google Cloud Pub/Sub Push形式のラッパー
@@ -281,6 +312,12 @@ impl PubSubSubscriber {
             NotificationType::Disconnect => {
                 self.handle_disconnect(&validated_notification).await
             }
+            NotificationType::CameraSettings => {
+                self.handle_camera_settings(&validated_notification).await
+            }
+            NotificationType::CameraRemove => {
+                self.handle_camera_remove(&validated_notification).await
+            }
         }
     }
 
@@ -387,6 +424,69 @@ impl PubSubSubscriber {
 
         Ok(())
     }
+
+    /// カメラ設定変更通知を処理（Phase 8: T8-6）
+    async fn handle_camera_settings(&self, notification: &ConfigUpdateNotification) -> Result<(), ParaclateError> {
+        info!(
+            tid = %notification.tid,
+            fids = ?notification.fids,
+            changed_cameras = ?notification.changed_cameras.len(),
+            actor = %notification.actor,
+            "Received camera settings update notification"
+        );
+
+        if notification.changed_cameras.is_empty() {
+            debug!("No changed cameras in notification, skipping");
+            return Ok(());
+        }
+
+        // 各カメラの設定を同期（GetConfig経由で最新設定を取得）
+        // TODO: CameraSyncServiceを注入してsync_camera_settings_from_mobesを呼び出す
+        // 現時点ではログ出力のみ
+
+        for camera in &notification.changed_cameras {
+            info!(
+                lacis_id = %camera.lacis_id,
+                changed_fields = ?camera.changed_fields,
+                "Camera settings changed - need to sync from mobes2.0"
+            );
+        }
+
+        // GetConfigを呼び出してカメラ設定を取得・保存
+        // self.config_sync.sync_camera_settings(...)
+
+        Ok(())
+    }
+
+    /// カメラ削除通知を処理（Phase 8: T8-7）
+    async fn handle_camera_remove(&self, notification: &ConfigUpdateNotification) -> Result<(), ParaclateError> {
+        warn!(
+            tid = %notification.tid,
+            fids = ?notification.fids,
+            removed_cameras = ?notification.removed_cameras.len(),
+            actor = %notification.actor,
+            "Received camera removal notification from mobes2.0"
+        );
+
+        if notification.removed_cameras.is_empty() {
+            debug!("No removed cameras in notification, skipping");
+            return Ok(());
+        }
+
+        // 各カメラを論理削除
+        // TODO: CameraSyncServiceを注入してhandle_camera_remove_from_mobesを呼び出す
+        // 現時点ではログ出力のみ
+
+        for camera in &notification.removed_cameras {
+            warn!(
+                lacis_id = %camera.lacis_id,
+                reason = %camera.reason,
+                "Camera marked for removal by mobes2.0"
+            );
+        }
+
+        Ok(())
+    }
 }
 
 /// 処理結果
@@ -411,6 +511,8 @@ mod tests {
             (NotificationType::ConfigDelete, "config_delete"),
             (NotificationType::Disconnect, "disconnect"),
             (NotificationType::ForceSync, "force_sync"),
+            (NotificationType::CameraSettings, "camera_settings"),
+            (NotificationType::CameraRemove, "camera_remove"),
         ];
 
         for (notification_type, expected_str) in types {

@@ -26,6 +26,7 @@ pub mod aranea_register;
 pub mod bq_sync_service;
 pub mod camera_registry;
 pub mod camera_brand;
+pub mod camera_sync;
 pub mod summary_service;
 pub mod paraclate_client;
 pub mod config_store;

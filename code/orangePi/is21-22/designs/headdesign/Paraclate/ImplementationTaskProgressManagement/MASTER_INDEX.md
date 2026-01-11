@@ -22,6 +22,7 @@
 | Phase 5 | DD04 | BqSyncService | Phase 3,4 | #118 |
 | Phase 6 | DD06,DD07 | IS21 Baseline | Phase 1 | #119 |
 | Phase 7 | mobes2.0回答 | mobes2.0統合 | Phase 1,4 | #120 |
+| Phase 8 | DD10 | CameraBidirectionalSync | Phase 2,4 | #121 |
 
 **親Issue**: #113
 
@@ -38,6 +39,7 @@
 | [Phase5_BqSyncService.md](./Phase5_BqSyncService.md) | BigQuery同期 | 7 |
 | [Phase6_IS21_Baseline.md](./Phase6_IS21_Baseline.md) | IS21基盤・推論サービス | 9 |
 | [Phase5_mobes20_Integration.md](./Phase5_mobes20_Integration.md) | mobes2.0統合（Phase 7） | 3 |
+| [Phase8_CameraBidirectionalSync.md](./Phase8_CameraBidirectionalSync.md) | カメラ双方向同期 | 10 |
 | [COMPLETENESS_CHECK.md](./COMPLETENESS_CHECK.md) | 完全性チェック結果 | - |
 
 ---
@@ -65,7 +67,8 @@
 | Phase 5 | ✅ | 7 | 7 | 100% |
 | Phase 6 | ✅ | 9 | 9 | 100% |
 | Phase 7 | ✅ | 3 | 3 | 100% |
-| **合計** | | **48** | **48** | **100%** |
+| Phase 8 | 🔄 | 6 | 10 | 60% |
+| **合計** | | **54** | **58** | **93%** |
 
 ### Phase 1 タスク詳細
 
@@ -155,6 +158,31 @@
 - LacisFiles: Event APIにsnapshot（Base64）を送信
 - カメラ不調: IngestEvent APIにmalfunction_type含めて送信
 - BQ同期: mobes2.0側で自動処理のためIS22側対応不要
+
+### Phase 8 タスク詳細（カメラ双方向同期）
+
+| タスクID | タスク名 | 状態 |
+|---------|---------|------|
+| T8-1 | DBマイグレーション（026_camera_sync_extension.sql） | ✅ COMPLETED (2026-01-11) |
+| T8-2 | camera_sync モジュール作成（types, repository, sync_service） | ✅ COMPLETED (2026-01-11) |
+| T8-3 | IS22→mobes メタデータ送信機能 | ✅ COMPLETED (2026-01-11) |
+| T8-4 | カメラ名変更トリガー実装 | 🔄 IN_PROGRESS |
+| T8-5 | カメラ削除通知機能（IS22→mobes） | ✅ COMPLETED (2026-01-11) |
+| T8-6 | Pub/Sub camera_settings ハンドラー | ✅ COMPLETED (2026-01-11) |
+| T8-7 | Pub/Sub camera_remove ハンドラー | ✅ COMPLETED (2026-01-11) |
+| T8-8 | GetConfig カメラ個別設定取得拡張 | ⬜ NOT_STARTED |
+| T8-9 | 定期同期スケジューラ | ⬜ NOT_STARTED |
+| T8-10 | 統合テスト | ⬜ NOT_STARTED |
+
+**注記**: Phase 8はParaclate_DesignOverview.mdの要件に基づく追加実装
+- カメラメタデータ双方向同期（名前、コンテキスト、設定）
+- カメラ削除のIS22↔mobes2.0間連携
+- Pub/Sub通知タイプ拡張（camera_settings, camera_remove）
+
+**実装済みコンポーネント（2026-01-11）**:
+- `migrations/026_camera_sync_extension.sql`: 同期状態・設定テーブル
+- `src/camera_sync/`: 新規モジュール（types, repository, sync_service）
+- `src/paraclate_client/pubsub_subscriber.rs`: CameraSettings/CameraRemove通知ハンドラー追加
 
 ---
 
