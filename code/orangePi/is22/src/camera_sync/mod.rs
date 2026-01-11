@@ -28,5 +28,5 @@ pub mod types;
 
 // Re-exports
 pub use repository::CameraSyncRepository;
-pub use sync_service::CameraSyncService;
+pub use sync_service::{CameraSyncService, PeriodicSyncState};
 pub use types::*;

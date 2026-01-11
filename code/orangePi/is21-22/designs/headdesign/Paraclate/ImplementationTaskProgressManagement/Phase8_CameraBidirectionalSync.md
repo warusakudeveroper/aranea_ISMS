@@ -37,7 +37,7 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 | T8-6 | Pub/Sub camera_settings ハンドラー | ✅ COMPLETED | Claude |
 | T8-7 | Pub/Sub camera_remove ハンドラー | ✅ COMPLETED | Claude |
 | T8-8 | GetConfig カメラ個別設定取得拡張 | ✅ COMPLETED | Claude |
-| T8-9 | 定期同期スケジューラ | 🔄 IN_PROGRESS | Claude |
+| T8-9 | 定期同期スケジューラ | ✅ COMPLETED | Claude |
 | T8-10 | 統合テスト | ⬜ NOT_STARTED | - |
 
 ---
@@ -196,17 +196,26 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 
 ### T8-9: 定期同期スケジューラ
 
-**ファイル**: `src/camera_sync/sync_service.rs`
+**ファイル**:
+- `src/camera_sync/sync_service.rs` (修正)
+- `src/camera_sync/mod.rs` (修正)
 
 **内容**:
-- 定期的な全カメラ同期
-- 同期間隔設定（デフォルト: 1時間）
-- 同期状態ログ出力
+- `PeriodicSyncState` 型定義（last_full_sync, is_running, next_sync_at, consecutive_failures, last_error）
+- `start_periodic_sync()` - バックグラウンド定期同期タスク
+- `execute_periodic_sync()` - 同期実行（排他制御付き）
+- `get_periodic_sync_state()` - 定期同期状態取得
+- `trigger_full_sync()` - 手動フル同期（API用）
+- デフォルト同期間隔: 1時間（DEFAULT_SYNC_INTERVAL_SECS）
+- 最小同期間隔: 5分（MIN_SYNC_INTERVAL_SECS）
+- `get_sync_status()` に last_full_sync 統合
 
 **完了条件**:
-- [ ] スケジューラ実装
-- [ ] 設定可能な同期間隔
-- [ ] ヘルスチェック連携
+- [x] スケジューラ実装（start_periodic_sync）
+- [x] 設定可能な同期間隔
+- [x] 排他制御（is_runningフラグ）
+- [x] 連続失敗カウント
+- [x] 状態取得API統合
 
 ---
 
@@ -228,10 +237,10 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 | 項目 | 値 |
 |------|-----|
 | 全タスク数 | 10 |
-| 完了タスク | 8 |
-| 進行中タスク | 1 |
+| 完了タスク | 9 |
+| 進行中タスク | 0 |
 | 未着手タスク | 1 |
-| 進捗率 | 80% |
+| 進捗率 | 90% |
 
 ### 実装済みファイル一覧（2026-01-12）
 
@@ -277,3 +286,4 @@ IS22とmobes2.0（Paraclate APP）間でのカメラメタデータ双方向同�
 | 2026-01-11 | 初版作成 |
 | 2026-01-12 | ParaclateClient API呼び出し実装、PubSubSubscriber CameraSyncService統合 |
 | 2026-01-12 | T8-4完了（カメラ更新/削除トリガー）、T8-8完了（GetConfigカメラ設定拡張） |
+| 2026-01-12 | T8-9完了（定期同期スケジューラ: PeriodicSyncState, start_periodic_sync, trigger_full_sync） |

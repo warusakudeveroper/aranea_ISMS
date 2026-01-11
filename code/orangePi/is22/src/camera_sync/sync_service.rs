@@ -1,21 +1,46 @@
 //! Camera Sync Service
 //!
 //! Phase 8: カメラ双方向同期 (Issue #121)
-//! T8-3, T8-4, T8-5: 同期サービス
+//! T8-3, T8-4, T8-5, T8-9: 同期サービス
 
-use super::repository::{CameraSyncRepository, SyncCounts};
+use super::repository::CameraSyncRepository;
 use super::types::*;
 use crate::config_store::ConfigStore;
 use crate::paraclate_client::ParaclateClient;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
+
+/// デフォルト同期間隔（秒）: 1時間
+const DEFAULT_SYNC_INTERVAL_SECS: u64 = 3600;
+
+/// 最小同期間隔（秒）: 5分
+const MIN_SYNC_INTERVAL_SECS: u64 = 300;
+
+/// 定期同期状態
+#[derive(Debug, Clone, Default)]
+pub struct PeriodicSyncState {
+    /// 最終フル同期日時
+    pub last_full_sync: Option<DateTime<Utc>>,
+    /// 同期実行中フラグ
+    pub is_running: bool,
+    /// 次回同期予定時刻
+    pub next_sync_at: Option<DateTime<Utc>>,
+    /// 連続失敗回数
+    pub consecutive_failures: u32,
+    /// 最後のエラーメッセージ
+    pub last_error: Option<String>,
+}
 
 /// Camera Sync Service
 pub struct CameraSyncService {
     repository: CameraSyncRepository,
     config_store: Arc<ConfigStore>,
     paraclate_client: Option<Arc<ParaclateClient>>,
+    /// T8-9: 定期同期状態
+    periodic_sync_state: Arc<RwLock<PeriodicSyncState>>,
 }
 
 impl CameraSyncService {
@@ -28,6 +53,7 @@ impl CameraSyncService {
             repository,
             config_store,
             paraclate_client: None,
+            periodic_sync_state: Arc::new(RwLock::new(PeriodicSyncState::default())),
         }
     }
 
@@ -35,6 +61,127 @@ impl CameraSyncService {
     pub fn with_paraclate_client(mut self, client: Arc<ParaclateClient>) -> Self {
         self.paraclate_client = Some(client);
         self
+    }
+
+    // ========================================
+    // T8-9: 定期同期スケジューラ
+    // ========================================
+
+    /// 定期同期を開始（バックグラウンドタスク）
+    ///
+    /// # Arguments
+    /// * `tid` - テナントID
+    /// * `fid` - 施設ID
+    /// * `interval_secs` - 同期間隔（秒）。Noneの場合はデフォルト1時間
+    pub async fn start_periodic_sync(
+        self: Arc<Self>,
+        tid: String,
+        fid: String,
+        interval_secs: Option<u64>,
+    ) {
+        let interval = interval_secs
+            .map(|s| s.max(MIN_SYNC_INTERVAL_SECS))
+            .unwrap_or(DEFAULT_SYNC_INTERVAL_SECS);
+
+        info!(
+            tid = %tid,
+            fid = %fid,
+            interval_secs = interval,
+            "Starting periodic camera sync scheduler"
+        );
+
+        // 初回同期までの待機時間（起動直後は少し待つ）
+        tokio::time::sleep(Duration::from_secs(30)).await;
+
+        let mut ticker = tokio::time::interval(Duration::from_secs(interval));
+        // 最初のtickはすぐに発火するのでスキップ
+        ticker.tick().await;
+
+        loop {
+            ticker.tick().await;
+
+            // 次回同期時刻を更新
+            {
+                let mut state = self.periodic_sync_state.write().await;
+                state.next_sync_at = Some(Utc::now() + chrono::Duration::seconds(interval as i64));
+            }
+
+            // 同期実行
+            self.execute_periodic_sync(&tid, &fid).await;
+        }
+    }
+
+    /// 定期同期を実行
+    async fn execute_periodic_sync(&self, tid: &str, fid: &str) {
+        // 実行中フラグを設定
+        {
+            let mut state = self.periodic_sync_state.write().await;
+            if state.is_running {
+                warn!("Periodic sync already running, skipping");
+                return;
+            }
+            state.is_running = true;
+        }
+
+        info!(tid = %tid, fid = %fid, "Executing periodic camera sync");
+
+        let result = self.push_all_cameras(tid, fid).await;
+
+        // 結果を記録
+        {
+            let mut state = self.periodic_sync_state.write().await;
+            state.is_running = false;
+
+            match result {
+                Ok(response) => {
+                    state.last_full_sync = Some(Utc::now());
+                    state.consecutive_failures = 0;
+                    state.last_error = None;
+
+                    info!(
+                        tid = %tid,
+                        fid = %fid,
+                        synced = response.synced_count,
+                        failed = response.failed_count,
+                        "Periodic camera sync completed successfully"
+                    );
+                }
+                Err(e) => {
+                    state.consecutive_failures += 1;
+                    state.last_error = Some(e.to_string());
+
+                    warn!(
+                        tid = %tid,
+                        fid = %fid,
+                        error = %e,
+                        consecutive_failures = state.consecutive_failures,
+                        "Periodic camera sync failed"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 定期同期状態を取得
+    pub async fn get_periodic_sync_state(&self) -> PeriodicSyncState {
+        self.periodic_sync_state.read().await.clone()
+    }
+
+    /// 手動でフル同期を実行（API用）
+    pub async fn trigger_full_sync(&self, tid: &str, fid: &str) -> crate::Result<SyncResponse> {
+        info!(tid = %tid, fid = %fid, "Triggering manual full camera sync");
+
+        let result = self.push_all_cameras(tid, fid).await;
+
+        // 成功した場合は状態を更新
+        if let Ok(ref response) = result {
+            if response.success {
+                let mut state = self.periodic_sync_state.write().await;
+                state.last_full_sync = Some(Utc::now());
+            }
+        }
+
+        result
     }
 
     // ========================================
@@ -363,8 +510,11 @@ impl CameraSyncService {
         // 全カメラの同期状態を取得（TODO: ページネーション）
         let cameras = self.get_all_sync_states().await?;
 
+        // 定期同期状態から最終フル同期日時を取得
+        let periodic_state = self.periodic_sync_state.read().await;
+
         Ok(SyncStatusResponse {
-            last_full_sync: None, // TODO: 最終フル同期日時を保存
+            last_full_sync: periodic_state.last_full_sync,
             pending_count: counts.pending,
             synced_count: counts.synced,
             failed_count: counts.failed,
