@@ -23,11 +23,11 @@ pub const PREFIX: &str = "3";
 /// is22 Paraclate Server プロダクトタイプ
 pub const PRODUCT_TYPE: &str = "022";
 
-/// 追い番なしのため固定
-pub const PRODUCT_CODE: &str = "0000";
+/// ProductCode (SDK準拠: 0001)
+pub const PRODUCT_CODE: &str = "0001";
 
-/// デバイスタイプ
-pub const DEVICE_TYPE: &str = "ar-is22CamServer";
+/// デバイスタイプ（aranea-sdk CLIバリデーション準拠: aranea_プレフィックス必須）
+pub const DEVICE_TYPE: &str = "aranea_ar-is22";
 
 /// タイプドメイン
 pub const TYPE_DOMAIN: &str = "araneaDevice";
@@ -46,6 +46,7 @@ pub const MAC_LENGTH: usize = 12;
 pub mod config_keys {
     pub const LACIS_ID: &str = "aranea.lacis_id";
     pub const TID: &str = "aranea.tid";
+    pub const FID: &str = "aranea.fid";
     pub const CIC: &str = "aranea.cic";
     pub const REGISTERED: &str = "aranea.registered";
     pub const STATE_ENDPOINT: &str = "aranea.state_endpoint";
@@ -73,6 +74,8 @@ pub struct TenantPrimaryAuth {
 pub struct RegisterRequest {
     pub tenant_primary_auth: TenantPrimaryAuth,
     pub tid: String,
+    #[serde(default)]
+    pub fid: Option<String>,
 }
 
 /// araneaDeviceGateへ送信するペイロード
@@ -165,6 +168,8 @@ pub struct RegistrationStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub fid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cic: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registered_at: Option<DateTime<Utc>>,
@@ -178,6 +183,7 @@ impl Default for RegistrationStatus {
             registered: false,
             lacis_id: None,
             tid: None,
+            fid: None,
             cic: None,
             registered_at: None,
             last_sync_at: None,
@@ -191,6 +197,7 @@ pub struct AraneaRegistration {
     pub id: Option<u32>,
     pub lacis_id: String,
     pub tid: String,
+    pub fid: Option<String>,
     pub cic: String,
     pub device_type: String,
     pub state_endpoint: Option<String>,
@@ -267,7 +274,7 @@ mod tests {
         assert_eq!(PREFIX, "3");
         assert_eq!(PRODUCT_TYPE, "022");
         assert_eq!(PRODUCT_CODE, "0000");
-        assert_eq!(DEVICE_TYPE, "ar-is22CamServer");
+        assert_eq!(DEVICE_TYPE, "aranea_ar-is22");
         assert_eq!(TYPE_DOMAIN, "araneaDevice");
     }
 }

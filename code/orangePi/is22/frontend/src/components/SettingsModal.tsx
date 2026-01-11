@@ -60,6 +60,9 @@ import {
   Link2Off,
   FileText,
   Sliders,
+  Shield,
+  Loader2,
+  Building2,
 } from "lucide-react"
 import { API_BASE_URL } from "@/lib/config"
 import { PerformanceDashboard } from "@/components/PerformanceDashboard"
@@ -67,7 +70,8 @@ import { CameraBrandsSettings } from "@/components/CameraBrandsSettings"
 import { SdmSettingsTab } from "@/components/SdmSettingsTab"
 import { InferenceStatsTab } from "@/components/InferenceStatsTab"
 import { PresetSelector } from "@/components/PresetSelector"
-import type { Camera as CameraType } from "@/types/api"
+import type { Camera as CameraType, AraneaRegistrationStatus, AraneaRegisterRequest, AraneaRegisterResult } from "@/types/api"
+import { useParaclateStatus } from "@/hooks/useParaclateStatus"
 
 interface SettingsModalProps {
   open: boolean
@@ -156,7 +160,7 @@ interface StorageSettings {
   }
 }
 
-// AI Assistant settings (Paraclate module placeholder)
+// Paraclate settings (mobes AI control Tower)
 interface AIAssistantSettings {
   suggestionFrequency: number  // 0=OFF, 1=低, 2=中, 3=高
   paraclate: {
@@ -172,6 +176,43 @@ interface AIAssistantSettings {
 }
 
 const AI_ASSISTANT_SETTINGS_KEY = "ai_assistant_settings"
+
+// Aranea tenant settings (for device registration)
+interface AraneaTenantSettings {
+  tid: string
+  tenantPrimaryLacisId: string
+  tenantPrimaryUserId: string
+  tenantPrimaryCic: string
+}
+
+const ARANEA_TENANT_SETTINGS_KEY = "aranea_tenant_settings"
+
+const defaultAraneaTenantSettings: AraneaTenantSettings = {
+  tid: "",
+  tenantPrimaryLacisId: "",
+  tenantPrimaryUserId: "",
+  tenantPrimaryCic: "",
+}
+
+export function loadAraneaTenantSettings(): AraneaTenantSettings {
+  try {
+    const stored = localStorage.getItem(ARANEA_TENANT_SETTINGS_KEY)
+    if (stored) {
+      return { ...defaultAraneaTenantSettings, ...JSON.parse(stored) }
+    }
+  } catch (e) {
+    console.error("Failed to load aranea tenant settings:", e)
+  }
+  return defaultAraneaTenantSettings
+}
+
+function saveAraneaTenantSettings(settings: AraneaTenantSettings): void {
+  try {
+    localStorage.setItem(ARANEA_TENANT_SETTINGS_KEY, JSON.stringify(settings))
+  } catch (e) {
+    console.error("Failed to save aranea tenant settings:", e)
+  }
+}
 
 const defaultAIAssistantSettings: AIAssistantSettings = {
   suggestionFrequency: 2,  // 中
@@ -239,8 +280,30 @@ export function SettingsModal({
   // Camera list for diagnostics (T3-3)
   const [cameras, setCameras] = useState<CameraType[]>([])
 
-  // AI Assistant settings (Paraclate placeholder)
+  // Paraclate settings (mobes AI control Tower)
   const [aiSettings, setAiSettings] = useState<AIAssistantSettings>(() => loadAIAssistantSettings())
+
+  // Aranea tenant settings (for device registration)
+  const [araneaTenantSettings, setAraneaTenantSettings] = useState<AraneaTenantSettings>(() => loadAraneaTenantSettings())
+  const [araneaRegistrationStatus, setAraneaRegistrationStatus] = useState<AraneaRegistrationStatus | null>(null)
+  const [araneaRegistering, setAraneaRegistering] = useState(false)
+  const [araneaError, setAraneaError] = useState<string | null>(null)
+  const [editingFid, setEditingFid] = useState<string>("")
+  const [savingFid, setSavingFid] = useState(false)
+
+  // Paraclate connection status (DD09_IS22_WebUI準拠)
+  const paraclate = useParaclateStatus(
+    araneaRegistrationStatus?.tid || '',
+    araneaRegistrationStatus?.fid || '0000'
+  )
+
+  // Paraclate設定UI有効化条件
+  // 登録済み + FID設定済み + API接続済み の場合のみ有効
+  const isParaclateEnabled = Boolean(
+    araneaRegistrationStatus?.registered &&
+    araneaRegistrationStatus?.fid &&
+    paraclate.status?.connected
+  )
 
   // Fetch cameras list for diagnostics
   const fetchCameras = useCallback(async () => {
@@ -349,6 +412,123 @@ export function SettingsModal({
       console.error("Failed to fetch storage settings:", error)
     }
   }, [])
+
+  // Fetch Aranea registration status
+  const fetchAraneaRegistrationStatus = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/register/status`)
+      if (resp.ok) {
+        const json = await resp.json()
+        setAraneaRegistrationStatus(json)
+        setAraneaError(null)
+      }
+    } catch (error) {
+      console.error("Failed to fetch Aranea registration status:", error)
+      setAraneaError("登録状態の取得に失敗しました")
+    }
+  }, [])
+
+  // Initialize editingFid when registration status is fetched
+  useEffect(() => {
+    if (araneaRegistrationStatus?.fid) {
+      setEditingFid(araneaRegistrationStatus.fid)
+    }
+  }, [araneaRegistrationStatus?.fid])
+
+  // Register device to araneaDeviceGate
+  const handleAraneaRegister = async () => {
+    // Validate inputs
+    if (!araneaTenantSettings.tid || !araneaTenantSettings.tenantPrimaryLacisId ||
+        !araneaTenantSettings.tenantPrimaryUserId || !araneaTenantSettings.tenantPrimaryCic) {
+      setAraneaError("すべてのテナント情報を入力してください")
+      return
+    }
+
+    setAraneaRegistering(true)
+    setAraneaError(null)
+    try {
+      const req: AraneaRegisterRequest = {
+        tenantPrimaryAuth: {
+          lacisId: araneaTenantSettings.tenantPrimaryLacisId,
+          userId: araneaTenantSettings.tenantPrimaryUserId,
+          cic: araneaTenantSettings.tenantPrimaryCic,
+        },
+        tid: araneaTenantSettings.tid,
+      }
+      const resp = await fetch(`${API_BASE_URL}/api/register/device`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      })
+      const json: AraneaRegisterResult = await resp.json()
+      if (json.ok) {
+        await fetchAraneaRegistrationStatus()
+        setAraneaError(null)
+      } else {
+        setAraneaError(json.error || "登録に失敗しました")
+      }
+    } catch (error) {
+      console.error("Failed to register device:", error)
+      setAraneaError("ネットワークエラー: 登録に失敗しました")
+    } finally {
+      setAraneaRegistering(false)
+    }
+  }
+
+  // Clear Aranea registration
+  const handleAraneaClearRegistration = async () => {
+    if (!confirm("デバイス登録情報をクリアしますか？再登録が必要になります。")) {
+      return
+    }
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/register`, {
+        method: "DELETE",
+      })
+      if (resp.ok) {
+        await fetchAraneaRegistrationStatus()
+        setAraneaError(null)
+      }
+    } catch (error) {
+      console.error("Failed to clear registration:", error)
+      setAraneaError("登録クリアに失敗しました")
+    }
+  }
+
+  // Save FID to backend
+  const handleSaveFid = async () => {
+    if (!editingFid.trim()) {
+      setAraneaError("FIDを入力してください")
+      return
+    }
+    setSavingFid(true)
+    setAraneaError(null)
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/register/fid`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fid: editingFid.trim() }),
+      })
+      const json = await resp.json()
+      if (resp.ok && json.ok) {
+        await fetchAraneaRegistrationStatus()
+        setAraneaError(null)
+      } else {
+        setAraneaError(json.error || "FID設定に失敗しました")
+      }
+    } catch (error) {
+      console.error("Failed to save FID:", error)
+      setAraneaError("FID保存に失敗しました")
+    } finally {
+      setSavingFid(false)
+    }
+  }
+
+  // Update tenant settings
+  const updateAraneaTenantSettings = (key: keyof AraneaTenantSettings, value: string) => {
+    const newSettings = { ...araneaTenantSettings, [key]: value }
+    setAraneaTenantSettings(newSettings)
+    saveAraneaTenantSettings(newSettings)
+  }
 
   // Save storage settings
   const handleSaveStorage = async () => {
@@ -594,6 +774,9 @@ export function SettingsModal({
           case "polling":
             await fetchPollingLogs()
             break
+          case "aranea":
+            await fetchAraneaRegistrationStatus()
+            break
         }
       } finally {
         setLoading(false)
@@ -601,7 +784,7 @@ export function SettingsModal({
     }
 
     fetchData()
-  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings, fetchCameras])
+  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings, fetchCameras, fetchAraneaRegistrationStatus])
 
   // Auto-refresh for active tabs
   useEffect(() => {
@@ -627,11 +810,14 @@ export function SettingsModal({
         case "polling":
           fetchPollingLogs()
           break
+        case "aranea":
+          fetchAraneaRegistrationStatus()
+          break
       }
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings])
+  }, [open, activeTab, fetchIS21Status, fetchSystemInfo, fetchPerformanceLogs, fetchPollingLogs, fetchTimeoutSettings, fetchStorageSettings, fetchAraneaRegistrationStatus])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -644,7 +830,7 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-11">
+          <TabsList className="grid w-full grid-cols-12">
             <TabsTrigger value="display" className="flex items-center gap-1 text-xs">
               <Video className="h-4 w-4" />
               表示
@@ -683,7 +869,11 @@ export function SettingsModal({
             </TabsTrigger>
             <TabsTrigger value="ai" className="flex items-center gap-1 text-xs">
               <Bot className="h-4 w-4" />
-              AI
+              Paraclate
+            </TabsTrigger>
+            <TabsTrigger value="aranea" className="flex items-center gap-1 text-xs">
+              <Shield className="h-4 w-4" />
+              登録
             </TabsTrigger>
             <TabsTrigger value="brands" className="flex items-center gap-1 text-xs">
               <Tags className="h-4 w-4" />
@@ -1597,9 +1787,15 @@ export function SettingsModal({
             </div>
           </TabsContent>
 
-          {/* AI Assistant Settings Tab (Paraclate placeholder) */}
+          {/* Paraclate Tab (mobes AI control Tower) */}
           <TabsContent value="ai" className="flex-1 overflow-auto mt-4">
             <div className="space-y-4">
+              {/* Page Header */}
+              <div className="pb-2">
+                <h2 className="text-lg font-semibold">Paraclate</h2>
+                <p className="text-sm text-muted-foreground">mobes AI control Tower</p>
+              </div>
+
               {/* Suggestion Frequency Settings */}
               <Card>
                 <CardHeader className="pb-3">
@@ -1687,23 +1883,30 @@ export function SettingsModal({
                               saveAIAssistantSettings(newSettings)
                             }
                           }}
-                          disabled
-                          className="opacity-60"
+                          disabled={!isParaclateEnabled}
+                          className={!isParaclateEnabled ? "opacity-60" : ""}
                         />
                       </div>
                       <div className="space-y-2">
                         <Label>GrandSummary時刻</Label>
                         <div className="flex flex-wrap gap-1">
                           {aiSettings.paraclate.grandSummaryTimes.map((time, i) => (
-                            <Badge key={i} variant="outline" className="opacity-60">{time}</Badge>
+                            <Badge key={i} variant="outline" className={!isParaclateEnabled ? "opacity-60" : ""}>{time}</Badge>
                           ))}
                         </div>
                       </div>
                     </div>
-                    <p className="text-xs text-amber-600 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />
-                      mobes2.0への接続設定後に有効化されます
-                    </p>
+                    {!isParaclateEnabled && (
+                      <p className="text-xs text-amber-600 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        {!araneaRegistrationStatus?.registered
+                          ? "デバイス登録後に有効化されます"
+                          : !araneaRegistrationStatus?.fid
+                          ? "施設ID (FID) 設定後に有効化されます"
+                          : "Paraclate API接続後に有効化されます"
+                        }
+                      </p>
+                    )}
                   </div>
 
                   {/* Report Context Settings */}
@@ -1716,7 +1919,7 @@ export function SettingsModal({
                       <Label htmlFor="context-note">重視するポイント</Label>
                       <textarea
                         id="context-note"
-                        className="w-full min-h-[80px] p-2 border rounded-md text-sm resize-none opacity-60"
+                        className={`w-full min-h-[80px] p-2 border rounded-md text-sm resize-none ${!isParaclateEnabled ? "opacity-60" : ""}`}
                         placeholder="例: 不審者の検出を重視。深夜帯の動体検知は特に注意して報告してください。"
                         value={aiSettings.paraclate.contextNote}
                         onChange={(e) => {
@@ -1727,7 +1930,7 @@ export function SettingsModal({
                           setAiSettings(newSettings)
                           saveAIAssistantSettings(newSettings)
                         }}
-                        disabled
+                        disabled={!isParaclateEnabled}
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -1743,9 +1946,9 @@ export function SettingsModal({
                             setAiSettings(newSettings)
                             saveAIAssistantSettings(newSettings)
                           }}
-                          disabled
+                          disabled={!isParaclateEnabled}
                         >
-                          <SelectTrigger className="opacity-60">
+                          <SelectTrigger className={!isParaclateEnabled ? "opacity-60" : ""}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1768,10 +1971,10 @@ export function SettingsModal({
                             setAiSettings(newSettings)
                             saveAIAssistantSettings(newSettings)
                           }}
-                          disabled
-                          className="opacity-60"
+                          disabled={!isParaclateEnabled}
+                          className={!isParaclateEnabled ? "opacity-60" : ""}
                         />
-                        <Label htmlFor="instant-alert" className="text-sm opacity-60">異常検出時の即時通知</Label>
+                        <Label htmlFor="instant-alert" className={`text-sm ${!isParaclateEnabled ? "opacity-60" : ""}`}>異常検出時の即時通知</Label>
                       </div>
                     </div>
                   </div>
@@ -1796,10 +1999,10 @@ export function SettingsModal({
                             setAiSettings(newSettings)
                             saveAIAssistantSettings(newSettings)
                           }}
-                          disabled
-                          className="opacity-60"
+                          disabled={!isParaclateEnabled}
+                          className={!isParaclateEnabled ? "opacity-60" : ""}
                         />
-                        <Label htmlFor="auto-tuning" className="text-sm opacity-60">自動チューニング提案を有効化</Label>
+                        <Label htmlFor="auto-tuning" className={`text-sm ${!isParaclateEnabled ? "opacity-60" : ""}`}>自動チューニング提案を有効化</Label>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
@@ -1814,9 +2017,9 @@ export function SettingsModal({
                               setAiSettings(newSettings)
                               saveAIAssistantSettings(newSettings)
                             }}
-                            disabled
+                            disabled={!isParaclateEnabled}
                           >
-                            <SelectTrigger className="opacity-60">
+                            <SelectTrigger className={!isParaclateEnabled ? "opacity-60" : ""}>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -1828,7 +2031,7 @@ export function SettingsModal({
                         </div>
                         <div className="space-y-2">
                           <Label>チューニング積極性</Label>
-                          <div className="pt-2 opacity-60">
+                          <div className={`pt-2 ${!isParaclateEnabled ? "opacity-60" : ""}`}>
                             <Slider
                               value={[aiSettings.paraclate.tuningAggressiveness]}
                               onValueChange={(value) => {
@@ -1842,7 +2045,7 @@ export function SettingsModal({
                               min={0}
                               max={100}
                               step={10}
-                              disabled
+                              disabled={!isParaclateEnabled}
                             />
                             <div className="flex justify-between text-xs text-muted-foreground mt-1">
                               <span>保守的</span>
@@ -1854,15 +2057,333 @@ export function SettingsModal({
                     </div>
                   </div>
 
-                  {/* Connection Status (Placeholder) */}
+                  {/* Connection Status - DD09_IS22_WebUI準拠 */}
                   <div className="pt-3 border-t">
-                    <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
-                      <Link2Off className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm font-medium text-muted-foreground">Paraclate API: 未接続</p>
-                        <p className="text-xs text-muted-foreground">最終同期: --</p>
+                    <div className={`p-3 rounded-lg flex items-center justify-between ${
+                      paraclate.status?.connected
+                        ? 'bg-green-500/10'
+                        : paraclate.status?.lastError
+                          ? 'bg-red-500/10'
+                          : 'bg-muted/50'
+                    }`}>
+                      <div className="flex items-center gap-3">
+                        {paraclate.status?.connected ? (
+                          <CheckCircle2 className="h-5 w-5 text-green-500" />
+                        ) : paraclate.status?.lastError ? (
+                          <XCircle className="h-5 w-5 text-red-500" />
+                        ) : (
+                          <Link2Off className="h-5 w-5 text-muted-foreground" />
+                        )}
+                        <div>
+                          <p className={`text-sm font-medium ${
+                            paraclate.status?.connected
+                              ? 'text-green-600'
+                              : paraclate.status?.lastError
+                                ? 'text-red-600'
+                                : 'text-muted-foreground'
+                          }`}>
+                            Paraclate API: {
+                              paraclate.status?.connected
+                                ? '接続中'
+                                : paraclate.status?.lastError
+                                  ? 'エラー'
+                                  : '未接続'
+                            }
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {paraclate.status?.connected && paraclate.status?.endpoint && (
+                              <span className="block truncate max-w-[250px]">{paraclate.status.endpoint}</span>
+                            )}
+                            {paraclate.status?.lastError && (
+                              <span className="text-red-500">{paraclate.status.lastError}</span>
+                            )}
+                            {paraclate.status?.lastSuccessAt ? (
+                              <span>最終同期: {new Date(paraclate.status.lastSuccessAt).toLocaleString()}</span>
+                            ) : (
+                              <span>最終同期: --</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      {/* 接続テストボタン */}
+                      {araneaRegistrationStatus?.registered && (
+                        <Button
+                          size="sm"
+                          variant={paraclate.status?.connected ? "outline" : "default"}
+                          onClick={() => {
+                            if (paraclate.status?.connected) {
+                              paraclate.disconnect()
+                            } else {
+                              // TODO: エンドポイント入力ダイアログを表示
+                              const endpoint = prompt('Paraclate APIエンドポイントを入力:', 'https://api.paraclate.com/v1')
+                              if (endpoint) {
+                                paraclate.connect(endpoint, araneaRegistrationStatus.fid || '0000')
+                              }
+                            }
+                          }}
+                          disabled={paraclate.isLoading}
+                        >
+                          {paraclate.isLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : paraclate.status?.connected ? (
+                            '切断'
+                          ) : (
+                            '接続テスト'
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    {!araneaRegistrationStatus?.registered && (
+                      <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        Paraclate連携にはis22のデバイス登録が必要です
+                      </p>
+                    )}
+                    {araneaRegistrationStatus?.registered && !araneaRegistrationStatus?.fid && (
+                      <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        Paraclate連携には施設ID (FID) の設定が必要です。登録タブで設定してください。
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* Aranea Registration Tab - Device Registration & Tenant Settings */}
+          <TabsContent value="aranea" className="flex-1 overflow-auto mt-4">
+            <div className="space-y-4">
+              {/* Registration Status */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Shield className="h-4 w-4" />
+                    デバイス登録状態
+                    {araneaRegistrationStatus?.registered ? (
+                      <Badge variant="default" className="ml-2 bg-green-500">登録済み</Badge>
+                    ) : (
+                      <Badge variant="secondary" className="ml-2">未登録</Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {araneaRegistrationStatus?.registered ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">LacisID</Label>
+                          <p className="font-mono text-sm">{araneaRegistrationStatus.lacisId}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">CIC</Label>
+                          <p className="font-mono text-sm">{araneaRegistrationStatus.cic}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">テナントID</Label>
+                          <p className="font-mono text-sm">{araneaRegistrationStatus.tid}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">FID (施設ID)</Label>
+                          <p className="font-mono text-sm">{araneaRegistrationStatus.fid || "(未設定)"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">登録日時</Label>
+                          <p className="text-sm">
+                            {araneaRegistrationStatus.registeredAt
+                              ? new Date(araneaRegistrationStatus.registeredAt).toLocaleString()
+                              : "-"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={handleAraneaClearRegistration}
+                        >
+                          登録をクリア
+                        </Button>
                       </div>
                     </div>
+                  ) : (
+                    <div className="p-4 rounded-lg bg-muted/50 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        このサーバーはまだaraneaDeviceGateに登録されていません。
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        下のフォームでテナント情報を設定し、「登録」ボタンをクリックしてください。
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* FID Configuration (only when registered) */}
+              {araneaRegistrationStatus?.registered && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      施設ID (FID) 設定
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="fid">施設ID (FID)</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="fid"
+                          placeholder="例: 0150"
+                          value={editingFid}
+                          onChange={(e) => setEditingFid(e.target.value)}
+                          className="font-mono max-w-[200px]"
+                        />
+                        <Button
+                          onClick={handleSaveFid}
+                          disabled={savingFid || editingFid === araneaRegistrationStatus.fid}
+                          size="sm"
+                        >
+                          {savingFid ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "保存"
+                          )}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Paraclate連携に必要な施設IDを設定してください。
+                        mobes2.0管理画面で確認できます。
+                      </p>
+                    </div>
+
+                    {araneaError && (
+                      <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" />
+                        {araneaError}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Tenant Configuration */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Settings2 className="h-4 w-4" />
+                    テナント設定
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="tid">テナントID (tid)</Label>
+                      <Input
+                        id="tid"
+                        placeholder="T2025..."
+                        value={araneaTenantSettings.tid}
+                        onChange={(e) => updateAraneaTenantSettings("tid", e.target.value)}
+                        disabled={araneaRegistrationStatus?.registered}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        登録先のテナントID
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tenantPrimaryUserId">テナントプライマリ ユーザーID</Label>
+                      <Input
+                        id="tenantPrimaryUserId"
+                        type="email"
+                        placeholder="user@example.com"
+                        value={araneaTenantSettings.tenantPrimaryUserId}
+                        onChange={(e) => updateAraneaTenantSettings("tenantPrimaryUserId", e.target.value)}
+                        disabled={araneaRegistrationStatus?.registered}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        テナントプライマリのメールアドレス
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="tenantPrimaryLacisId">テナントプライマリ LacisID</Label>
+                      <Input
+                        id="tenantPrimaryLacisId"
+                        placeholder="18217487937895888001"
+                        value={araneaTenantSettings.tenantPrimaryLacisId}
+                        onChange={(e) => updateAraneaTenantSettings("tenantPrimaryLacisId", e.target.value)}
+                        disabled={araneaRegistrationStatus?.registered}
+                        className="font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        テナントプライマリの20桁LacisID
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tenantPrimaryCic">テナントプライマリ CIC</Label>
+                      <Input
+                        id="tenantPrimaryCic"
+                        placeholder="204965"
+                        value={araneaTenantSettings.tenantPrimaryCic}
+                        onChange={(e) => updateAraneaTenantSettings("tenantPrimaryCic", e.target.value)}
+                        disabled={araneaRegistrationStatus?.registered}
+                        className="font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        テナントプライマリの6桁CIC
+                      </p>
+                    </div>
+                  </div>
+
+                  {araneaError && (
+                    <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      {araneaError}
+                    </div>
+                  )}
+
+                  {!araneaRegistrationStatus?.registered && (
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={handleAraneaRegister}
+                        disabled={araneaRegistering}
+                      >
+                        {araneaRegistering ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            登録中...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="h-4 w-4 mr-2" />
+                            デバイスを登録
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Info Card */}
+              <Card className="border-dashed">
+                <CardContent className="pt-4">
+                  <div className="text-sm text-muted-foreground space-y-2">
+                    <p className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-500 flex-shrink-0" />
+                      <span>
+                        デバイス登録はmobes2.0システムとの連携に必要です。
+                        登録するとこのサーバーに一意のLacisIDとCICが割り当てられます。
+                      </span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 mt-0.5 text-green-500 flex-shrink-0" />
+                      <span>
+                        テナント情報はmobes2.0管理画面から取得できます。
+                        テナントプライマリの認証情報が必要です。
+                      </span>
+                    </p>
                   </div>
                 </CardContent>
               </Card>

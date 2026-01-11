@@ -122,10 +122,11 @@ impl AraneaRegisterService {
 
         // 5. 成功時: 永続化
         if result.ok {
-            self.save_registration(&result, &request.tid).await?;
+            self.save_registration(&result, &request.tid, request.fid.as_deref()).await?;
             tracing::info!(
                 lacis_id = %lacis_id,
                 cic = ?result.cic,
+                fid = ?request.fid,
                 "AraneaRegister: Registration successful"
             );
         } else {
@@ -146,7 +147,11 @@ impl AraneaRegisterService {
         lacis_id: &str,
         mac: &str,
     ) -> crate::Result<RegisterResult> {
-        let url = format!("{}/register", self.gate_url);
+        // ESP32準拠: gateUrlにそのままPOST（/registerは付けない）
+        let url = self.gate_url.clone();
+
+        // MACアドレスからコロンを除去（API要求: 12桁hex）
+        let mac_hex = mac.replace(":", "");
 
         let payload = json!({
             "lacisOath": {
@@ -162,7 +167,7 @@ impl AraneaRegisterService {
                 "type": DEVICE_TYPE
             },
             "deviceMeta": {
-                "macAddress": mac,
+                "macAddress": mac_hex,
                 "productType": PRODUCT_TYPE,
                 "productCode": PRODUCT_CODE
             }
@@ -278,6 +283,7 @@ impl AraneaRegisterService {
         &self,
         result: &RegisterResult,
         tid: &str,
+        fid: Option<&str>,
     ) -> crate::Result<()> {
         // config_storeに保存 (即時参照用)
         if let Some(ref lacis_id) = result.lacis_id {
@@ -296,6 +302,9 @@ impl AraneaRegisterService {
                 .await?;
         }
         self.set_config_value(config_keys::TID, tid).await?;
+        if let Some(fid_value) = fid {
+            self.set_config_value(config_keys::FID, fid_value).await?;
+        }
         self.set_config_value(config_keys::REGISTERED, "true")
             .await?;
 
@@ -304,6 +313,7 @@ impl AraneaRegisterService {
             id: None,
             lacis_id: result.lacis_id.clone().unwrap_or_default(),
             tid: tid.to_string(),
+            fid: fid.map(String::from),
             cic: result.cic.clone().unwrap_or_default(),
             device_type: DEVICE_TYPE.to_string(),
             state_endpoint: result.state_endpoint.clone(),
@@ -316,6 +326,7 @@ impl AraneaRegisterService {
 
         tracing::info!(
             lacis_id = %registration.lacis_id,
+            fid = ?fid,
             "AraneaRegister: Registration saved to config_store and DB"
         );
 
@@ -336,6 +347,7 @@ impl AraneaRegisterService {
 
         let lacis_id = self.get_config_value(config_keys::LACIS_ID).await;
         let tid = self.get_config_value(config_keys::TID).await;
+        let fid = self.get_config_value(config_keys::FID).await;
         let cic = self.get_config_value(config_keys::CIC).await;
 
         // DB から timestamp取得
@@ -346,6 +358,7 @@ impl AraneaRegisterService {
             registered: true,
             lacis_id,
             tid,
+            fid,
             cic,
             registered_at,
             last_sync_at,
@@ -357,6 +370,7 @@ impl AraneaRegisterService {
         // config_storeからクリア
         self.remove_config_value(config_keys::LACIS_ID).await?;
         self.remove_config_value(config_keys::TID).await?;
+        self.remove_config_value(config_keys::FID).await?;
         self.remove_config_value(config_keys::CIC).await?;
         self.remove_config_value(config_keys::STATE_ENDPOINT).await?;
         self.remove_config_value(config_keys::MQTT_ENDPOINT).await?;
@@ -399,6 +413,16 @@ impl AraneaRegisterService {
     /// Get TID (if registered)
     pub async fn get_tid(&self) -> Option<String> {
         self.get_config_value(config_keys::TID).await
+    }
+
+    /// Get FID (if set)
+    pub async fn get_fid(&self) -> Option<String> {
+        self.get_config_value(config_keys::FID).await
+    }
+
+    /// Set FID
+    pub async fn set_fid(&self, fid: &str) -> crate::Result<()> {
+        self.set_config_value(config_keys::FID, fid).await
     }
 
     /// Check if registered

@@ -6,25 +6,44 @@
 //! ## エンドポイント
 //! - POST /api/register/device - デバイス登録実行
 //! - GET /api/register/status - 登録状態取得
+//! - PUT /api/register/fid - FID設定
 //! - DELETE /api/register - 登録情報クリア
 
 use axum::{
     extract::State,
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::aranea_register::{ClearResult, RegisterRequest, RegisterResult, RegistrationStatus};
 use crate::state::AppState;
+
+/// FID設定リクエスト
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetFidRequest {
+    pub fid: String,
+}
+
+/// FID設定レスポンス
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetFidResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
 
 /// Create register routes
 pub fn register_routes() -> Router<AppState> {
     Router::new()
         .route("/device", post(register_device))
         .route("/status", get(get_registration_status))
+        .route("/fid", put(set_fid))
         .route("/", delete(clear_registration))
 }
 
@@ -189,6 +208,83 @@ async fn clear_registration(State(state): State<AppState>) -> impl IntoResponse 
                 Json(ClearResult {
                     ok: false,
                     message: e.to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// PUT /api/register/fid
+///
+/// FIDを設定（登録済みデバイスのFID更新）
+///
+/// ## Request Body
+/// ```json
+/// {
+///   "fid": "0150"
+/// }
+/// ```
+///
+/// ## Response (200 OK)
+/// ```json
+/// {
+///   "ok": true,
+///   "fid": "0150"
+/// }
+/// ```
+async fn set_fid(
+    State(state): State<AppState>,
+    Json(req): Json<SetFidRequest>,
+) -> impl IntoResponse {
+    tracing::info!(fid = %req.fid, "AraneaRegister API: Set FID requested");
+
+    let service = match &state.aranea_register {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(SetFidResponse {
+                    ok: false,
+                    fid: None,
+                    error: Some("AraneaRegister service not initialized".to_string()),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 登録済みか確認
+    if !service.is_registered().await {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(SetFidResponse {
+                ok: false,
+                fid: None,
+                error: Some("Device not registered. Register first.".to_string()),
+            }),
+        )
+            .into_response();
+    }
+
+    match service.set_fid(&req.fid).await {
+        Ok(()) => {
+            tracing::info!(fid = %req.fid, "AraneaRegister API: FID set successfully");
+            Json(SetFidResponse {
+                ok: true,
+                fid: Some(req.fid),
+                error: None,
+            })
+            .into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "AraneaRegister API: Failed to set FID");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(SetFidResponse {
+                    ok: false,
+                    fid: None,
+                    error: Some(e.to_string()),
                 }),
             )
                 .into_response()

@@ -17,6 +17,7 @@ struct AraneaRegistrationRow {
     id: u32,
     lacis_id: String,
     tid: String,
+    fid: Option<String>,
     cic: String,
     device_type: String,
     state_endpoint: Option<String>,
@@ -31,6 +32,7 @@ impl From<AraneaRegistrationRow> for AraneaRegistration {
             id: Some(row.id),
             lacis_id: row.lacis_id,
             tid: row.tid,
+            fid: row.fid,
             cic: row.cic,
             device_type: row.device_type,
             state_endpoint: row.state_endpoint,
@@ -57,13 +59,14 @@ impl AraneaRegistrationRepository {
         let result = sqlx::query(
             r#"
             INSERT INTO aranea_registration
-                (lacis_id, tid, cic, device_type, state_endpoint, mqtt_endpoint, registered_at)
+                (lacis_id, tid, fid, cic, device_type, state_endpoint, mqtt_endpoint, registered_at)
             VALUES
-                (?, ?, ?, ?, ?, ?, ?)
+                (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&registration.lacis_id)
         .bind(&registration.tid)
+        .bind(&registration.fid)
         .bind(&registration.cic)
         .bind(&registration.device_type)
         .bind(&registration.state_endpoint)
@@ -88,7 +91,7 @@ impl AraneaRegistrationRepository {
     ) -> crate::Result<Option<AraneaRegistration>> {
         let row = sqlx::query_as::<_, AraneaRegistrationRow>(
             r#"
-            SELECT id, lacis_id, tid, cic, device_type, state_endpoint, mqtt_endpoint, registered_at, last_sync_at
+            SELECT id, lacis_id, tid, fid, cic, device_type, state_endpoint, mqtt_endpoint, registered_at, last_sync_at
             FROM aranea_registration
             WHERE lacis_id = ?
             "#,
@@ -104,7 +107,7 @@ impl AraneaRegistrationRepository {
     pub async fn get_latest(&self) -> crate::Result<Option<AraneaRegistration>> {
         let row = sqlx::query_as::<_, AraneaRegistrationRow>(
             r#"
-            SELECT id, lacis_id, tid, cic, device_type, state_endpoint, mqtt_endpoint, registered_at, last_sync_at
+            SELECT id, lacis_id, tid, fid, cic, device_type, state_endpoint, mqtt_endpoint, registered_at, last_sync_at
             FROM aranea_registration
             ORDER BY registered_at DESC
             LIMIT 1

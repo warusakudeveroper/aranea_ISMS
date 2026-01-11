@@ -826,3 +826,47 @@ export interface SdmSyncGo2rtcResponse {
   skipped: number;
   errors: string[];
 }
+
+// =============================================================================
+// AraneaRegister API Types (Phase 1 - Issue #114)
+// =============================================================================
+
+// Tenant Primary Authentication (for device registration)
+export interface TenantPrimaryAuth {
+  lacisId: string;      // テナントプライマリのLacisID
+  userId: string;       // テナントプライマリのユーザーID (email)
+  cic: string;          // テナントプライマリのCIC (6桁)
+}
+
+// Register device request
+export interface AraneaRegisterRequest {
+  tenantPrimaryAuth: TenantPrimaryAuth;
+  tid: string;          // テナントID (T2025...)
+}
+
+// Register device result
+export interface AraneaRegisterResult {
+  ok: boolean;
+  lacisId?: string;     // 登録されたデバイスのLacisID
+  cic?: string;         // デバイスのCIC
+  stateEndpoint?: string;
+  mqttEndpoint?: string;
+  error?: string;
+}
+
+// Registration status (GET /api/register/status)
+export interface AraneaRegistrationStatus {
+  registered: boolean;
+  lacisId?: string;
+  tid?: string;
+  fid?: string;           // Facility ID (DD09_IS22_WebUI)
+  cic?: string;
+  registeredAt?: string;  // ISO8601
+  lastSyncAt?: string;    // ISO8601
+}
+
+// Clear registration result
+export interface AraneaClearResult {
+  ok: boolean;
+  message: string;
+}
