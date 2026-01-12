@@ -1047,6 +1047,7 @@ impl ParaclateClient {
         let url = endpoints::AI_CHAT;
 
         // リクエストペイロード構築
+        // AI Chat APIはmessageをトップレベルで期待する（payloadラッパー不要）
         let request = AIChatRequest {
             tid: tid.to_string(),
             fid: fid.to_string(),
@@ -1055,21 +1056,15 @@ impl ParaclateClient {
             context,
         };
 
-        // mobes2.0 ペイロード形式: { fid, payload: { ... } }
-        let wrapped_payload = serde_json::json!({
-            "fid": fid,
-            "payload": request
-        });
-
         debug!(
             url = %url,
-            payload = %serde_json::to_string(&wrapped_payload).unwrap_or_default(),
+            payload = %serde_json::to_string(&request).unwrap_or_default(),
             "AI chat request"
         );
 
         let mut req = self.http.post(url)
             .header("Content-Type", "application/json")
-            .json(&wrapped_payload);
+            .json(&request);
 
         for (key, value) in oath.to_headers() {
             req = req.header(&key, &value);
