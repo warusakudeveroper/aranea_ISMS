@@ -98,6 +98,18 @@ export function ChatExpandModal({
   const inputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null)
+  const prevMessagesLengthRef = useRef(messages.length)
+
+  // 新しいアシスタントメッセージを検知してアニメーション対象に設定
+  useEffect(() => {
+    if (messages.length > prevMessagesLengthRef.current) {
+      const lastMsg = messages[messages.length - 1]
+      if (lastMsg?.role === "assistant") {
+        setTypingMessageId(lastMsg.id)
+      }
+    }
+    prevMessagesLengthRef.current = messages.length
+  }, [messages])
 
   // Scroll to bottom - helper function
   const scrollToBottom = useCallback(() => {
@@ -179,13 +191,7 @@ export function ChatExpandModal({
     if (value) {
       onSend(value)
       if (inputRef.current) inputRef.current.value = ""
-      // Mark next assistant message for typing animation
-      setTimeout(() => {
-        const lastMsg = messages[messages.length - 1]
-        if (lastMsg?.role === "assistant") {
-          setTypingMessageId(lastMsg.id)
-        }
-      }, 100)
+      // typingMessageIdはuseEffectでmessages変化時に自動設定される
     }
   }
 
