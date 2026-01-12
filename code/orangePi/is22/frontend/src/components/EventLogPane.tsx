@@ -621,8 +621,8 @@ export function EventLogPane({
     setIsDetailModalOpen(true)
   }
 
-  // Handle chat message send (stub)
-  const handleChatSend = (message: string) => {
+  // Handle chat message send - AI Assistant with camera status queries
+  const handleChatSend = async (message: string) => {
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -631,16 +631,170 @@ export function EventLogPane({
     }
     setChatMessages((prev) => [...prev, userMessage])
 
-    // TODO: Connect to mobes2.0 API
-    setTimeout(() => {
-      const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        content: "mobes2.0との連携は後続タスクで実装予定です。",
-        timestamp: new Date(),
+    // Process the query and generate response
+    const response = await processAIQuery(message, cameras, logs)
+
+    const assistantMessage: ChatMessage = {
+      id: `assistant-${Date.now()}`,
+      role: "assistant",
+      content: response,
+      timestamp: new Date(),
+    }
+    setChatMessages((prev) => [...prev, assistantMessage])
+  }
+
+  // AI Query Processor - analyzes user query and generates response
+  async function processAIQuery(
+    query: string,
+    cameras: Camera[],
+    recentLogs: DetectionLog[]
+  ): Promise<string> {
+    const lowerQuery = query.toLowerCase()
+
+    // Help/usage query
+    if (lowerQuery.includes('ヘルプ') || lowerQuery.includes('使い方') || lowerQuery.includes('help')) {
+      return `AIアシスタントの使い方:
+• 「[カメラ名]の状態」- 特定カメラの状態を確認
+• 「カメラ一覧」- 登録カメラの概要
+• 「検出サマリー」- 最近の検出状況
+• 「異常カメラ」- 問題のあるカメラを確認`
+    }
+
+    // Camera list query
+    if (lowerQuery.includes('カメラ一覧') || lowerQuery.includes('登録カメラ')) {
+      const online = cameras.filter(c => c.enabled && c.polling_enabled).length
+      const total = cameras.length
+      return `登録カメラ: ${total}台（オンライン: ${online}台）\n\n${cameras.slice(0, 5).map(c =>
+        `• ${c.name}: ${c.enabled ? '✅有効' : '❌無効'}`
+      ).join('\n')}${cameras.length > 5 ? `\n...他${cameras.length - 5}台` : ''}`
+    }
+
+    // Detection summary query
+    if (lowerQuery.includes('検出') && (lowerQuery.includes('サマリー') || lowerQuery.includes('状況') || lowerQuery.includes('概要'))) {
+      const last24h = recentLogs.filter(log => {
+        const logTime = new Date(log.captured_at).getTime()
+        const now = Date.now()
+        return now - logTime < 24 * 60 * 60 * 1000
+      })
+      const humanCount = last24h.filter(l => l.primary_event.toLowerCase().includes('human')).length
+      const vehicleCount = last24h.filter(l => l.primary_event.toLowerCase().includes('vehicle')).length
+      const unknownCount = last24h.filter(l => l.unknown_flag).length
+
+      return `過去24時間の検出サマリー:
+• 総検出数: ${last24h.length}件
+• 人物検知: ${humanCount}件
+• 車両検知: ${vehicleCount}件
+• 未分類: ${unknownCount}件`
+    }
+
+    // Anomaly camera query
+    if (lowerQuery.includes('異常') || lowerQuery.includes('問題')) {
+      const disabledCams = cameras.filter(c => !c.enabled || !c.polling_enabled)
+      if (disabledCams.length === 0) {
+        return '現在、問題のあるカメラはありません。全カメラ正常稼働中です。'
       }
-      setChatMessages((prev) => [...prev, assistantMessage])
-    }, 500)
+      return `問題のあるカメラ: ${disabledCams.length}台\n\n${disabledCams.map(c =>
+        `• ${c.name}: ${!c.enabled ? 'カメラ無効' : 'ポーリング停止'}`
+      ).join('\n')}`
+    }
+
+    // Specific camera query - extract camera name
+    const cameraNameMatch = extractCameraName(query, cameras)
+    if (cameraNameMatch) {
+      return await getCameraStatusResponse(cameraNameMatch, recentLogs)
+    }
+
+    // Default response
+    return `ご質問ありがとうございます。
+
+以下の質問に回答できます:
+• カメラの状態確認（例: "Tam-1F-Frontの状態"）
+• カメラ一覧
+• 検出サマリー
+• 異常カメラの確認
+
+具体的なカメラ名を含めてお聞きください。`
+  }
+
+  // Extract camera name from query using fuzzy matching
+  function extractCameraName(query: string, cameras: Camera[]): Camera | null {
+    // Try exact match first
+    for (const cam of cameras) {
+      if (query.includes(cam.name)) {
+        return cam
+      }
+    }
+
+    // Try partial match (at least 4 characters)
+    const words = query.split(/[\s、。？！の]/g).filter(w => w.length >= 3)
+    for (const word of words) {
+      for (const cam of cameras) {
+        if (cam.name.toLowerCase().includes(word.toLowerCase()) ||
+            word.toLowerCase().includes(cam.name.toLowerCase().substring(0, 6))) {
+          return cam
+        }
+      }
+    }
+
+    return null
+  }
+
+  // Generate camera status response
+  async function getCameraStatusResponse(camera: Camera, recentLogs: DetectionLog[]): Promise<string> {
+    // Get recent logs for this camera
+    const cameraLogs = recentLogs.filter(l => l.camera_id === camera.camera_id)
+    const last24hLogs = cameraLogs.filter(log => {
+      const logTime = new Date(log.captured_at).getTime()
+      return Date.now() - logTime < 24 * 60 * 60 * 1000
+    })
+
+    // Fetch attunement status
+    let attunementInfo = ''
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/attunement/status/${camera.camera_id}`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.data?.recommendations?.length > 0) {
+          attunementInfo = `\n• 推奨事項: ${data.data.recommendations[0]}`
+        }
+      }
+    } catch {
+      // Attunement info is optional
+    }
+
+    // Build status response
+    const statusEmoji = camera.enabled && camera.polling_enabled ? '🟢' : '🔴'
+    const statusText = camera.enabled && camera.polling_enabled ? 'オンライン' : 'オフライン'
+
+    const humanCount = last24hLogs.filter(l => l.primary_event.toLowerCase().includes('human')).length
+    const unknownCount = last24hLogs.filter(l => l.unknown_flag).length
+
+    let response = `${statusEmoji} ${camera.name} の状態
+
+📍 基本情報:
+• ステータス: ${statusText}
+• 場所: ${camera.location || '未設定'}
+• IP: ${camera.ip_address || '不明'}
+• プリセット: ${camera.preset_id || 'デフォルト'}
+
+📊 過去24時間の検出:
+• 総検出: ${last24hLogs.length}件
+• 人物検知: ${humanCount}件
+• 未分類: ${unknownCount}件`
+
+    if (camera.conf_override) {
+      response += `\n• 信頼度閾値: ${(camera.conf_override * 100).toFixed(0)}%`
+    }
+
+    if (attunementInfo) {
+      response += attunementInfo
+    }
+
+    if (unknownCount > last24hLogs.length * 0.3 && last24hLogs.length >= 10) {
+      response += `\n\n⚠️ 未分類検出が多いです。プリセット調整を検討してください。`
+    }
+
+    return response
   }
 
   // Auto-scroll chat to bottom
