@@ -26,8 +26,9 @@ use axum::{
 use serde::Deserialize;
 
 use crate::paraclate_client::{
-    ConfigResponse, ConfigUpdateNotification, ConnectRequest, ConnectResponse,
-    FidValidator, PubSubPushMessage, QueueListResponse, QueueStatus, StatusResponse,
+    AIChatContext, AIChatResponse, CameraContextInfo, CameraDetectionCount, ChatMessage,
+    ConfigResponse, ConfigUpdateNotification, ConnectRequest, ConnectResponse, FidValidator,
+    PubSubPushMessage, QueueListResponse, QueueStatus, RecentDetectionsSummary, StatusResponse,
     UpdateConfigRequest,
 };
 use crate::state::AppState;
@@ -46,6 +47,8 @@ pub fn paraclate_routes() -> Router<AppState> {
         // T4-7: Pub/Sub受信フロー
         .route("/pubsub/push", post(handle_pubsub_push))
         .route("/notify", post(handle_direct_notification))
+        // AI Chat (Paraclate_DesignOverview.md準拠)
+        .route("/chat", post(handle_ai_chat))
 }
 
 /// TIDクエリパラメータ（将来のマルチテナント対応用）
@@ -337,4 +340,219 @@ async fn handle_direct_notification(
             Err(crate::Error::Internal(e.to_string()))
         }
     }
+}
+
+// ============================================================
+// AI Chat (Paraclate_DesignOverview.md準拠)
+// ============================================================
+
+/// AIチャットリクエスト（API用）
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AIChatApiRequest {
+    /// 施設ID
+    pub fid: String,
+    /// ユーザーからの質問
+    pub message: String,
+    /// 会話履歴（オプション）
+    #[serde(default)]
+    pub conversation_history: Option<Vec<ChatMessageInput>>,
+    /// コンテキスト自動収集を有効にするか（デフォルト: true）
+    #[serde(default = "default_auto_context")]
+    pub auto_context: bool,
+}
+
+fn default_auto_context() -> bool {
+    true
+}
+
+/// チャットメッセージ入力（API用）
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessageInput {
+    pub role: String,
+    pub content: String,
+}
+
+/// POST /api/paraclate/chat
+///
+/// AIアシスタントチャット（Paraclate APP統合）
+///
+/// ## Paraclate_DesignOverview.md準拠
+/// - AIアシスタントタブからの質問に関してもParaclate APPからのレスポンスでチャットボット機能を行う
+/// - 検出特徴の人物のカメラ間での移動などを横断的に把握
+/// - カメラ不調などの傾向も把握
+/// - 過去の記録を参照する、過去の記録範囲を対話的にユーザーと会話
+async fn handle_ai_chat(
+    State(state): State<AppState>,
+    Query(query): Query<TidQuery>,
+    Json(body): Json<AIChatApiRequest>,
+) -> Result<Json<AIChatResponse>> {
+    // Issue #119: FID所属検証
+    validate_fid(&state, &body.fid).await?;
+
+    tracing::info!(
+        tid = %query.tid,
+        fid = %body.fid,
+        message_len = body.message.len(),
+        auto_context = body.auto_context,
+        "Processing AI chat request"
+    );
+
+    // コンテキスト自動収集
+    let context = if body.auto_context {
+        Some(build_ai_context(&state, &query.tid, &body.fid).await?)
+    } else {
+        None
+    };
+
+    // 会話履歴を変換
+    let conversation_history = body.conversation_history.map(|history| {
+        history
+            .into_iter()
+            .map(|m| ChatMessage {
+                role: m.role,
+                content: m.content,
+                timestamp: None,
+            })
+            .collect()
+    });
+
+    // Paraclate APPにチャット送信
+    let response = state
+        .paraclate_client
+        .send_ai_chat(&query.tid, &body.fid, &body.message, context, conversation_history)
+        .await?;
+
+    Ok(Json(response))
+}
+
+/// AIコンテキストを自動構築
+///
+/// カメラ情報と直近検出サマリーを収集してコンテキストを生成
+async fn build_ai_context(
+    state: &AppState,
+    tid: &str,
+    fid: &str,
+) -> Result<AIChatContext> {
+    use chrono::{Duration, Utc};
+
+    // カメラ一覧取得
+    let cameras: Vec<_> = sqlx::query_as::<_, (String, String, Option<String>, bool, bool, Option<chrono::DateTime<Utc>>)>(
+        r#"
+        SELECT
+            camera_id, name, camera_context, enabled, polling_enabled,
+            (SELECT MAX(captured_at) FROM detection_logs WHERE detection_logs.camera_id = cameras.camera_id) as last_detection_at
+        FROM cameras
+        WHERE deleted_at IS NULL
+          AND (tid = ? OR fid = ?)
+        ORDER BY name
+        LIMIT 30
+        "#,
+    )
+    .bind(tid)
+    .bind(fid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| crate::Error::Database(e.to_string()))?;
+
+    let camera_infos: Vec<CameraContextInfo> = cameras
+        .iter()
+        .map(|(id, name, context, enabled, polling_enabled, last_detection)| {
+            CameraContextInfo {
+                camera_id: id.clone(),
+                name: name.clone(),
+                location: context.clone(),
+                status: if *enabled && *polling_enabled {
+                    "online".to_string()
+                } else {
+                    "offline".to_string()
+                },
+                last_detection_at: *last_detection,
+            }
+        })
+        .collect();
+
+    // 24時間以内の検出サマリー取得
+    let cutoff = Utc::now() - Duration::hours(24);
+
+    let detection_stats: (i64, i64, i64) = sqlx::query_as(
+        r#"
+        SELECT
+            CAST(COUNT(*) AS SIGNED) as total,
+            CAST(COALESCE(SUM(CASE WHEN LOWER(primary_event) LIKE '%human%' OR LOWER(primary_event) LIKE '%person%' THEN 1 ELSE 0 END), 0) AS SIGNED) as human_count,
+            CAST(COALESCE(SUM(CASE WHEN LOWER(primary_event) LIKE '%vehicle%' OR LOWER(primary_event) LIKE '%car%' THEN 1 ELSE 0 END), 0) AS SIGNED) as vehicle_count
+        FROM detection_logs
+        WHERE captured_at >= ?
+          AND (tid = ? OR fid = ?)
+        "#,
+    )
+    .bind(cutoff)
+    .bind(tid)
+    .bind(fid)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| crate::Error::Database(e.to_string()))?;
+
+    // カメラ別検出数
+    let by_camera: Vec<(String, String, i64)> = sqlx::query_as(
+        r#"
+        SELECT
+            dl.camera_id,
+            c.name,
+            CAST(COUNT(*) AS SIGNED) as count
+        FROM detection_logs dl
+        JOIN cameras c ON dl.camera_id = c.camera_id
+        WHERE dl.captured_at >= ?
+          AND (dl.tid = ? OR dl.fid = ?)
+        GROUP BY dl.camera_id, c.name
+        ORDER BY count DESC
+        LIMIT 10
+        "#,
+    )
+    .bind(cutoff)
+    .bind(tid)
+    .bind(fid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| crate::Error::Database(e.to_string()))?;
+
+    let camera_counts: Vec<CameraDetectionCount> = by_camera
+        .into_iter()
+        .map(|(camera_id, camera_name, count)| CameraDetectionCount {
+            camera_id,
+            camera_name,
+            count: count as u32,
+        })
+        .collect();
+
+    let recent_detections = RecentDetectionsSummary {
+        total_24h: detection_stats.0 as u32,
+        human_count: detection_stats.1 as u32,
+        vehicle_count: detection_stats.2 as u32,
+        by_camera: if camera_counts.is_empty() {
+            None
+        } else {
+            Some(camera_counts)
+        },
+    };
+
+    // 施設コンテキスト取得（Paraclate設定から）
+    let facility_context = state
+        .paraclate_client
+        .get_config(tid, fid)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|c| {
+            c.attunement.get("facilityContext")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+
+    Ok(AIChatContext {
+        cameras: Some(camera_infos),
+        recent_detections: Some(recent_detections),
+        facility_context,
+    })
 }

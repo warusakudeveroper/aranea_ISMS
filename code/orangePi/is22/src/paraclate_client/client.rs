@@ -15,7 +15,13 @@
 use crate::config_store::ConfigStore;
 use crate::paraclate_client::{
     repository::{ConfigRepository, ConnectionLogRepository, SendQueueRepository},
-    types::*,
+    types::{
+        AIChatContext, AIChatRequest, AIChatResponse, ChatMessage, ConnectionEventType,
+        ConnectionLogInsert, ConnectionStatus, EventPayload, EventResponse, LacisOath,
+        ParaclateConfigInsert, ParaclateError, PayloadType, QueueItemResponse, QueueListResponse,
+        QueueStats, QueueStatus, SendQueueInsert, SendQueueUpdate, StatusResponse,
+        ConfigResponse, ConnectResponse, EventSendResult,
+    },
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -33,6 +39,9 @@ mod endpoints {
     /// Phase 8: カメラメタデータ同期 (Issue #121)
     /// mobes2.0チーム回答に基づき訂正 (2026-01-12)
     pub const CAMERA_METADATA: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateCameraMetadata";
+    /// AI Chat エンドポイント
+    /// Paraclate_DesignOverview.md準拠: AIアシスタント機能
+    pub const AI_CHAT: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateAIChat";
 }
 
 /// ParaclateClient
@@ -1008,6 +1017,128 @@ pub struct CameraMetadataResponse {
     pub success: bool,
     pub synced_count: usize,
     pub error: Option<String>,
+}
+
+impl ParaclateClient {
+    // ========================================
+    // AI Chat (Paraclate APP Integration)
+    // ========================================
+
+    /// AIチャット送信
+    ///
+    /// Paraclate_DesignOverview.md準拠:
+    /// AIアシスタントタブからの質問に関してもParaclate APPからのレスポンスでチャットボット機能を行う
+    ///
+    /// ## 機能
+    /// - 検出特徴の人物のカメラ間での移動などを横断的に把握
+    /// - カメラ不調などの傾向も把握
+    /// - 過去の記録を参照する、過去の記録範囲を対話的にユーザーと会話
+    pub async fn send_ai_chat(
+        &self,
+        tid: &str,
+        fid: &str,
+        message: &str,
+        context: Option<AIChatContext>,
+        conversation_history: Option<Vec<ChatMessage>>,
+    ) -> Result<AIChatResponse, ParaclateError> {
+        info!(tid = %tid, fid = %fid, message_len = message.len(), "Sending AI chat to Paraclate APP");
+
+        let oath = self.get_lacis_oath(tid).await?;
+        let url = endpoints::AI_CHAT;
+
+        // リクエストペイロード構築
+        let request = AIChatRequest {
+            tid: tid.to_string(),
+            fid: fid.to_string(),
+            message: message.to_string(),
+            conversation_history,
+            context,
+        };
+
+        // mobes2.0 ペイロード形式: { fid, payload: { ... } }
+        let wrapped_payload = serde_json::json!({
+            "fid": fid,
+            "payload": request
+        });
+
+        debug!(
+            url = %url,
+            payload = %serde_json::to_string(&wrapped_payload).unwrap_or_default(),
+            "AI chat request"
+        );
+
+        let mut req = self.http.post(url)
+            .header("Content-Type", "application/json")
+            .json(&wrapped_payload);
+
+        for (key, value) in oath.to_headers() {
+            req = req.header(&key, &value);
+        }
+
+        let start = std::time::Instant::now();
+
+        match req.send().await {
+            Ok(response) => {
+                let status = response.status();
+                let elapsed_ms = start.elapsed().as_millis() as u32;
+
+                if status.is_success() {
+                    let body: serde_json::Value = response.json().await.map_err(|e| {
+                        ParaclateError::Http(format!("Failed to parse AI chat response: {}", e))
+                    })?;
+
+                    // レスポンス解析
+                    let message = body.get("message")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    let related_data = body.get("relatedData")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+                    info!(
+                        tid = %tid,
+                        fid = %fid,
+                        elapsed_ms = elapsed_ms,
+                        message_len = message.as_ref().map(|m| m.len()).unwrap_or(0),
+                        "AI chat response received"
+                    );
+
+                    Ok(AIChatResponse {
+                        ok: true,
+                        message,
+                        related_data,
+                        processing_time_ms: Some(elapsed_ms),
+                        error: None,
+                    })
+                } else {
+                    let error_body = response.text().await.unwrap_or_default();
+                    let error_msg = format!("HTTP {}: {}", status.as_u16(), error_body);
+
+                    warn!(
+                        tid = %tid,
+                        fid = %fid,
+                        status = %status,
+                        error = %error_msg,
+                        "AI chat request failed"
+                    );
+
+                    Ok(AIChatResponse {
+                        ok: false,
+                        message: None,
+                        related_data: None,
+                        processing_time_ms: Some(elapsed_ms),
+                        error: Some(error_msg),
+                    })
+                }
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                error!(tid = %tid, fid = %fid, error = %error_msg, "AI chat connection error");
+
+                Err(ParaclateError::Http(error_msg))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

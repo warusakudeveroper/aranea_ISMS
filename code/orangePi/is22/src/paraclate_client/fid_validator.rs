@@ -94,7 +94,7 @@ impl FidValidator {
         let tid = self
             .config_store
             .service()
-            .get_setting("aranea_tid")
+            .get_setting("aranea.tid")
             .await
             .map_err(|e| FidValidationError::Database(e.to_string()))?
             .and_then(|v| v.as_str().map(String::from));

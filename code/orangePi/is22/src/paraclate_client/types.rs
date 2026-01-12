@@ -751,6 +751,138 @@ impl From<ParaclateError> for crate::Error {
 }
 
 // ============================================================
+// AI Chat Structures (Paraclate APP Integration)
+// ============================================================
+
+/// AIチャットリクエスト
+///
+/// ユーザーからの質問をParaclate APPに送信
+/// Paraclate_DesignOverview.md準拠:
+/// - AIアシスタントタブからの質問に関してもParaclate APPからのレスポンスでチャットボット機能を行う
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AIChatRequest {
+    /// テナントID
+    pub tid: String,
+    /// 施設ID
+    pub fid: String,
+    /// ユーザーからの質問
+    pub message: String,
+    /// 会話履歴（オプション）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_history: Option<Vec<ChatMessage>>,
+    /// コンテキスト情報（オプション）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<AIChatContext>,
+}
+
+/// チャットメッセージ
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    /// 送信者 (user/assistant)
+    pub role: String,
+    /// メッセージ内容
+    pub content: String,
+    /// タイムスタンプ
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<DateTime<Utc>>,
+}
+
+/// AIチャットコンテキスト
+///
+/// mobesのAI機能に渡す追加コンテキスト
+/// - facilityContext、cameraContext情報
+/// - 直近の検出サマリー
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AIChatContext {
+    /// カメラ一覧（名前、ID、状態）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cameras: Option<Vec<CameraContextInfo>>,
+    /// 直近の検出サマリー
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recent_detections: Option<RecentDetectionsSummary>,
+    /// 施設コンテキスト
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub facility_context: Option<String>,
+}
+
+/// カメラコンテキスト情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraContextInfo {
+    pub camera_id: String,
+    pub name: String,
+    pub location: Option<String>,
+    pub status: String,
+    pub last_detection_at: Option<DateTime<Utc>>,
+}
+
+/// 直近検出サマリー
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentDetectionsSummary {
+    /// 24時間以内の総検出数
+    pub total_24h: u32,
+    /// 人物検知数
+    pub human_count: u32,
+    /// 車両検知数
+    pub vehicle_count: u32,
+    /// カメラ別検出数
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by_camera: Option<Vec<CameraDetectionCount>>,
+}
+
+/// カメラ別検出カウント
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraDetectionCount {
+    pub camera_id: String,
+    pub camera_name: String,
+    pub count: u32,
+}
+
+/// AIチャットレスポンス
+///
+/// Paraclate APPからのAI応答
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AIChatResponse {
+    /// 成功フラグ
+    pub ok: bool,
+    /// AI応答メッセージ
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// 関連データ（画像参照等）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_data: Option<RelatedData>,
+    /// 処理時間（ms）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub processing_time_ms: Option<u32>,
+    /// エラーメッセージ
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 関連データ
+///
+/// AIが参照したデータや追加情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedData {
+    /// 参照した検出ログID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detection_log_ids: Option<Vec<u64>>,
+    /// 参照したスナップショット
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshots: Option<Vec<SnapshotRef>>,
+    /// 参照したカメラ
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cameras: Option<Vec<String>>,
+}
+
+// ============================================================
 // Constants
 // ============================================================
 
