@@ -29,6 +29,7 @@ use is22_camserver::{
     suggest_engine::SuggestEngine,
     summary_service::{
         GrandSummaryGenerator, ScheduleRepository, SummaryGenerator, SummaryRepository,
+        SummaryScheduler,
     },
     state::{AppConfig, AppState, SystemHealth},
     web_api,
@@ -325,6 +326,17 @@ async fn main() -> anyhow::Result<()> {
             tracing::error!(error = %e, "Failed to start BqSyncService background task");
         }
     }
+
+    // Start SummaryScheduler background task (Phase 3: Issue #116)
+    // Note: Use state.schedule_repository.clone() here, not schedule_repository
+    // because schedule_repository was moved into AppState
+    let summary_scheduler = Arc::new(SummaryScheduler::new(
+        state.schedule_repository.clone(),
+        state.summary_generator.clone(),
+        state.grand_summary_generator.clone(),
+    ));
+    summary_scheduler.start().await;
+    tracing::info!("SummaryScheduler started (60-second tick interval)");
 
     // Create router with static file serving
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "/opt/is22/frontend/dist".to_string());

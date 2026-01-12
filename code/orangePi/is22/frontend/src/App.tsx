@@ -143,7 +143,8 @@ function App() {
         }
 
         const result = await response.json()
-        const logs = (result.data || result) as DetectionLog[]
+        // API returns { ok: true, data: { filter: {...}, logs: [...] } }
+        const logs = (result.data?.logs || result.data || result) as DetectionLog[]
 
         // Extract latest captured_at for each camera
         const latestTimestamps: Record<string, number> = {}
@@ -339,8 +340,8 @@ function App() {
           <h1 className="text-lg font-semibold">mAcT</h1>
         ) : (
           <>
-            <h1 className="text-lg font-semibold">mobes AI<span className="text-primary">cam</span> control Tower</h1>
-            <Badge variant="outline" className="text-xs">mAcT</Badge>
+            <h1 className="text-lg font-semibold">Paraclate</h1>
+            <Badge variant="outline" className="text-xs">mobes AI control Tower</Badge>
           </>
         )}
       </div>

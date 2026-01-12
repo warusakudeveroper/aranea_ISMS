@@ -63,6 +63,8 @@ import {
   Shield,
   Loader2,
   Building2,
+  TestTube2,
+  CameraOff,
 } from "lucide-react"
 import { API_BASE_URL } from "@/lib/config"
 import { PerformanceDashboard } from "@/components/PerformanceDashboard"
@@ -1847,16 +1849,245 @@ export function SettingsModal({
                 </CardContent>
               </Card>
 
-              {/* Paraclate Integration Settings (Placeholder) */}
-              <Card className="border-dashed">
+              {/* Paraclate Integration Settings */}
+              <Card className={araneaRegistrationStatus?.registered ? "" : "border-dashed"}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <FileText className="h-4 w-4" />
                     Paraclate連携（mobes2.0）
-                    <Badge variant="secondary" className="ml-2">準備中</Badge>
+                    {araneaRegistrationStatus?.registered ? (
+                      <Badge variant="default" className="ml-2 bg-green-500">
+                        登録済み (FID: {araneaRegistrationStatus.fid})
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="ml-2">未登録</Badge>
+                    )}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {/* Test Execution Section - テスト用強制生成 */}
+                  {araneaRegistrationStatus?.registered && (
+                    <div className="space-y-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30">
+                      <h4 className="text-sm font-medium flex items-center gap-2">
+                        <TestTube2 className="h-4 w-4 text-blue-500" />
+                        テスト実行
+                      </h4>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            サマリーを強制生成（スケジュール無視）
+                          </p>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  const fid = araneaRegistrationStatus?.fid || "0000"
+                                  const tid = araneaRegistrationStatus?.tid || ""
+                                  const res = await fetch(`/api/summary/force-hourly?fid=${fid}&tid=${tid}`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ hours: 1 })
+                                  })
+                                  const data = await res.json()
+                                  if (res.ok) {
+                                    alert(`✓ ${data.message}\n\nSummary ID: ${data.summaryId}\n検出: ${data.detectionCount}件`)
+                                  } else {
+                                    alert(`エラー: ${data.message || "生成に失敗しました"}`)
+                                  }
+                                } catch (e) {
+                                  alert(`エラー: ${e}`)
+                                }
+                              }}
+                              className="text-xs"
+                            >
+                              直近1時間サマリー
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  const fid = araneaRegistrationStatus?.fid || "0000"
+                                  const tid = araneaRegistrationStatus?.tid || ""
+                                  const res = await fetch(`/api/summary/force-grand?fid=${fid}&tid=${tid}`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ hours: 6 })
+                                  })
+                                  const data = await res.json()
+                                  if (res.ok) {
+                                    alert(`✓ ${data.message}\n\nSummary ID: ${data.summaryId}\n検出: ${data.detectionCount}件`)
+                                  } else {
+                                    alert(`エラー: ${data.message || "生成に失敗しました"}`)
+                                  }
+                                } catch (e) {
+                                  alert(`エラー: ${e}`)
+                                }
+                              }}
+                              className="text-xs"
+                            >
+                              直近6時間GrandSummary
+                            </Button>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            Paraclate API テスト
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  const fid = araneaRegistrationStatus?.fid || "0000"
+                                  const tid = araneaRegistrationStatus?.tid || ""
+                                  const res = await fetch(`/api/paraclate/status?fid=${fid}&tid=${tid}`)
+                                  const data = await res.json()
+                                  alert(`Paraclate Status:\n${JSON.stringify(data, null, 2)}`)
+                                } catch (e) {
+                                  alert(`エラー: ${e}`)
+                                }
+                              }}
+                              className="text-xs"
+                            >
+                              接続状態
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  const fid = araneaRegistrationStatus?.fid || "0000"
+                                  const tid = araneaRegistrationStatus?.tid || ""
+                                  const res = await fetch(`/api/paraclate/queue?fid=${fid}&tid=${tid}`)
+                                  const data = await res.json()
+                                  alert(`キュー状態:\n${JSON.stringify(data, null, 2)}`)
+                                } catch (e) {
+                                  alert(`エラー: ${e}`)
+                                }
+                              }}
+                              className="text-xs"
+                            >
+                              キュー確認
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch("/api/summary/latest")
+                                  const data = await res.json()
+                                  alert(`最新Summary:\n${JSON.stringify(data, null, 2)}`)
+                                } catch (e) {
+                                  alert(`エラー: ${e}`)
+                                }
+                              }}
+                              className="text-xs"
+                            >
+                              最新Summary
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch("/api/grand-summary/latest")
+                                  const data = await res.json()
+                                  alert(`最新GrandSummary:\n${JSON.stringify(data, null, 2)}`)
+                                } catch (e) {
+                                  alert(`エラー: ${e}`)
+                                }
+                              }}
+                              className="text-xs"
+                            >
+                              最新GrandSummary
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Camera Registration Management - lacisID未登録カメラ管理 */}
+                  {araneaRegistrationStatus?.registered && (
+                    <div className="space-y-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30">
+                      <h4 className="text-sm font-medium flex items-center gap-2">
+                        <CameraOff className="h-4 w-4 text-amber-500" />
+                        カメラ登録管理
+                      </h4>
+                      <p className="text-xs text-muted-foreground">
+                        lacisID未設定のカメラを強制登録してParaclate連携を有効化
+                      </p>
+                      <div className="space-y-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch("/api/cameras")
+                              const cameras = await res.json()
+                              const unregistered = cameras.filter((c: CameraType) => !c.lacis_id || c.lacis_id === "")
+                              if (unregistered.length === 0) {
+                                alert("全カメラが登録済みです")
+                                return
+                              }
+                              const list = unregistered.map((c: CameraType) => `• ${c.name} (${c.ip_address})`).join("\n")
+                              alert(`未登録カメラ (${unregistered.length}台):\n${list}`)
+                            } catch (e) {
+                              alert(`エラー: ${e}`)
+                            }
+                          }}
+                          className="text-xs"
+                        >
+                          未登録カメラ確認
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch("/api/cameras")
+                              const cameras = await res.json()
+                              const unregistered = cameras.filter((c: CameraType) => !c.lacis_id || c.lacis_id === "")
+                              if (unregistered.length === 0) {
+                                alert("全カメラが登録済みです")
+                                return
+                              }
+                              const confirmed = confirm(`${unregistered.length}台のカメラを強制登録しますか？\n\n※lacisIDが自動生成されます`)
+                              if (!confirmed) return
+
+                              let successCount = 0
+                              let failCount = 0
+                              for (const cam of unregistered) {
+                                try {
+                                  const regRes = await fetch(`/api/ipcamscan/devices/${encodeURIComponent(cam.ip_address)}/force-register`, {
+                                    method: "POST"
+                                  })
+                                  if (regRes.ok) {
+                                    successCount++
+                                  } else {
+                                    failCount++
+                                  }
+                                } catch {
+                                  failCount++
+                                }
+                              }
+                              alert(`完了: 成功 ${successCount}台, 失敗 ${failCount}台`)
+                            } catch (e) {
+                              alert(`エラー: ${e}`)
+                            }
+                          }}
+                          className="text-xs bg-amber-500 hover:bg-amber-600"
+                        >
+                          全未登録カメラを強制登録
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Scheduled Report Settings */}
                   <div className="space-y-3">
                     <h4 className="text-sm font-medium flex items-center gap-2">

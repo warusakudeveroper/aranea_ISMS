@@ -5,6 +5,8 @@
 //!
 //! ## エンドポイント
 //! - POST /api/summary/generate - 手動Summary生成
+//! - POST /api/summary/force-hourly - 強制Hourly Summary生成（テスト用）
+//! - POST /api/summary/force-grand - 強制GrandSummary生成（テスト用）
 //! - GET /api/summary/latest - 最新Summary取得
 //! - GET /api/summary/:id - Summary取得
 //! - GET /api/summary/range - 期間指定Summary一覧
@@ -25,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
 use crate::summary_service::{
-    ReportSchedule, ReportType, SummaryResult, SummaryType,
+    ReportSchedule, ReportType, SummaryInsert, SummaryResult, SummaryType,
 };
 
 /// Summary API ルーター
@@ -33,6 +35,8 @@ pub fn summary_routes() -> Router<AppState> {
     Router::new()
         // Summary endpoints
         .route("/summary/generate", post(generate_summary))
+        .route("/summary/force-hourly", post(force_generate_hourly))
+        .route("/summary/force-grand", post(force_generate_grand))
         .route("/summary/latest", get(get_latest_summary))
         .route("/summary/:id", get(get_summary_by_id))
         .route("/summary/range", get(get_summaries_range))
@@ -341,16 +345,16 @@ async fn get_summaries_range(
         _ => None,
     };
 
-    let limit = query.limit.unwrap_or(100);
+    let limit = query.limit.unwrap_or(100) as u32;
 
     match state
         .summary_repository
-        .get_range(&tid, query.fid.as_deref(), summary_type, query.from, query.to, limit)
+        .get_range(&tid, query.fid.as_deref(), query.from, query.to, summary_type, limit)
         .await
     {
         Ok(results) => {
             let total = results.len();
-            let has_more = total as i64 >= limit;
+            let has_more = total as u32 >= limit;
             let summaries = results.into_iter().map(SummaryResponse::from).collect();
 
             Json(SummaryRangeResponse {
@@ -644,7 +648,7 @@ async fn get_config_tid(state: &AppState) -> Option<String> {
     state
         .config_store
         .service()
-        .get_setting("aranea_tid")
+        .get_setting("aranea.tid")
         .await
         .ok()
         .flatten()
@@ -661,4 +665,274 @@ async fn get_config_fid(state: &AppState) -> Option<String> {
         .ok()
         .flatten()
         .and_then(|v| v.as_str().map(String::from))
+}
+
+// ========================================
+// Force Generate APIs (テスト用)
+// ========================================
+
+/// 強制生成リクエスト
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceGenerateRequest {
+    /// 対象時間（時間単位）
+    #[serde(default = "default_hours")]
+    pub hours: u32,
+}
+
+fn default_hours() -> u32 {
+    1
+}
+
+/// 強制生成レスポンス
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceGenerateResponse {
+    pub summary_id: u64,
+    pub summary_type: String,
+    pub period_start: DateTime<Utc>,
+    pub period_end: DateTime<Utc>,
+    pub detection_count: i32,
+    pub severity_max: i32,
+    pub camera_ids: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub message: String,
+}
+
+/// POST /api/summary/force-hourly - 強制Hourly Summary生成
+///
+/// 直近N時間のサマリーを強制生成（スケジュール無視）
+/// テスト・デバッグ用途
+async fn force_generate_hourly(
+    State(state): State<AppState>,
+    Json(req): Json<ForceGenerateRequest>,
+) -> impl IntoResponse {
+    let tid = match get_config_tid(&state).await {
+        Some(tid) => tid,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "CONFIG_ERROR",
+                    "message": "TID not configured"
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    let fid = match get_config_fid(&state).await {
+        Some(fid) => fid,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "CONFIG_ERROR",
+                    "message": "FID not configured"
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    // 直近N時間を計算
+    let now = Utc::now();
+    let period_start = now - chrono::Duration::hours(req.hours as i64);
+    let period_end = now;
+
+    tracing::info!(
+        tid = %tid,
+        fid = %fid,
+        hours = req.hours,
+        period_start = %period_start,
+        period_end = %period_end,
+        "Force generating hourly summary"
+    );
+
+    match state
+        .summary_generator
+        .generate(&tid, &fid, period_start, period_end)
+        .await
+    {
+        Ok(result) => {
+            let response = ForceGenerateResponse {
+                summary_id: result.summary_id,
+                summary_type: "hourly".to_string(),
+                period_start: result.period_start,
+                period_end: result.period_end,
+                detection_count: result.detection_count,
+                severity_max: result.severity_max,
+                camera_ids: result.camera_ids,
+                created_at: result.created_at,
+                message: format!(
+                    "直近{}時間のサマリーを生成しました（検出: {}件）",
+                    req.hours, result.detection_count
+                ),
+            };
+            (StatusCode::CREATED, Json(response)).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to force generate hourly summary");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "SUMMARY_ERROR",
+                    "message": e.to_string()
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// POST /api/summary/force-grand - 強制GrandSummary生成
+///
+/// 直近6時間のGrandSummaryを強制生成（スケジュール無視）
+/// テスト・デバッグ用途
+async fn force_generate_grand(
+    State(state): State<AppState>,
+    Json(req): Json<ForceGenerateRequest>,
+) -> impl IntoResponse {
+    let tid = match get_config_tid(&state).await {
+        Some(tid) => tid,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "CONFIG_ERROR",
+                    "message": "TID not configured"
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    let fid = match get_config_fid(&state).await {
+        Some(fid) => fid,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "CONFIG_ERROR",
+                    "message": "FID not configured"
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    // デフォルトは6時間
+    let hours = if req.hours == 0 { 6 } else { req.hours };
+
+    // 直近N時間を計算
+    let now = Utc::now();
+    let period_start = now - chrono::Duration::hours(hours as i64);
+    let period_end = now;
+
+    tracing::info!(
+        tid = %tid,
+        fid = %fid,
+        hours = hours,
+        period_start = %period_start,
+        period_end = %period_end,
+        "Force generating GrandSummary"
+    );
+
+    // GrandSummaryは既存のHourlySummaryを集計する
+    // まず対象期間のHourlySummaryを取得
+    let summaries = match state
+        .summary_repository
+        .get_by_period(&tid, &fid, SummaryType::Hourly, period_start, period_end)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get hourly summaries for grand summary");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "DATABASE_ERROR",
+                    "message": e.to_string()
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // 集計
+    let total_detection_count: i32 = summaries.iter().map(|s| s.detection_count).sum();
+    let max_severity: i32 = summaries.iter().map(|s| s.severity_max).max().unwrap_or(0);
+    let all_camera_ids: std::collections::HashSet<String> = summaries
+        .iter()
+        .flat_map(|s| s.camera_ids.clone())
+        .collect();
+    let included_summary_ids: Vec<u64> = summaries.iter().map(|s| s.summary_id).collect();
+
+    // GrandSummary用のサマリーテキスト生成
+    let summary_text = format!(
+        "直近{}時間のGrandSummary: {}件の検出（{}件のHourlySummaryを集計）",
+        hours,
+        total_detection_count,
+        summaries.len()
+    );
+
+    // summary_jsonを構築
+    let summary_json = serde_json::json!({
+        "type": "grand_summary",
+        "periodHours": hours,
+        "includedSummaryIds": included_summary_ids,
+        "totalDetectionCount": total_detection_count,
+        "severityMax": max_severity,
+        "cameraCount": all_camera_ids.len(),
+        "hourlySummaryCount": summaries.len()
+    });
+
+    // DBに保存
+    let insert_data = SummaryInsert {
+        tid: tid.clone(),
+        fid: fid.clone(),
+        summary_type: SummaryType::Daily,  // GrandSummaryはDailyタイプとして保存
+        period_start,
+        period_end,
+        summary_text: summary_text.clone(),
+        summary_json: Some(summary_json.clone()),
+        detection_count: total_detection_count,
+        severity_max: max_severity,
+        camera_ids: serde_json::json!(all_camera_ids.iter().cloned().collect::<Vec<_>>()),
+        expires_at: Utc::now() + chrono::Duration::days(90),  // 90日間保持
+    };
+    match state
+        .summary_repository
+        .insert(insert_data)
+        .await
+    {
+        Ok(result) => {
+            let response = ForceGenerateResponse {
+                summary_id: result.summary_id,
+                summary_type: "grand_summary".to_string(),
+                period_start,
+                period_end,
+                detection_count: total_detection_count,
+                severity_max: max_severity,
+                camera_ids: all_camera_ids.into_iter().collect(),
+                created_at: Utc::now(),
+                message: format!(
+                    "直近{}時間のGrandSummaryを生成しました（検出: {}件, Hourly: {}件）",
+                    hours, total_detection_count, summaries.len()
+                ),
+            };
+            (StatusCode::CREATED, Json(response)).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to save grand summary");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "DATABASE_ERROR",
+                    "message": e.to_string()
+                })),
+            )
+                .into_response()
+        }
+    }
 }
