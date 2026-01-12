@@ -36,6 +36,8 @@ pub enum HubMessage {
     CycleStats(CycleStatsMessage),
     /// Cooldown countdown during inter-cycle pause
     CooldownTick(CooldownTickMessage),
+    /// Summary/GrandSummary report for AI Chat display
+    SummaryReport(SummaryReportMessage),
 }
 
 /// Event log message
@@ -125,6 +127,30 @@ pub struct CooldownTickMessage {
     pub phase: String,
 }
 
+/// Summary/GrandSummary report message for AI Chat
+/// Sent when SummaryScheduler generates a new Summary or GrandSummary
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryReportMessage {
+    /// Report type: "summary" or "grand_summary"
+    pub report_type: String,
+    /// Summary ID
+    pub summary_id: u64,
+    /// Period start (ISO8601)
+    pub period_start: String,
+    /// Period end (ISO8601)
+    pub period_end: String,
+    /// Total detection count
+    pub detection_count: i32,
+    /// Maximum severity in period
+    pub severity_max: i32,
+    /// Number of cameras with detections
+    pub camera_count: usize,
+    /// Human-readable summary text for chat display
+    pub summary_text: String,
+    /// Timestamp of report generation
+    pub created_at: String,
+}
+
 /// Client connection
 struct ClientConnection {
     id: Uuid,
@@ -177,6 +203,18 @@ impl RealtimeHub {
 
     /// Broadcast message to all clients
     pub async fn broadcast(&self, message: HubMessage) {
+        let msg_type = match &message {
+            HubMessage::SuggestUpdate(_) => "suggest_update",
+            HubMessage::EventLog(_) => "event_log",
+            HubMessage::SystemStatus(_) => "system_status",
+            HubMessage::CameraStatus(_) => "camera_status",
+            HubMessage::SnapshotUpdated(_) => "snapshot_updated",
+            HubMessage::CycleStats(_) => "cycle_stats",
+            HubMessage::CooldownTick(_) => "cooldown_tick",
+            HubMessage::SummaryReport(_) => "summary_report",
+        };
+        tracing::info!(message_type = %msg_type, "Broadcasting message to clients");
+
         let json = match serde_json::to_string(&message) {
             Ok(j) => j,
             Err(e) => {
@@ -186,6 +224,9 @@ impl RealtimeHub {
         };
 
         let connections = self.connections.read().await;
+        let client_count = connections.len();
+        tracing::debug!(client_count = %client_count, "Sending to connected clients");
+
         for conn in connections.values() {
             if let Err(e) = conn.tx.send(json.clone()) {
                 tracing::warn!(connection_id = %conn.id, error = %e, "Failed to send message");

@@ -11,7 +11,8 @@
  */
 
 import { useEffect, useRef, useMemo, useState } from "react"
-import type { DetectionLog, Camera } from "@/types/api"
+import type { DetectionLog, Camera, AIChatResponse, ChatMessageInput } from "@/types/api"
+import type { SummaryReportMessage } from "@/hooks/useWebSocket"
 import { useEventLogStore } from "@/stores/eventLogStore"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -159,6 +160,10 @@ interface EventLogPaneProps {
   executionState?: ExecutionState
   /** Issue #108: モバイル表示モード */
   isMobile?: boolean
+  /** Summary/GrandSummary report from scheduler (via WebSocket) */
+  summaryReport?: SummaryReportMessage | null
+  /** Callback after summary report is consumed (added to chat) */
+  onSummaryReportConsumed?: () => void
 }
 
 // [REMOVED] getEventTypeColor - replaced by getEventStyle() in Phase 2
@@ -521,6 +526,8 @@ export function EventLogPane({
   cooldownSeconds = 0,
   executionState = "waiting",
   isMobile: _isMobile = false,  // Reserved for future mobile-specific behavior
+  summaryReport,
+  onSummaryReportConsumed,
 }: EventLogPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
@@ -545,9 +552,14 @@ export function EventLogPane({
   // Chat expand modal state
   const [isChatExpandOpen, setIsChatExpandOpen] = useState(false)
 
+  // AI Chat loading state - 思考中インジケーター表示用
+  const [isChatLoading, setIsChatLoading] = useState(false)
+
   // Track new log IDs for animation (clear after animation duration)
   const [newLogIds, setNewLogIds] = useState<Set<number>>(new Set())
   const previousLogsRef = useRef<number[]>([])
+  // Track processed summary IDs to prevent duplicate messages
+  const processedSummaryIdsRef = useRef<Set<number>>(new Set())
 
   // Store state
   const {
@@ -621,7 +633,9 @@ export function EventLogPane({
     setIsDetailModalOpen(true)
   }
 
-  // Handle chat message send - AI Assistant with camera status queries
+  // Handle chat message send - AI Assistant with Paraclate APP integration
+  // Paraclate_DesignOverview.md準拠:
+  // - AIアシスタントタブからの質問に関してもParaclate APPからのレスポンスでチャットボット機能を行う
   const handleChatSend = async (message: string) => {
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -631,33 +645,107 @@ export function EventLogPane({
     }
     setChatMessages((prev) => [...prev, userMessage])
 
-    // Process the query and generate response
-    const response = await processAIQuery(message, cameras, logs)
+    // 思考中状態を開始
+    setIsChatLoading(true)
 
-    const assistantMessage: ChatMessage = {
-      id: `assistant-${Date.now()}`,
-      role: "assistant",
-      content: response,
-      timestamp: new Date(),
+    try {
+      // Call Paraclate APP AI Chat API
+      const response = await processAIQuery(message, chatMessages)
+
+      const assistantMessage: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        content: response,
+        timestamp: new Date(),
+      }
+      setChatMessages((prev) => [...prev, assistantMessage])
+    } finally {
+      // 思考中状態を終了
+      setIsChatLoading(false)
     }
-    setChatMessages((prev) => [...prev, assistantMessage])
   }
 
-  // AI Query Processor - analyzes user query and generates response
+  // AI Query Processor - Paraclate APP Integration
+  // Paraclate_DesignOverview.md準拠:
+  // - 検出特徴の人物のカメラ間での移動などを横断的に把握
+  // - カメラ不調などの傾向も把握
+  // - 過去の記録を参照する、過去の記録範囲を対話的にユーザーと会話
   async function processAIQuery(
+    query: string,
+    conversationHistory: ChatMessage[]
+  ): Promise<string> {
+    try {
+      // Get FID from cameras or use default
+      // FID is the facility identifier for lacisOath authentication
+      const fid = cameras[0]?.fid || '0150'
+
+      // Build conversation history for context
+      // Include system messages (summaries) for continuity
+      const historyForApi: ChatMessageInput[] = conversationHistory
+        .slice(-10)  // Last 10 messages for context
+        .map(m => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content,
+        }))
+
+      // Call Paraclate APP AI Chat API
+      const response = await fetch(`${API_BASE_URL}/api/paraclate/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fid,
+          message: query,
+          conversationHistory: historyForApi,
+          autoContext: true,  // Auto-collect camera & detection context
+        }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('AI Chat API error:', response.status, errorText)
+        return generateFallbackResponse(query, cameras, logs)
+      }
+
+      const result: AIChatResponse = await response.json()
+
+      if (result.ok && result.message) {
+        // Append processing time info if available
+        let aiResponse = result.message
+        if (result.processingTimeMs && result.processingTimeMs > 0) {
+          aiResponse += `\n\n_応答時間: ${result.processingTimeMs}ms_`
+        }
+        return aiResponse
+      } else {
+        console.warn('AI Chat returned error:', result.error)
+        return generateFallbackResponse(query, cameras, logs)
+      }
+    } catch (error) {
+      console.error('AI Chat request failed:', error)
+      return generateFallbackResponse(query, cameras, logs)
+    }
+  }
+
+  // Fallback response when Paraclate APP is unavailable
+  // ローカルでの簡易応答（API接続失敗時のフォールバック）
+  function generateFallbackResponse(
     query: string,
     cameras: Camera[],
     recentLogs: DetectionLog[]
-  ): Promise<string> {
+  ): string {
     const lowerQuery = query.toLowerCase()
 
     // Help/usage query
     if (lowerQuery.includes('ヘルプ') || lowerQuery.includes('使い方') || lowerQuery.includes('help')) {
       return `AIアシスタントの使い方:
+• 「今日は何かあった？」- 本日の検出状況を確認
 • 「[カメラ名]の状態」- 特定カメラの状態を確認
 • 「カメラ一覧」- 登録カメラの概要
-• 「検出サマリー」- 最近の検出状況
-• 「異常カメラ」- 問題のあるカメラを確認`
+• 「赤い服の人来なかった？」- 過去の記録を検索
+• 「異常カメラ」- 問題のあるカメラを確認
+
+※ Paraclate APP接続中は高度なAI分析が利用できます。`
     }
 
     // Camera list query
@@ -670,7 +758,7 @@ export function EventLogPane({
     }
 
     // Detection summary query
-    if (lowerQuery.includes('検出') && (lowerQuery.includes('サマリー') || lowerQuery.includes('状況') || lowerQuery.includes('概要'))) {
+    if (lowerQuery.includes('検出') || lowerQuery.includes('今日') || lowerQuery.includes('何かあった')) {
       const last24h = recentLogs.filter(log => {
         const logTime = new Date(log.captured_at).getTime()
         const now = Date.now()
@@ -678,13 +766,13 @@ export function EventLogPane({
       })
       const humanCount = last24h.filter(l => l.primary_event.toLowerCase().includes('human')).length
       const vehicleCount = last24h.filter(l => l.primary_event.toLowerCase().includes('vehicle')).length
-      const unknownCount = last24h.filter(l => l.unknown_flag).length
 
-      return `過去24時間の検出サマリー:
-• 総検出数: ${last24h.length}件
+      return `過去24時間の検出:
+• 総検出: ${last24h.length}件
 • 人物検知: ${humanCount}件
 • 車両検知: ${vehicleCount}件
-• 未分類: ${unknownCount}件`
+
+※ 詳細な分析にはParaclate APP接続が必要です。`
     }
 
     // Anomaly camera query
@@ -698,116 +786,77 @@ export function EventLogPane({
       ).join('\n')}`
     }
 
-    // Specific camera query - extract camera name
-    const cameraNameMatch = extractCameraName(query, cameras)
-    if (cameraNameMatch) {
-      return await getCameraStatusResponse(cameraNameMatch, recentLogs)
-    }
-
-    // Default response
+    // Default response - encourage Paraclate connection
     return `ご質問ありがとうございます。
 
-以下の質問に回答できます:
-• カメラの状態確認（例: "Tam-1F-Frontの状態"）
-• カメラ一覧
-• 検出サマリー
-• 異常カメラの確認
+Paraclate APP接続時は以下の高度な機能が利用できます:
+• 「今日は何かあった？」→ 検出傾向のAI分析
+• 「赤い服の人来なかった？」→ 過去記録の対話的検索
+• カメラ間での人物追跡分析
+• カメラ不調傾向の把握
 
-具体的なカメラ名を含めてお聞きください。`
+設定タブでParaclate APPに接続してください。`
   }
 
-  // Extract camera name from query using fuzzy matching
-  function extractCameraName(query: string, cameras: Camera[]): Camera | null {
-    // Try exact match first
-    for (const cam of cameras) {
-      if (query.includes(cam.name)) {
-        return cam
-      }
-    }
-
-    // Try partial match (at least 4 characters)
-    const words = query.split(/[\s、。？！の]/g).filter(w => w.length >= 3)
-    for (const word of words) {
-      for (const cam of cameras) {
-        if (cam.name.toLowerCase().includes(word.toLowerCase()) ||
-            word.toLowerCase().includes(cam.name.toLowerCase().substring(0, 6))) {
-          return cam
-        }
-      }
-    }
-
-    return null
-  }
-
-  // Generate camera status response
-  async function getCameraStatusResponse(camera: Camera, recentLogs: DetectionLog[]): Promise<string> {
-    // Get recent logs for this camera
-    const cameraLogs = recentLogs.filter(l => l.camera_id === camera.camera_id)
-    const last24hLogs = cameraLogs.filter(log => {
-      const logTime = new Date(log.captured_at).getTime()
-      return Date.now() - logTime < 24 * 60 * 60 * 1000
-    })
-
-    // Fetch attunement status
-    let attunementInfo = ''
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/attunement/status/${camera.camera_id}`)
-      if (response.ok) {
-        const data = await response.json()
-        if (data.data?.recommendations?.length > 0) {
-          attunementInfo = `\n• 推奨事項: ${data.data.recommendations[0]}`
-        }
-      }
-    } catch {
-      // Attunement info is optional
-    }
-
-    // Build status response
-    const statusEmoji = camera.enabled && camera.polling_enabled ? '🟢' : '🔴'
-    const statusText = camera.enabled && camera.polling_enabled ? 'オンライン' : 'オフライン'
-
-    const humanCount = last24hLogs.filter(l => l.primary_event.toLowerCase().includes('human')).length
-    const unknownCount = last24hLogs.filter(l => l.unknown_flag).length
-
-    let response = `${statusEmoji} ${camera.name} の状態
-
-📍 基本情報:
-• ステータス: ${statusText}
-• 場所: ${camera.location || '未設定'}
-• IP: ${camera.ip_address || '不明'}
-• プリセット: ${camera.preset_id || 'デフォルト'}
-
-📊 過去24時間の検出:
-• 総検出: ${last24hLogs.length}件
-• 人物検知: ${humanCount}件
-• 未分類: ${unknownCount}件`
-
-    if (camera.conf_override) {
-      response += `\n• 信頼度閾値: ${(camera.conf_override * 100).toFixed(0)}%`
-    }
-
-    if (attunementInfo) {
-      response += attunementInfo
-    }
-
-    if (unknownCount > last24hLogs.length * 0.3 && last24hLogs.length >= 10) {
-      response += `\n\n⚠️ 未分類検出が多いです。プリセット調整を検討してください。`
-    }
-
-    return response
-  }
-
-  // Auto-scroll chat to bottom
+  // Auto-scroll chat to bottom (including when loading indicator appears)
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
     }
-  }, [chatMessages])
+  }, [chatMessages, isChatLoading])
 
   // Save chat messages to localStorage
   useEffect(() => {
     saveChatMessages(chatMessages)
   }, [chatMessages])
+
+  // Handle Summary/GrandSummary report from scheduler
+  // Display as system message in chat
+  useEffect(() => {
+    if (!summaryReport) return
+
+    // Dedupe: skip if we've already processed this summary
+    if (processedSummaryIdsRef.current.has(summaryReport.summary_id)) {
+      onSummaryReportConsumed?.()
+      return
+    }
+
+    // Mark as processed
+    processedSummaryIdsRef.current.add(summaryReport.summary_id)
+
+    // Format period for display
+    const formatPeriod = (start: string, end: string) => {
+      const startDate = new Date(start)
+      const endDate = new Date(end)
+      const formatTime = (d: Date) => d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
+      const formatDate = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`
+
+      if (startDate.getDate() === endDate.getDate()) {
+        return `${formatDate(startDate)} ${formatTime(startDate)}〜${formatTime(endDate)}`
+      } else {
+        return `${formatDate(startDate)} ${formatTime(startDate)}〜${formatDate(endDate)} ${formatTime(endDate)}`
+      }
+    }
+
+    const reportTypeLabel = summaryReport.report_type === "grand_summary" ? "シフトサマリー" : "定時サマリー"
+    const period = formatPeriod(summaryReport.period_start, summaryReport.period_end)
+
+    const content = summaryReport.detection_count > 0
+      ? `【${reportTypeLabel}】${period}\n検出: ${summaryReport.detection_count}件（${summaryReport.camera_count}台）\n最大重要度: ${summaryReport.severity_max}\n\n${summaryReport.summary_text}`
+      : `【${reportTypeLabel}】${period}\n検出イベントなし`
+
+    const summaryMessage: ChatMessage = {
+      id: `summary-${summaryReport.summary_id}-${Date.now()}`,
+      role: "system",
+      content,
+      timestamp: new Date(summaryReport.created_at),
+    }
+
+    setChatMessages((prev) => [...prev, summaryMessage])
+
+    // Notify parent that we've consumed the report
+    onSummaryReportConsumed?.()
+  }, [summaryReport, onSummaryReportConsumed])
 
   // Fetch overdetection analysis and create suggestion messages
   useEffect(() => {
@@ -1154,6 +1203,23 @@ export function EventLogPane({
                   </div>
                 </div>
               ))}
+              {/* AI思考中インジケーター - 3点リーダーアニメーション */}
+              {isChatLoading && (
+                <div className="flex justify-start items-start gap-2">
+                  <img
+                    src={aichatIcon}
+                    alt="AI"
+                    className="w-8 h-8 flex-shrink-0 rounded-full bg-white p-0.5"
+                  />
+                  <div className="bg-[#F0F0F0] text-[#1A1A1A] rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1178,6 +1244,7 @@ export function EventLogPane({
         onSend={handleChatSend}
         onPresetChange={handlePresetChange}
         onDismiss={handleDismissSuggestion}
+        isLoading={isChatLoading}
       />
     </div>
   )

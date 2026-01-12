@@ -870,3 +870,45 @@ export interface AraneaClearResult {
   ok: boolean;
   message: string;
 }
+
+// =============================================================================
+// AI Chat API Types (Paraclate APP Integration)
+// =============================================================================
+
+// AI Chat request
+export interface AIChatRequest {
+  fid: string;
+  message: string;
+  conversationHistory?: ChatMessageInput[];
+  autoContext?: boolean;
+}
+
+// Chat message for history
+// Note: 'system' role is used for summary messages and other system notifications
+export interface ChatMessageInput {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+// AI Chat response from Paraclate APP
+export interface AIChatResponse {
+  ok: boolean;
+  message?: string;
+  relatedData?: RelatedData;
+  processingTimeMs?: number;
+  error?: string;
+}
+
+// Related data from AI response
+export interface RelatedData {
+  detectionLogIds?: number[];
+  snapshots?: SnapshotRef[];
+  cameras?: string[];
+}
+
+// Snapshot reference
+export interface SnapshotRef {
+  tid: string;
+  fileId: string;
+  storagePath: string;
+}
