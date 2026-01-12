@@ -1082,12 +1082,36 @@ impl ParaclateClient {
                         ParaclateError::Http(format!("Failed to parse AI chat response: {}", e))
                     })?;
 
+                    // デバッグ: mobes2.0の生レスポンスをログ出力
+                    debug!(
+                        tid = %tid,
+                        fid = %fid,
+                        raw_response = %serde_json::to_string(&body).unwrap_or_default(),
+                        "Raw AI chat response from mobes2.0"
+                    );
+
                     // レスポンス解析
-                    let message = body.get("message")
+                    // mobes2.0は response.text にAI応答を返す
+                    // { "success": true, "response": { "text": "...", "suggestions": [] } }
+                    let message = body.get("response")
+                        .and_then(|r| r.get("text"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        // フォールバック: トップレベルのmessage/text
+                        .or_else(|| body.get("message").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                        .or_else(|| body.get("text").and_then(|v| v.as_str()).map(|s| s.to_string()));
+
+                    // 会話IDを取得（将来的に会話継続に使用可能）
+                    let conversation_id = body.get("conversationId")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
 
+                    if let Some(conv_id) = &conversation_id {
+                        debug!(conversation_id = %conv_id, "AI chat conversation ID received");
+                    }
+
                     let related_data = body.get("relatedData")
+                        .or_else(|| body.get("related_data"))
                         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
                     info!(
@@ -1095,6 +1119,7 @@ impl ParaclateClient {
                         fid = %fid,
                         elapsed_ms = elapsed_ms,
                         message_len = message.as_ref().map(|m| m.len()).unwrap_or(0),
+                        has_message = message.is_some(),
                         "AI chat response received"
                     );
 
