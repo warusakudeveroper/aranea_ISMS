@@ -823,7 +823,7 @@ export function SettingsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[85vh] flex flex-col">
+      <DialogContent className="max-w-6xl w-[95vw] md:w-auto h-[90vh] md:h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="h-5 w-5" />
@@ -832,52 +832,53 @@ export function SettingsModal({
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-12">
-            <TabsTrigger value="display" className="flex items-center gap-1 text-xs">
+          {/* モバイル: 横スクロール可能、デスクトップ: グリッド12列 */}
+          <TabsList className="flex overflow-x-auto md:grid md:w-full md:grid-cols-12 gap-1 md:gap-0 pb-1 md:pb-0">
+            <TabsTrigger value="display" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Video className="h-4 w-4" />
               表示
             </TabsTrigger>
-            <TabsTrigger value="preset" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="preset" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Settings2 className="h-4 w-4" />
               検出
             </TabsTrigger>
-            <TabsTrigger value="sdm" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="sdm" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Bell className="h-4 w-4" />
               Nest
             </TabsTrigger>
-            <TabsTrigger value="is21" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="is21" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Server className="h-4 w-4" />
               IS21
             </TabsTrigger>
-            <TabsTrigger value="system" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="system" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Cpu className="h-4 w-4" />
               システム
             </TabsTrigger>
-            <TabsTrigger value="storage" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="storage" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <HardDrive className="h-4 w-4" />
               保存
             </TabsTrigger>
-            <TabsTrigger value="performance" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="performance" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <TrendingUp className="h-4 w-4" />
               ログ
             </TabsTrigger>
-            <TabsTrigger value="polling" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="polling" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <ListFilter className="h-4 w-4" />
               巡回
             </TabsTrigger>
-            <TabsTrigger value="dashboard" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="dashboard" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Gauge className="h-4 w-4" />
               統計
             </TabsTrigger>
-            <TabsTrigger value="ai" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="ai" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Bot className="h-4 w-4" />
               Paraclate
             </TabsTrigger>
-            <TabsTrigger value="aranea" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="aranea" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Shield className="h-4 w-4" />
               登録
             </TabsTrigger>
-            <TabsTrigger value="brands" className="flex items-center gap-1 text-xs">
+            <TabsTrigger value="brands" className="flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap">
               <Tags className="h-4 w-4" />
               ブランド
             </TabsTrigger>

@@ -86,6 +86,18 @@ function TypedText({ text, onComplete }: { text: string; onComplete?: () => void
   )
 }
 
+// モバイル判定 (768px以下)
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= 768)
+    check()
+    window.addEventListener("resize", check)
+    return () => window.removeEventListener("resize", check)
+  }, [])
+  return isMobile
+}
+
 export function ChatExpandModal({
   isOpen,
   onClose,
@@ -94,6 +106,7 @@ export function ChatExpandModal({
   onPresetChange,
   onDismiss,
 }: ChatExpandModalProps) {
+  const isMobile = useIsMobile()
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
@@ -216,10 +229,16 @@ export function ChatExpandModal({
       aria-modal="true"
       aria-labelledby="chat-modal-title"
     >
-      {/* Modal Container */}
+      {/* Modal Container - モバイル対応 */}
       <div
         ref={modalRef}
-        className="w-[90vw] max-w-2xl h-[85vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        className={cn(
+          "bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200",
+          // モバイル: フルスクリーンに近い表示、safe-area対応
+          isMobile
+            ? "w-[95vw] h-[90vh] max-h-[calc(100vh-env(safe-area-inset-top)-env(safe-area-inset-bottom))]"
+            : "w-[90vw] max-w-2xl h-[85vh]"
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -359,26 +378,37 @@ export function ChatExpandModal({
           )}
         </div>
 
-        {/* Input Area - matching main page feel but larger */}
-        <div className="border-t p-3 bg-gray-50 flex-shrink-0">
+        {/* Input Area - モバイル対応: タッチターゲット拡大、safe-area */}
+        <div className={cn(
+          "border-t bg-gray-50 flex-shrink-0",
+          isMobile ? "p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]" : "p-3"
+        )}>
           <div className="flex items-center gap-2">
             <input
               ref={inputRef}
               type="text"
               placeholder="メッセージを入力..."
-              className="flex-1 px-4 py-2.5 rounded-full border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className={cn(
+                "flex-1 rounded-full border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                // モバイル: 大きめのタッチターゲット
+                isMobile ? "px-4 py-3 text-base" : "px-4 py-2.5 text-sm"
+              )}
               onKeyDown={handleKeyDown}
             />
             <button
               onClick={handleSend}
-              className="p-2.5 rounded-full bg-[#007AFF] hover:bg-[#0066CC] text-white transition-colors shadow-md flex-shrink-0"
+              className={cn(
+                "rounded-full bg-[#007AFF] hover:bg-[#0066CC] text-white transition-colors shadow-md flex-shrink-0",
+                // モバイル: 44x44px最小タッチターゲット
+                isMobile ? "p-3" : "p-2.5"
+              )}
               aria-label="送信"
             >
-              <Send className="h-5 w-5" />
+              <Send className={isMobile ? "h-6 w-6" : "h-5 w-5"} />
             </button>
           </div>
           <p className="text-[10px] text-gray-400 mt-1.5 text-center">
-            ESCキーまたはモーダル外クリックで閉じる
+            {isMobile ? "背景タップで閉じる" : "ESCキーまたはモーダル外クリックで閉じる"}
           </p>
         </div>
       </div>
