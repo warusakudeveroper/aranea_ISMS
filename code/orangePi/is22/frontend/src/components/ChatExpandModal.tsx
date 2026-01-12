@@ -256,7 +256,7 @@ export function ChatExpandModal({
               <p className="text-xs mt-1">カメラ設定やシステムについてお答えします</p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 pb-16">
               {visibleMessages.map((msg) => {
                 // Only animate if explicitly marked with typingMessageId
                 const shouldAnimate = msg.role === "assistant" &&
@@ -280,74 +280,77 @@ export function ChatExpandModal({
                       />
                     )}
 
-                    {/* Message Bubble - iOS style matching main page exactly */}
-                    <div
-                      className={cn(
-                        "max-w-[80%] text-xs px-3 py-2 rounded-2xl shadow-sm",
-                        // User message: iOS blue background, white text, right tail
-                        msg.role === "user" && "bg-[#007AFF] text-white rounded-tr-sm",
-                        // System/Assistant message: light gray background, dark text, left tail
-                        (msg.role === "system" || msg.role === "assistant") && "bg-[#F0F0F0] text-[#1A1A1A] rounded-tl-sm"
-                      )}
-                    >
-                      {/* Message Content with optional typing animation */}
-                      <div className="leading-relaxed whitespace-pre-wrap">
-                        {shouldAnimate ? (
-                          <TypedText
-                            key={msg.id}
-                            text={msg.content}
-                            onComplete={() => {
-                              if (msg.id === typingMessageId) {
-                                setTypingMessageId(null)
-                              }
-                              scrollToBottom()
-                            }}
-                          />
-                        ) : (
-                          msg.content
+                    {/* Message container with bubble and external timestamp */}
+                    <div className={cn(
+                      "max-w-[80%] flex flex-col",
+                      msg.role === "user" ? "items-end" : "items-start"
+                    )}>
+                      {/* Message Bubble - iOS style matching main page exactly */}
+                      <div
+                        className={cn(
+                          "text-xs px-3 py-2 rounded-2xl shadow-sm",
+                          // User message: iOS blue background, white text, right tail
+                          msg.role === "user" && "bg-[#007AFF] text-white rounded-tr-sm",
+                          // System/Assistant message: light gray background, dark text, left tail
+                          (msg.role === "system" || msg.role === "assistant") && "bg-[#F0F0F0] text-[#1A1A1A] rounded-tl-sm"
+                        )}
+                      >
+                        {/* Message Content with optional typing animation */}
+                        <div className="leading-relaxed whitespace-pre-wrap">
+                          {shouldAnimate ? (
+                            <TypedText
+                              key={msg.id}
+                              text={msg.content}
+                              onComplete={() => {
+                                if (msg.id === typingMessageId) {
+                                  setTypingMessageId(null)
+                                }
+                                scrollToBottom()
+                              }}
+                            />
+                          ) : (
+                            msg.content
+                          )}
+                        </div>
+
+                        {/* Action Buttons for System Messages - matching main page style */}
+                        {msg.role === "system" && msg.actionMeta && !msg.handled && (
+                          <div className="flex gap-2 mt-2 pt-2 border-t border-gray-300">
+                            <button
+                              onClick={() => onPresetChange(
+                                msg.actionMeta!.cameraId,
+                                msg.actionMeta!.presetId,
+                                msg.id
+                              )}
+                              className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-[#007AFF] hover:bg-[#0066CC] text-white"
+                            >
+                              はい
+                            </button>
+                            <button
+                              onClick={() => onDismiss(msg.id)}
+                              className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-gray-300 hover:bg-gray-400 text-gray-700"
+                            >
+                              いいえ
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Handled Indicator */}
+                        {msg.role === "system" && msg.handled && (
+                          <div className="mt-1.5 text-[10px] text-gray-500 flex items-center gap-1">
+                            <span>✓</span>
+                            <span>対応済み</span>
+                          </div>
                         )}
                       </div>
 
-                      {/* Timestamp - matching main page style */}
-                      <div className={cn(
-                        "text-[9px] mt-1",
-                        msg.role === "user" ? "text-right text-white/70" : "text-right text-gray-500"
-                      )}>
+                      {/* Timestamp - outside bubble, bottom-right */}
+                      <div className="text-[9px] text-gray-400 mt-0.5 px-1">
                         {msg.timestamp.toLocaleTimeString("ja-JP", {
                           hour: "2-digit",
                           minute: "2-digit"
                         })}
                       </div>
-
-                      {/* Action Buttons for System Messages - matching main page style */}
-                      {msg.role === "system" && msg.actionMeta && !msg.handled && (
-                        <div className="flex gap-2 mt-2 pt-2 border-t border-gray-300">
-                          <button
-                            onClick={() => onPresetChange(
-                              msg.actionMeta!.cameraId,
-                              msg.actionMeta!.presetId,
-                              msg.id
-                            )}
-                            className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-[#007AFF] hover:bg-[#0066CC] text-white"
-                          >
-                            はい
-                          </button>
-                          <button
-                            onClick={() => onDismiss(msg.id)}
-                            className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors bg-gray-300 hover:bg-gray-400 text-gray-700"
-                          >
-                            いいえ
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Handled Indicator */}
-                      {msg.role === "system" && msg.handled && (
-                        <div className="mt-1.5 text-[10px] text-gray-500 flex items-center gap-1">
-                          <span>✓</span>
-                          <span>対応済み</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 )
