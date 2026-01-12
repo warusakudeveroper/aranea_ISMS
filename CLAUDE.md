@@ -86,6 +86,34 @@ araneaシリーズIoTデバイス開発(araneaDevices)プロジェクト。離�
 - バイナリ: `/opt/is22/target/release/camserver`
 - サービス再起動: `sudo systemctl restart is22`
 
+## is22 ↔ mobes2.0 連携（重要）
+
+### 共有ドキュメント置き場
+**mobes2.0リポジトリ内の共有ディレクトリを使用すること**
+
+```
+リポジトリ: warusakudeveroper/mobes2.0
+パス: doc/APPS/Paraclate/LLM/
+```
+
+- is22側からの報告・確認依頼もここに配置
+- mobes2.0側からの回答・調査報告もここに配置
+- GitHub CLI (`gh`) でアクセス可能
+
+### アクセス方法
+```bash
+# ファイル取得
+gh api repos/warusakudeveroper/mobes2.0/contents/doc/APPS/Paraclate/LLM/{filename}.md --jq '.content' | base64 -d
+
+# ファイル一覧
+gh api repos/warusakudeveroper/mobes2.0/contents/doc/APPS/Paraclate/LLM --jq '.[].name'
+```
+
+### 関連ドキュメント
+- `DataArchitecture_Investigation_Report.md` - データアーキテクチャ調査報告
+- SSoT（Single Source of Truth）: 検知ログ/サマリーはis22が正
+- mobes側はHot Cache（7日TTL）のみ保持
+
 ### Data Flow
 
   
