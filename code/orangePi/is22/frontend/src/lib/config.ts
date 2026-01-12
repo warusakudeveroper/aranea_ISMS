@@ -1,9 +1,5 @@
-// API Base URL - in production, use the IS22 backend port
-export const API_BASE_URL = import.meta.env.DEV
-  ? "" // In dev mode, Vite proxy handles /api/*
-  : "http://192.168.125.246:8080"
+// API Base URL - use same origin (served from Rust backend)
+export const API_BASE_URL = ""
 
-// WebSocket URL
-export const WS_BASE_URL = import.meta.env.DEV
-  ? `ws://${window.location.host}`
-  : "ws://192.168.125.246:8080"
+// WebSocket URL - use same origin
+export const WS_BASE_URL = `ws://${window.location.host}`

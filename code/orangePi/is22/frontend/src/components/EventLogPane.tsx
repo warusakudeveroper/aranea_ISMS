@@ -32,12 +32,14 @@ import {
   Clock,
   Pause,
   Play,
-  Loader2
+  Loader2,
+  Maximize2
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { API_BASE_URL } from "@/lib/config"
 import { ChatInput } from "./ChatInput"
 import { DetectionDetailModal } from "./DetectionDetailModal"
+import { ChatExpandModal } from "./ChatExpandModal"
 import { loadAIAssistantSettings } from "./SettingsModal"
 import aichatIcon from "@/assets/aichat_icon.svg"
 
@@ -344,6 +346,8 @@ interface ChatMessage {
   actions?: ChatMessageAction[]
   actionMeta?: ActionMeta  // Serializable action metadata
   handled?: boolean  // For tracking if action was taken
+  dismissAt?: number  // Timestamp when message should be hidden (for auto-dismiss)
+  isHiding?: boolean  // True when slide-out animation is active
 }
 
 // LocalStorage key for chat messages persistence
@@ -537,6 +541,9 @@ export function EventLogPane({
   // Detection detail modal state
   const [selectedLog, setSelectedLog] = useState<DetectionLog | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+
+  // Chat expand modal state
+  const [isChatExpandOpen, setIsChatExpandOpen] = useState(false)
 
   // Track new log IDs for animation (clear after animation duration)
   const [newLogIds, setNewLogIds] = useState<Set<number>>(new Set())
@@ -812,18 +819,44 @@ export function EventLogPane({
     }
   }
 
-  // Handle dismiss suggestion
+  // Handle dismiss suggestion - sets 1 minute auto-dismiss timer
   const handleDismissSuggestion = (messageId: string) => {
     setChatMessages(prev => prev.map(msg =>
       msg.id === messageId ? { ...msg, handled: true } : msg
     ))
+    // Add dismiss confirmation with auto-dismiss after 1 minute
+    const dismissTime = Date.now() + 60000  // 1 minute from now
     setChatMessages(prev => [...prev, {
       id: `dismiss-${Date.now()}`,
       role: "assistant",
       content: "了解しました。現在の設定を維持します。",
       timestamp: new Date(),
+      dismissAt: dismissTime,  // Auto-dismiss after 1 minute
     }])
   }
+
+  // Auto-dismiss effect - check every second for messages to hide
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now()
+      setChatMessages(prev => {
+        const updated = prev.map(msg => {
+          // Check if message should start hiding animation
+          if (msg.dismissAt && !msg.isHiding && now >= msg.dismissAt) {
+            return { ...msg, isHiding: true }
+          }
+          return msg
+        })
+        // Only update if something changed
+        if (JSON.stringify(updated) !== JSON.stringify(prev)) {
+          return updated
+        }
+        return prev
+      })
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   return (
     <div className="h-full flex flex-col">
@@ -883,20 +916,29 @@ export function EventLogPane({
       {/* Lower Half: Chat */}
       <div className="h-1/2 flex flex-col">
         {/* Chat Header */}
-        <div className="flex items-center gap-2 p-2 border-b flex-shrink-0">
-          <MessageCircle className="h-3 w-3 text-primary" />
-          <span className="text-xs font-medium">AIアシスタント</span>
+        <div className="flex items-center justify-between p-2 border-b flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="h-3 w-3 text-primary" />
+            <span className="text-xs font-medium">AIアシスタント</span>
+          </div>
+          <button
+            onClick={() => setIsChatExpandOpen(true)}
+            className="p-1 rounded hover:bg-muted transition-colors"
+            title="拡大表示"
+          >
+            <Maximize2 className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" />
+          </button>
         </div>
 
         {/* Chat History */}
         <div className="flex-1 overflow-auto p-2" ref={chatScrollRef}>
-          {chatMessages.length === 0 ? (
+          {chatMessages.filter(m => !m.isHiding).length === 0 ? (
             <div className="text-center text-muted-foreground text-xs py-4">
               質問を入力してください
             </div>
           ) : (
             <div className="space-y-3">
-              {chatMessages.map((msg) => (
+              {chatMessages.filter(m => !m.isHiding).map((msg) => (
                 <div
                   key={msg.id}
                   className={cn(
@@ -972,6 +1014,16 @@ export function EventLogPane({
         isOpen={isDetailModalOpen}
         onClose={() => setIsDetailModalOpen(false)}
         cameraName={selectedLog ? getCameraName(selectedLog.lacis_id || '') : ''}
+      />
+
+      {/* Chat Expand Modal */}
+      <ChatExpandModal
+        isOpen={isChatExpandOpen}
+        onClose={() => setIsChatExpandOpen(false)}
+        messages={chatMessages}
+        onSend={handleChatSend}
+        onPresetChange={handlePresetChange}
+        onDismiss={handleDismissSuggestion}
       />
     </div>
   )

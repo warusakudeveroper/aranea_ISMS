@@ -39,6 +39,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -325,10 +326,17 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Create router
+    // Create router with static file serving
+    let static_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "/opt/is22/frontend/dist".to_string());
+    let serve_dir = ServeDir::new(&static_dir)
+        .not_found_service(ServeFile::new(format!("{}/index.html", static_dir)));
+
     let app = web_api::create_router(state.clone())
+        .fallback_service(serve_dir)
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .layer(TraceLayer::new_for_http());
+
+    tracing::info!(static_dir = %static_dir, "Static file serving enabled");
 
     // Start cleanup task
     let admission_cleanup = state.admission.clone();

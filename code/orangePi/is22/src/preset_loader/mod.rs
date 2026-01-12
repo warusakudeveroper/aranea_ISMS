@@ -229,7 +229,7 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: Some("person_detailed".to_string()),
-            conf_override: Some(0.35),
+            conf_override: Some(0.45),  // v2.0.1: 0.35→0.45 unknown flood対策
             nms_threshold: None,
             par_threshold: Some(0.4),
             suggested_interval_sec: 10,
