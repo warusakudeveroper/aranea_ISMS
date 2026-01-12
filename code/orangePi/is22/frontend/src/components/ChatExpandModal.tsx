@@ -246,7 +246,7 @@ export function ChatExpandModal({
 
         {/* Messages Area */}
         <div
-          className="flex-1 overflow-y-auto p-4 scroll-smooth"
+          className="flex-1 overflow-y-auto p-4"
           ref={scrollRef}
         >
           {visibleMessages.length === 0 ? (
