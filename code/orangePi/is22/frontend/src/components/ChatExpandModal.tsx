@@ -42,6 +42,7 @@ interface ChatExpandModalProps {
   onSend: (message: string) => void
   onPresetChange: (cameraId: string, presetId: string, messageId: string) => void
   onDismiss: (messageId: string) => void
+  isLoading?: boolean  // AI思考中状態
 }
 
 // Typing animation component - uses useRef to avoid re-render loops
@@ -105,6 +106,7 @@ export function ChatExpandModal({
   onSend,
   onPresetChange,
   onDismiss,
+  isLoading = false,
 }: ChatExpandModalProps) {
   const isMobile = useIsMobile()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -191,6 +193,9 @@ export function ChatExpandModal({
 
   // Handle key press in input
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // IME変換中はEnterで送信しない（日本語入力対応）
+    if (e.nativeEvent.isComposing) return
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -374,6 +379,23 @@ export function ChatExpandModal({
                   </div>
                 )
               })}
+              {/* AI思考中インジケーター - 3点リーダーアニメーション */}
+              {isLoading && (
+                <div className="flex justify-start items-start gap-2 animate-in slide-in-from-bottom-2 duration-300">
+                  <img
+                    src={aichatIcon}
+                    alt="AI"
+                    className="w-8 h-8 flex-shrink-0 rounded-full bg-white p-0.5"
+                  />
+                  <div className="bg-[#F0F0F0] rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+                    <div className="flex gap-1.5 items-center">
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

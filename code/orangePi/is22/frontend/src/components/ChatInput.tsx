@@ -42,6 +42,9 @@ export function ChatInput({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // IME変換中はEnterで送信しない（日本語入力対応）
+    if (e.nativeEvent.isComposing) return
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSend()

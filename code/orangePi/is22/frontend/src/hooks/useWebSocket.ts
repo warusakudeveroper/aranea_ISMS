@@ -64,9 +64,43 @@ export interface CooldownTickMessage {
   phase: string  // "pre_cycle" (3-2-1 countdown before cycle start) or "inter_cycle" (cooldown between cycles)
 }
 
+// Summary/GrandSummary report for AI Chat display
+export interface SummaryReportMessage {
+  report_type: string  // "summary" or "grand_summary"
+  summary_id: number
+  period_start: string  // ISO8601
+  period_end: string    // ISO8601
+  detection_count: number
+  severity_max: number
+  camera_count: number
+  summary_text: string
+  created_at: string
+}
+
+// Chat message data for WebSocket sync
+export interface ChatMessageData {
+  message_id: string
+  role: string
+  content: string
+  timestamp: string
+  handled: boolean
+  action_type?: string
+  action_camera_id?: string
+  action_preset_id?: string
+  dismiss_at?: number
+  is_hiding: boolean
+}
+
+// Chat message sync for cross-device real-time updates
+export interface ChatSyncMessage {
+  action: "created" | "updated" | "deleted" | "cleared"
+  message?: ChatMessageData
+  message_id?: string
+}
+
 export interface HubMessage {
-  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated" | "cycle_stats" | "cooldown_tick"
-  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | CycleStatsMessage | CooldownTickMessage | unknown
+  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated" | "cycle_stats" | "cooldown_tick" | "summary_report" | "chat_sync"
+  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | CycleStatsMessage | CooldownTickMessage | SummaryReportMessage | ChatSyncMessage | unknown
 }
 
 interface UseWebSocketOptions {
@@ -76,6 +110,8 @@ interface UseWebSocketOptions {
   onSnapshotUpdated?: (msg: SnapshotUpdatedMessage) => void
   onCycleStats?: (msg: CycleStatsMessage) => void
   onCooldownTick?: (msg: CooldownTickMessage) => void
+  onSummaryReport?: (msg: SummaryReportMessage) => void
+  onChatSync?: (msg: ChatSyncMessage) => void
   onMessage?: (msg: HubMessage) => void
   reconnectInterval?: number
 }
@@ -124,6 +160,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             callbacks.onCycleStats(msg.data as CycleStatsMessage)
           } else if (msg.type === "cooldown_tick" && callbacks.onCooldownTick) {
             callbacks.onCooldownTick(msg.data as CooldownTickMessage)
+          } else if (msg.type === "summary_report" && callbacks.onSummaryReport) {
+            callbacks.onSummaryReport(msg.data as SummaryReportMessage)
+          } else if (msg.type === "chat_sync" && callbacks.onChatSync) {
+            callbacks.onChatSync(msg.data as ChatSyncMessage)
           }
 
           // Generic message handler

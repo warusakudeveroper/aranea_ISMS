@@ -6,8 +6,10 @@
 //! ## SSoT: Paraclate_DesignOverview.md
 
 use super::types::{
-    CameraContextItem, CameraDetectionItem, PayloadLacisOath, SummaryOverview, SummaryPayload,
+    CameraContextItem, CameraDetectionItem, CameraStatusSummary, PayloadLacisOath, SummaryOverview,
+    SummaryPayload,
 };
+use std::collections::HashSet;
 use crate::camera_registry::{CameraContext, ContextMapEntry};
 use crate::detection_log_service::DetectionLog;
 use chrono::{DateTime, Utc};
@@ -88,7 +90,7 @@ impl PayloadBuilder {
             .filter_map(|log| {
                 log.camera_lacis_id.as_ref().map(|lacis_id| {
                     CameraDetectionItem {
-                        timestamp: log.detected_at.to_rfc3339(),
+                        timestamp: log.captured_at.to_rfc3339(),
                         camera_lacis_id: lacis_id.clone(),
                         detection_detail: self.format_detection_detail(log),
                     }
@@ -96,9 +98,15 @@ impl PayloadBuilder {
             })
             .collect();
 
+        // カメラステータスサマリー構築
+        let camera_status_summary =
+            self.build_camera_status_summary(detection_logs, camera_context_map);
+
         debug!(
             detection_count = detection_logs.len(),
             camera_count = camera_context.len(),
+            offline_cameras = camera_status_summary.offline_cameras,
+            system_health = %camera_status_summary.system_health,
             "Built summary payload"
         );
 
@@ -107,17 +115,67 @@ impl PayloadBuilder {
             summary_overview,
             camera_context,
             camera_detection,
+            camera_status_summary,
+        }
+    }
+
+    /// カメラステータスサマリーを構築
+    /// camera_lost イベントを集計してシステム健全性を判定
+    fn build_camera_status_summary(
+        &self,
+        detection_logs: &[DetectionLog],
+        camera_context_map: &HashMap<String, ContextMapEntry>,
+    ) -> CameraStatusSummary {
+        let total_cameras = camera_context_map.len() as i32;
+
+        // camera_lost イベントを集計
+        let mut offline_camera_ids: HashSet<String> = HashSet::new();
+        let mut connection_lost_events = 0i32;
+
+        for log in detection_logs {
+            if log.primary_event == "camera_lost" || log.primary_event == "connection_lost" {
+                connection_lost_events += 1;
+                if let Some(lacis_id) = &log.camera_lacis_id {
+                    offline_camera_ids.insert(lacis_id.clone());
+                }
+            }
+        }
+
+        let offline_cameras = offline_camera_ids.len() as i32;
+        let online_cameras = total_cameras - offline_cameras;
+
+        // システム健全性判定
+        // - healthy: 接続ロストなし
+        // - degraded: 一部カメラで接続ロスト（50%未満）
+        // - critical: 半数以上のカメラで接続ロスト
+        let system_health = if offline_cameras == 0 {
+            "healthy".to_string()
+        } else if total_cameras > 0 && (offline_cameras as f32 / total_cameras as f32) >= 0.5 {
+            "critical".to_string()
+        } else {
+            "degraded".to_string()
+        };
+
+        CameraStatusSummary {
+            total_cameras,
+            online_cameras,
+            offline_cameras,
+            offline_camera_ids: offline_camera_ids.into_iter().collect(),
+            connection_lost_events,
+            system_health,
         }
     }
 
     /// 検出詳細をJSON文字列にフォーマット
+    /// mobes summaryImageContext.ts 対応: confidence追加
     fn format_detection_detail(&self, log: &DetectionLog) -> String {
         serde_json::json!({
-            "detection_id": log.id,
+            "detection_id": log.log_id,
             "camera_id": log.camera_id,
-            "detection_reason": log.detection_reason,
-            "suspicious_score": log.suspicious_score,
-            "object_count": log.object_count
+            "primary_event": log.primary_event,
+            "severity": log.severity,
+            "confidence": log.confidence,
+            "count_hint": log.count_hint
         })
         .to_string()
     }
@@ -146,15 +204,15 @@ pub fn calculate_detect_times(logs: &[DetectionLog]) -> (DateTime<Utc>, DateTime
         return (now, now);
     }
 
-    let mut first = logs[0].detected_at;
-    let mut last = logs[0].detected_at;
+    let mut first = logs[0].captured_at;
+    let mut last = logs[0].captured_at;
 
     for log in logs {
-        if log.detected_at < first {
-            first = log.detected_at;
+        if log.captured_at < first {
+            first = log.captured_at;
         }
-        if log.detected_at > last {
-            last = log.detected_at;
+        if log.captured_at > last {
+            last = log.captured_at;
         }
     }
 

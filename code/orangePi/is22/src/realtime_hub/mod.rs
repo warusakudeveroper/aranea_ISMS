@@ -38,6 +38,8 @@ pub enum HubMessage {
     CooldownTick(CooldownTickMessage),
     /// Summary/GrandSummary report for AI Chat display
     SummaryReport(SummaryReportMessage),
+    /// Chat message sync (cross-device real-time sync)
+    ChatSync(ChatSyncMessage),
 }
 
 /// Event log message
@@ -151,6 +153,38 @@ pub struct SummaryReportMessage {
     pub created_at: String,
 }
 
+/// Chat message sync for cross-device real-time updates
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatSyncMessage {
+    /// Action type: "created", "updated", "deleted", "cleared"
+    pub action: String,
+    /// Message data (None for "cleared" action)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<ChatMessageData>,
+    /// Message ID (for delete action)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+}
+
+/// Chat message data for WebSocket sync
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessageData {
+    pub message_id: String,
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+    pub handled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_camera_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dismiss_at: Option<i64>,
+    pub is_hiding: bool,
+}
+
 /// Client connection
 struct ClientConnection {
     id: Uuid,
@@ -212,6 +246,7 @@ impl RealtimeHub {
             HubMessage::CycleStats(_) => "cycle_stats",
             HubMessage::CooldownTick(_) => "cooldown_tick",
             HubMessage::SummaryReport(_) => "summary_report",
+            HubMessage::ChatSync(_) => "chat_sync",
         };
         tracing::info!(message_type = %msg_type, "Broadcasting message to clients");
 

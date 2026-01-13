@@ -150,6 +150,27 @@ pub struct SummaryPayload {
     pub summary_overview: SummaryOverview,
     pub camera_context: HashMap<String, CameraContextItem>,
     pub camera_detection: Vec<CameraDetectionItem>,
+    /// カメラステータスサマリー（接続状態の集計）
+    pub camera_status_summary: CameraStatusSummary,
+}
+
+/// カメラステータスサマリー
+/// LLMが「すべて稼働中」か「接続問題あり」を正確に判定するための情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraStatusSummary {
+    /// 総カメラ数
+    pub total_cameras: i32,
+    /// オンラインカメラ数
+    pub online_cameras: i32,
+    /// オフライン（接続ロスト）カメラ数
+    pub offline_cameras: i32,
+    /// 接続ロスト発生カメラのLacisIDリスト
+    pub offline_camera_ids: Vec<String>,
+    /// 接続ロストイベント総数（期間内）
+    pub connection_lost_events: i32,
+    /// システム健全性: "healthy" | "degraded" | "critical"
+    pub system_health: String,
 }
 
 /// LacisOath（ペイロード用）

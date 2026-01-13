@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useMemo, useState } from "react"
 import type { DetectionLog, Camera, AIChatResponse, ChatMessageInput } from "@/types/api"
-import type { SummaryReportMessage } from "@/hooks/useWebSocket"
+import type { SummaryReportMessage, ChatSyncMessage } from "@/hooks/useWebSocket"
 import { useEventLogStore } from "@/stores/eventLogStore"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -164,6 +164,10 @@ interface EventLogPaneProps {
   summaryReport?: SummaryReportMessage | null
   /** Callback after summary report is consumed (added to chat) */
   onSummaryReportConsumed?: () => void
+  /** Chat sync message for cross-device real-time updates */
+  chatSyncMessage?: ChatSyncMessage | null
+  /** Callback after chat sync message is consumed */
+  onChatSyncConsumed?: () => void
 }
 
 // [REMOVED] getEventTypeColor - replaced by getEventStyle() in Phase 2
@@ -355,38 +359,109 @@ interface ChatMessage {
   isHiding?: boolean  // True when slide-out animation is active
 }
 
-// LocalStorage key for chat messages persistence
-const CHAT_STORAGE_KEY = 'is22_chat_messages'
+// API-based chat message persistence (cross-device sync)
+// Design: All data stored on backend, no browser-local storage
 
-// Load chat messages from localStorage
-function loadChatMessages(): ChatMessage[] {
+interface ChatMessageAPI {
+  message_id: string
+  role: string
+  content: string
+  timestamp: string
+  handled: boolean
+  action_type?: string
+  action_camera_id?: string
+  action_preset_id?: string
+  dismiss_at?: number
+  is_hiding: boolean
+}
+
+// Load chat messages from backend API
+async function loadChatMessagesFromAPI(): Promise<ChatMessage[]> {
   try {
-    const stored = localStorage.getItem(CHAT_STORAGE_KEY)
-    if (!stored) return []
-    const parsed = JSON.parse(stored)
-    // Convert timestamp strings back to Date objects
-    return parsed.map((msg: ChatMessage & { timestamp: string }) => ({
-      ...msg,
+    const response = await fetch(`${API_BASE_URL}/api/chat/messages?limit=100`)
+    if (!response.ok) return []
+    const result = await response.json()
+    if (!result.ok || !result.data) return []
+
+    return result.data.map((msg: ChatMessageAPI) => ({
+      id: msg.message_id,
+      role: msg.role as 'user' | 'assistant' | 'system',
+      content: msg.content,
       timestamp: new Date(msg.timestamp),
-      // Restore actions for system messages (not persisted, will be re-created on next check)
-      actions: undefined,
+      handled: msg.handled,
+      actionMeta: msg.action_type ? {
+        type: msg.action_type as 'preset_change',
+        cameraId: msg.action_camera_id || '',
+        presetId: msg.action_preset_id || '',
+      } : undefined,
+      dismissAt: msg.dismiss_at,
+      isHiding: msg.is_hiding,
     }))
-  } catch {
+  } catch (err) {
+    console.error('Failed to load chat messages from API:', err)
     return []
   }
 }
 
-// Save chat messages to localStorage
-function saveChatMessages(messages: ChatMessage[]) {
+// Save a single chat message to backend API
+async function saveChatMessageToAPI(msg: ChatMessage): Promise<boolean> {
   try {
-    // Don't save action functions (they can't be serialized)
-    const toSave = messages.map(msg => ({
-      ...msg,
-      actions: undefined,
-    }))
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(toSave))
+    const apiMsg: ChatMessageAPI = {
+      message_id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp.toISOString(),
+      handled: msg.handled || false,
+      action_type: msg.actionMeta?.type,
+      action_camera_id: msg.actionMeta?.cameraId,
+      action_preset_id: msg.actionMeta?.presetId,
+      dismiss_at: msg.dismissAt,
+      is_hiding: msg.isHiding || false,
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/chat/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(apiMsg),
+    })
+    return response.ok
   } catch (err) {
-    console.error('Failed to save chat messages:', err)
+    console.error('Failed to save chat message to API:', err)
+    return false
+  }
+}
+
+// Update a chat message in backend API
+async function updateChatMessageInAPI(msg: ChatMessage): Promise<boolean> {
+  try {
+    const apiMsg: Partial<ChatMessageAPI> = {
+      handled: msg.handled || false,
+      dismiss_at: msg.dismissAt,
+      is_hiding: msg.isHiding || false,
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/chat/messages/${msg.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(apiMsg),
+    })
+    return response.ok
+  } catch (err) {
+    console.error('Failed to update chat message in API:', err)
+    return false
+  }
+}
+
+// Delete a chat message from backend API
+async function deleteChatMessageFromAPI(messageId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/chat/messages/${messageId}`, {
+      method: 'DELETE',
+    })
+    return response.ok
+  } catch (err) {
+    console.error('Failed to delete chat message from API:', err)
+    return false
   }
 }
 
@@ -528,22 +603,39 @@ export function EventLogPane({
   isMobile: _isMobile = false,  // Reserved for future mobile-specific behavior
   summaryReport,
   onSummaryReportConsumed,
+  chatSyncMessage,
+  onChatSyncConsumed,
 }: EventLogPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
 
-  // Chat state with localStorage persistence
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => loadChatMessages())
+  // Chat state with backend API persistence (cross-device sync)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatMessagesLoaded, setChatMessagesLoaded] = useState(false)
 
-  // Overdetection suggestion tracking - initialize from persisted messages
+  // Load chat messages from backend API on mount
+  useEffect(() => {
+    loadChatMessagesFromAPI().then(messages => {
+      setChatMessages(messages)
+      setChatMessagesLoaded(true)
+    })
+  }, [])
+
+  // Overdetection suggestion tracking - initialize after chat messages loaded
   const [checkedOverdetection, setCheckedOverdetection] = useState(false)
-  const [overdetectionCameras, setOverdetectionCameras] = useState<string[]>(() => {
-    // Extract camera IDs from existing overdetection messages
-    const stored = loadChatMessages()
-    return stored
-      .filter(msg => msg.id.startsWith('overdetection-'))
-      .map(msg => msg.id.replace('overdetection-', '').split('-')[0])
-  })
+  const [overdetectionCameras, setOverdetectionCameras] = useState<string[]>([])
+
+  // Initialize overdetectionCameras from loaded chat messages
+  useEffect(() => {
+    if (chatMessagesLoaded && chatMessages.length > 0) {
+      const cameraIds = chatMessages
+        .filter(msg => msg.id.startsWith('overdetection-'))
+        .map(msg => msg.id.replace('overdetection-', '').split('-')[0])
+      if (cameraIds.length > 0) {
+        setOverdetectionCameras(cameraIds)
+      }
+    }
+  }, [chatMessagesLoaded, chatMessages])
 
   // Detection detail modal state
   const [selectedLog, setSelectedLog] = useState<DetectionLog | null>(null)
@@ -644,6 +736,7 @@ export function EventLogPane({
       timestamp: new Date(),
     }
     setChatMessages((prev) => [...prev, userMessage])
+    saveChatMessageToAPI(userMessage)  // Save to backend
 
     // 思考中状態を開始
     setIsChatLoading(true)
@@ -659,6 +752,7 @@ export function EventLogPane({
         timestamp: new Date(),
       }
       setChatMessages((prev) => [...prev, assistantMessage])
+      saveChatMessageToAPI(assistantMessage)  // Save to backend
     } finally {
       // 思考中状態を終了
       setIsChatLoading(false)
@@ -805,10 +899,8 @@ Paraclate APP接続時は以下の高度な機能が利用できます:
     }
   }, [chatMessages, isChatLoading])
 
-  // Save chat messages to localStorage
-  useEffect(() => {
-    saveChatMessages(chatMessages)
-  }, [chatMessages])
+  // Note: Chat messages are now saved to backend API when added/modified
+  // No localStorage persistence needed
 
   // Handle Summary/GrandSummary report from scheduler
   // Display as system message in chat
@@ -853,10 +945,74 @@ Paraclate APP接続時は以下の高度な機能が利用できます:
     }
 
     setChatMessages((prev) => [...prev, summaryMessage])
+    saveChatMessageToAPI(summaryMessage)  // Save to backend
 
     // Notify parent that we've consumed the report
     onSummaryReportConsumed?.()
   }, [summaryReport, onSummaryReportConsumed])
+
+  // Handle chat sync messages for cross-device real-time updates
+  useEffect(() => {
+    if (!chatSyncMessage) return
+
+    const { action, message, message_id } = chatSyncMessage
+
+    switch (action) {
+      case "created":
+        if (message) {
+          // Add new message if not already exists
+          setChatMessages((prev) => {
+            if (prev.some((m) => m.id === message.message_id)) {
+              return prev  // Already exists, skip
+            }
+            return [...prev, {
+              id: message.message_id,
+              role: message.role as "user" | "assistant" | "system",
+              content: message.content,
+              timestamp: new Date(message.timestamp),
+              handled: message.handled,
+              action: message.action_type ? {
+                type: message.action_type as "preset_change",
+                cameraId: message.action_camera_id,
+                presetId: message.action_preset_id,
+              } : undefined,
+              dismissAt: message.dismiss_at,
+              isHiding: message.is_hiding,
+            }]
+          })
+        }
+        break
+
+      case "updated":
+        if (message) {
+          setChatMessages((prev) =>
+            prev.map((m) =>
+              m.id === message.message_id
+                ? {
+                    ...m,
+                    handled: message.handled,
+                    dismissAt: message.dismiss_at,
+                    isHiding: message.is_hiding,
+                  }
+                : m
+            )
+          )
+        }
+        break
+
+      case "deleted":
+        if (message_id) {
+          setChatMessages((prev) => prev.filter((m) => m.id !== message_id))
+        }
+        break
+
+      case "cleared":
+        setChatMessages([])
+        break
+    }
+
+    onChatSyncConsumed?.()
+  }, [chatSyncMessage, onChatSyncConsumed])
 
   // Fetch overdetection analysis and create suggestion messages
   useEffect(() => {
@@ -971,6 +1127,8 @@ Paraclate APP接続時は以下の高度な機能が利用できます:
 
         if (newMessages.length > 0) {
           setChatMessages(prev => [...prev, ...newMessages])
+          // Save each new message to backend
+          newMessages.forEach(msg => saveChatMessageToAPI(msg))
           setOverdetectionCameras(prev => [
             ...prev,
             ...camerasWithIssues.map((c: { camera_id: string }) => c.camera_id)
@@ -1000,42 +1158,56 @@ Paraclate APP接続時は以下の高度な機能が利用できます:
 
       if (response.ok) {
         const presetName = PRESET_NAMES[presetId] || presetId
-        // Delete the suggestion message and add confirmation
+        // Delete the suggestion message from backend and UI
+        deleteChatMessageFromAPI(messageId)
         setChatMessages(prev => prev.filter(msg => msg.id !== messageId))
-        setChatMessages(prev => [...prev, {
+        // Add confirmation message
+        const confirmMsg: ChatMessage = {
           id: `confirm-${Date.now()}`,
           role: "assistant",
           content: `プリセットを「${presetName}」に変更しました。`,
           timestamp: new Date(),
-        }])
+        }
+        setChatMessages(prev => [...prev, confirmMsg])
+        saveChatMessageToAPI(confirmMsg)
       } else {
         throw new Error('Failed to update preset')
       }
     } catch (err) {
       console.error('Failed to change preset:', err)
-      setChatMessages(prev => [...prev, {
+      const errorMsg: ChatMessage = {
         id: `error-${Date.now()}`,
         role: "assistant",
         content: "プリセットの変更に失敗しました。設定画面から手動で変更してください。",
         timestamp: new Date(),
-      }])
+      }
+      setChatMessages(prev => [...prev, errorMsg])
+      saveChatMessageToAPI(errorMsg)
     }
   }
 
   // Handle dismiss suggestion - sets 1 minute auto-dismiss timer
   const handleDismissSuggestion = (messageId: string) => {
-    setChatMessages(prev => prev.map(msg =>
-      msg.id === messageId ? { ...msg, handled: true } : msg
-    ))
+    // Update the original message as handled
+    setChatMessages(prev => prev.map(msg => {
+      if (msg.id === messageId) {
+        const updated = { ...msg, handled: true }
+        updateChatMessageInAPI(updated)
+        return updated
+      }
+      return msg
+    }))
     // Add dismiss confirmation with auto-dismiss after 1 minute
     const dismissTime = Date.now() + 60000  // 1 minute from now
-    setChatMessages(prev => [...prev, {
+    const dismissMsg: ChatMessage = {
       id: `dismiss-${Date.now()}`,
       role: "assistant",
       content: "了解しました。現在の設定を維持します。",
       timestamp: new Date(),
-      dismissAt: dismissTime,  // Auto-dismiss after 1 minute
-    }])
+      dismissAt: dismissTime,
+    }
+    setChatMessages(prev => [...prev, dismissMsg])
+    saveChatMessageToAPI(dismissMsg)
   }
 
   // Auto-dismiss effect - check every second for messages to hide
@@ -1043,15 +1215,20 @@ Paraclate APP接続時は以下の高度な機能が利用できます:
     const interval = setInterval(() => {
       const now = Date.now()
       setChatMessages(prev => {
+        const messagesToHide: ChatMessage[] = []
         const updated = prev.map(msg => {
           // Check if message should start hiding animation
           if (msg.dismissAt && !msg.isHiding && now >= msg.dismissAt) {
-            return { ...msg, isHiding: true }
+            const hiddenMsg = { ...msg, isHiding: true }
+            messagesToHide.push(hiddenMsg)
+            return hiddenMsg
           }
           return msg
         })
-        // Only update if something changed
-        if (JSON.stringify(updated) !== JSON.stringify(prev)) {
+        // Update backend for messages that were just hidden
+        messagesToHide.forEach(msg => updateChatMessageInAPI(msg))
+        // Only update state if something changed
+        if (messagesToHide.length > 0) {
           return updated
         }
         return prev

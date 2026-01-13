@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { Camera, SystemStatus, DetectionLog } from "@/types/api"
 import { CameraGrid, type CameraStatus } from "@/components/CameraGrid"
-import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage, type CycleStatsMessage, type CooldownTickMessage } from "@/hooks/useWebSocket"
+import { useWebSocket, type EventLogMessage, type SnapshotUpdatedMessage, type CycleStatsMessage, type CooldownTickMessage, type SummaryReportMessage, type ChatSyncMessage } from "@/hooks/useWebSocket"
 import { SuggestPane } from "@/components/SuggestPane"
 import { EventLogPane } from "@/components/EventLogPane"
 import { ScanModal } from "@/components/ScanModal"
@@ -91,6 +91,12 @@ function App() {
   // FIX-002: Real-time event from WebSocket only (NOT from fetched historical logs)
   // This ensures page reload doesn't trigger video playback in SuggestPane
   const [realtimeEvent, setRealtimeEvent] = useState<DetectionLog | null>(null)
+
+  // Summary/GrandSummary report from scheduler for AI Chat display
+  const [latestSummaryReport, setLatestSummaryReport] = useState<SummaryReportMessage | null>(null)
+
+  // Chat sync message for cross-device real-time updates
+  const [latestChatSync, setLatestChatSync] = useState<ChatSyncMessage | null>(null)
 
   // Persist onairtime to localStorage
   useEffect(() => {
@@ -282,12 +288,26 @@ function App() {
     }))
   }, [])
 
+  // Handle summary report from scheduler for AI Chat display
+  const handleSummaryReport = useCallback((msg: SummaryReportMessage) => {
+    console.log('[WS] Summary report received:', msg.report_type, msg.summary_id)
+    setLatestSummaryReport(msg)
+  }, [])
+
+  // Handle chat sync for cross-device real-time updates
+  const handleChatSync = useCallback((msg: ChatSyncMessage) => {
+    console.log('[WS] Chat sync received:', msg.action, msg.message_id || msg.message?.message_id)
+    setLatestChatSync(msg)
+  }, [])
+
   // WebSocket connection for real-time notifications (single connection point)
   const { connected: wsConnected } = useWebSocket({
     onEventLog: handleEventLog,
     onSnapshotUpdated: handleSnapshotUpdated,
     onCycleStats: handleCycleStats,
     onCooldownTick: handleCooldownTick,
+    onSummaryReport: handleSummaryReport,
+    onChatSync: handleChatSync,
   })
 
   const { data: systemStatus } = useApi<SystemStatus>(
@@ -513,6 +533,10 @@ function App() {
             cooldownSeconds={cooldownSeconds}
             executionState={executionState}
             isMobile={true}
+            summaryReport={latestSummaryReport}
+            onSummaryReportConsumed={() => setLatestSummaryReport(null)}
+            chatSyncMessage={latestChatSync}
+            onChatSyncConsumed={() => setLatestChatSync(null)}
           />
         </MobileDrawer>
 
@@ -577,6 +601,10 @@ function App() {
             cameras={cameras || []}
             cooldownSeconds={cooldownSeconds}
             executionState={executionState}
+            summaryReport={latestSummaryReport}
+            onSummaryReportConsumed={() => setLatestSummaryReport(null)}
+            chatSyncMessage={latestChatSync}
+            onChatSyncConsumed={() => setLatestChatSync(null)}
           />
         </aside>
       </div>
