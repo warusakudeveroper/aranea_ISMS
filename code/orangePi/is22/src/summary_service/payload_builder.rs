@@ -136,7 +136,9 @@ impl PayloadBuilder {
         for log in detection_logs {
             if log.primary_event == "camera_lost" || log.primary_event == "connection_lost" {
                 connection_lost_events += 1;
-                if let Some(lacis_id) = &log.camera_lacis_id {
+                // camera_lacis_id優先、なければlacis_idにフォールバック
+                let lacis_id = log.camera_lacis_id.as_ref().or(log.lacis_id.as_ref());
+                if let Some(lacis_id) = lacis_id {
                     let reason = Some(log.primary_event.clone());
                     let last_online = Some(log.captured_at.to_rfc3339());
                     offline_camera_data.insert(lacis_id.clone(), (last_online, reason));
