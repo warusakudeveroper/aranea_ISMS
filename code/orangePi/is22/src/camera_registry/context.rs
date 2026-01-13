@@ -81,6 +81,7 @@ pub struct ContextMapEntry {
     pub lacis_id: String,
     pub name: String,
     pub location: Option<String>,
+    pub ip_address: Option<String>,
     pub context_summary: String,
 }
 
@@ -186,6 +187,7 @@ impl CameraContextService {
                 c.lacis_id,
                 c.name,
                 c.location,
+                c.ip_address,
                 c.camera_context
             FROM cameras c
             WHERE c.tid = ?
@@ -201,8 +203,8 @@ impl CameraContextService {
 
         let mut map = HashMap::new();
         for row in rows {
-            let lacis_id = match row.lacis_id {
-                Some(id) => id,
+            let lacis_id = match &row.lacis_id {
+                Some(id) => id.clone(),
                 None => continue,
             };
 
@@ -211,8 +213,9 @@ impl CameraContextService {
             let entry = ContextMapEntry {
                 camera_id: row.camera_id.clone(),
                 lacis_id: lacis_id.clone(),
-                name: row.name,
-                location: row.location,
+                name: row.name.clone(),
+                location: row.location.clone(),
+                ip_address: row.ip_address.clone(),
                 context_summary,
             };
 
@@ -241,6 +244,7 @@ impl CameraContextService {
                 c.lacis_id,
                 c.name,
                 c.location,
+                c.ip_address,
                 c.camera_context
             FROM cameras c
             WHERE c.tid = ? AND c.fid = ?
@@ -257,8 +261,8 @@ impl CameraContextService {
 
         let mut map = HashMap::new();
         for row in rows {
-            let lacis_id = match row.lacis_id {
-                Some(id) => id,
+            let lacis_id = match &row.lacis_id {
+                Some(id) => id.clone(),
                 None => continue,
             };
 
@@ -267,8 +271,9 @@ impl CameraContextService {
             let entry = ContextMapEntry {
                 camera_id: row.camera_id.clone(),
                 lacis_id: lacis_id.clone(),
-                name: row.name,
-                location: row.location,
+                name: row.name.clone(),
+                location: row.location.clone(),
+                ip_address: row.ip_address.clone(),
                 context_summary,
             };
 
@@ -350,6 +355,7 @@ struct ContextMapRow {
     lacis_id: Option<String>,
     name: String,
     location: Option<String>,
+    ip_address: Option<String>,
     camera_context: Option<String>,
 }
 

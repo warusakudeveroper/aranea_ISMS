@@ -154,6 +154,25 @@ pub struct SummaryPayload {
     pub camera_status_summary: CameraStatusSummary,
 }
 
+/// オフラインカメラ詳細情報
+/// mobes CameraStatusSummary_Implementation_Guide.md 準拠
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfflineCameraDetail {
+    /// カメラのLacisID
+    pub lacis_id: String,
+    /// カメラ名（表示名） - 必須
+    pub camera_name: String,
+    /// IPアドレス - 必須
+    pub ip_address: String,
+    /// 最終オンライン時刻（ISO 8601形式）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_online_at: Option<String>,
+    /// オフライン理由（わかる場合）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// カメラステータスサマリー
 /// LLMが「すべて稼働中」か「接続問題あり」を正確に判定するための情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,7 +184,10 @@ pub struct CameraStatusSummary {
     pub online_cameras: i32,
     /// オフライン（接続ロスト）カメラ数
     pub offline_cameras: i32,
-    /// 接続ロスト発生カメラのLacisIDリスト
+    /// オフラインカメラ詳細（カメラ名・IP含む）
+    pub offline_camera_details: Vec<OfflineCameraDetail>,
+    /// 接続ロスト発生カメラのLacisIDリスト（deprecated: 後方互換用）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub offline_camera_ids: Vec<String>,
     /// 接続ロストイベント総数（期間内）
     pub connection_lost_events: i32,
@@ -432,10 +454,30 @@ mod tests {
             },
             camera_context: HashMap::new(),
             camera_detection: vec![],
+            camera_status_summary: CameraStatusSummary {
+                total_cameras: 8,
+                online_cameras: 5,
+                offline_cameras: 3,
+                offline_camera_details: vec![
+                    OfflineCameraDetail {
+                        lacis_id: "3080AABBCCDD00010001".to_string(),
+                        camera_name: "エントランス北".to_string(),
+                        ip_address: "192.168.1.101".to_string(),
+                        last_online_at: Some("2026-01-13T08:45:00Z".to_string()),
+                        reason: Some("connection_lost".to_string()),
+                    },
+                ],
+                offline_camera_ids: vec![],
+                connection_lost_events: 5,
+                system_health: "degraded".to_string(),
+            },
         };
 
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("lacisID"));
         assert!(json.contains("summaryID"));
+        assert!(json.contains("cameraStatusSummary"));
+        assert!(json.contains("offlineCameraDetails"));
+        assert!(json.contains("エントランス北"));
     }
 }

@@ -6,8 +6,8 @@
 //! ## SSoT: Paraclate_DesignOverview.md
 
 use super::types::{
-    CameraContextItem, CameraDetectionItem, CameraStatusSummary, PayloadLacisOath, SummaryOverview,
-    SummaryPayload,
+    CameraContextItem, CameraDetectionItem, CameraStatusSummary, OfflineCameraDetail,
+    PayloadLacisOath, SummaryOverview, SummaryPayload,
 };
 use std::collections::HashSet;
 use crate::camera_registry::{CameraContext, ContextMapEntry};
@@ -121,6 +121,7 @@ impl PayloadBuilder {
 
     /// カメラステータスサマリーを構築
     /// camera_lost イベントを集計してシステム健全性を判定
+    /// mobes CameraStatusSummary_Implementation_Guide.md 準拠
     fn build_camera_status_summary(
         &self,
         detection_logs: &[DetectionLog],
@@ -128,21 +129,43 @@ impl PayloadBuilder {
     ) -> CameraStatusSummary {
         let total_cameras = camera_context_map.len() as i32;
 
-        // camera_lost イベントを集計
-        let mut offline_camera_ids: HashSet<String> = HashSet::new();
+        // camera_lost イベントを集計（最終イベント時刻も記録）
+        let mut offline_camera_data: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
         let mut connection_lost_events = 0i32;
 
         for log in detection_logs {
             if log.primary_event == "camera_lost" || log.primary_event == "connection_lost" {
                 connection_lost_events += 1;
                 if let Some(lacis_id) = &log.camera_lacis_id {
-                    offline_camera_ids.insert(lacis_id.clone());
+                    let reason = Some(log.primary_event.clone());
+                    let last_online = Some(log.captured_at.to_rfc3339());
+                    offline_camera_data.insert(lacis_id.clone(), (last_online, reason));
                 }
             }
         }
 
-        let offline_cameras = offline_camera_ids.len() as i32;
+        let offline_cameras = offline_camera_data.len() as i32;
         let online_cameras = total_cameras - offline_cameras;
+
+        // オフラインカメラ詳細を構築（カメラ名・IP含む）
+        let offline_camera_details: Vec<OfflineCameraDetail> = offline_camera_data
+            .iter()
+            .map(|(lacis_id, (last_online, reason))| {
+                let entry = camera_context_map.get(lacis_id);
+                OfflineCameraDetail {
+                    lacis_id: lacis_id.clone(),
+                    camera_name: entry.map(|e| e.name.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                    ip_address: entry
+                        .and_then(|e| e.ip_address.clone())
+                        .unwrap_or_else(|| "Unknown".to_string()),
+                    last_online_at: last_online.clone(),
+                    reason: reason.clone(),
+                }
+            })
+            .collect();
+
+        // 後方互換用のLacisIDリスト
+        let offline_camera_ids: Vec<String> = offline_camera_data.keys().cloned().collect();
 
         // システム健全性判定
         // - healthy: 接続ロストなし
@@ -160,7 +183,8 @@ impl PayloadBuilder {
             total_cameras,
             online_cameras,
             offline_cameras,
-            offline_camera_ids: offline_camera_ids.into_iter().collect(),
+            offline_camera_details,
+            offline_camera_ids,
             connection_lost_events,
             system_health,
         }
