@@ -214,8 +214,9 @@ function SortableCameraTile({
         <div
           {...attributes}
           {...listeners}
-          className="absolute top-1 left-1 z-10 p-1 rounded bg-black/50 cursor-grab active:cursor-grabbing opacity-0 group-hover/sortable:opacity-100 transition-opacity"
+          className="absolute top-1 left-1 z-20 p-1.5 rounded bg-black/70 cursor-grab active:cursor-grabbing opacity-0 group-hover/sortable:opacity-100 transition-opacity touch-none"
           title="ドラッグで並べ替え"
+          onClick={(e) => e.stopPropagation()}
         >
           <GripVertical className="h-4 w-4 text-white" />
         </div>
