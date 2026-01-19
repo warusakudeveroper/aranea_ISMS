@@ -16,6 +16,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { X, MessageCircle, Send } from "lucide-react"
 import { cn } from "@/lib/utils"
 import aichatIcon from "@/assets/aichat_icon.svg"
+import ReactMarkdown from "react-markdown"
 
 interface ChatMessage {
   id: string
@@ -320,7 +321,7 @@ export function ChatExpandModal({
                         )}
                       >
                         {/* Message Content with optional typing animation */}
-                        <div className="leading-relaxed whitespace-pre-wrap">
+                        <div className="leading-relaxed">
                           {shouldAnimate ? (
                             <TypedText
                               key={msg.id}
@@ -333,7 +334,25 @@ export function ChatExpandModal({
                               }}
                             />
                           ) : (
-                            msg.content
+                            <ReactMarkdown
+                              components={{
+                                // Style markdown elements for chat display
+                                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                ul: ({ children }) => <ul className="list-disc list-inside mb-2 ml-2">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 ml-2">{children}</ol>,
+                                li: ({ children }) => <li className="mb-0.5">{children}</li>,
+                                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                                h1: ({ children }) => <h1 className="text-sm font-bold mb-2">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-sm font-bold mb-1.5">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-xs font-bold mb-1">{children}</h3>,
+                                code: ({ children }) => <code className="bg-gray-200 px-1 py-0.5 rounded text-[10px]">{children}</code>,
+                                pre: ({ children }) => <pre className="bg-gray-200 p-2 rounded text-[10px] overflow-x-auto my-1">{children}</pre>,
+                                a: ({ href, children }) => <a href={href} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
+                                hr: () => <hr className="my-2 border-gray-300" />,
+                              }}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
                           )}
                         </div>
 

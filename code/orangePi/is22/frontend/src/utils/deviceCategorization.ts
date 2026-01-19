@@ -6,35 +6,42 @@ import type {
 
 // credential_status ベースのカテゴリ判定（is22_ScanModal_Credential_Trial_Spec.md Section 4）
 // カテゴリF（LostConnection/StrayChild）対応追加（T3-8）
+// SSoT: バックエンドのcategoryフィールドを優先使用（lacisIDベース）
 export function categorizeDevice(
   device: ScannedDevice,
   registeredIPs: Set<string>
 ): DeviceCategory {
-  // バックエンドからカテゴリ情報が既に設定されている場合はそれを使用
-  // 特にカテゴリF（LostConnection/StrayChild）はバックエンドで判定される
+  // バックエンドからcategoryが設定されている場合はそれを使用（SSoT）
+  // devices-with-categories エンドポイントはlacisIDベースで分類済み
+  if (device.category) {
+    return device.category
+  }
+
+  // フォールバック: category_detailからカテゴリを推定（旧エンドポイント互換）
+  // Backend uses snake_case for DeviceCategoryDetail
   const categoryDetail = device.category_detail
   if (categoryDetail) {
-    if (categoryDetail === "LostConnection" || categoryDetail === "StrayChild") {
+    if (categoryDetail === "lost_connection" || categoryDetail === "stray_child") {
       return "f"
     }
-    if (categoryDetail === "RegisteredAuthenticated" || categoryDetail === "RegisteredAuthIssue") {
+    if (categoryDetail === "registered") {
       return "a"
     }
-    if (categoryDetail === "Registrable") {
+    if (categoryDetail === "registrable") {
       return "b"
     }
-    if (categoryDetail === "AuthRequired") {
+    if (categoryDetail === "auth_required" || categoryDetail === "auth_failed") {
       return "c"
     }
     if (
-      categoryDetail === "PossibleCamera" ||
-      categoryDetail === "NetworkEquipment" ||
-      categoryDetail === "IoTDevice" ||
-      categoryDetail === "UnknownDevice"
+      categoryDetail === "possible_camera" ||
+      categoryDetail === "network_equipment" ||
+      categoryDetail === "io_t_device" ||
+      categoryDetail === "unknown_device"
     ) {
       return "d"
     }
-    if (categoryDetail === "NonCamera") {
+    if (categoryDetail === "non_camera") {
       return "e"
     }
   }

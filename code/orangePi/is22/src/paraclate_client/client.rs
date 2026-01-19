@@ -29,13 +29,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
-/// mobes2.0 Cloud Run エンドポイント定数
-/// E2Eテスト結果に基づく実際のURL
+/// mobes2.0 Cloud Functions エンドポイント定数
+/// mobes_response_to_is22.md (2026-01-13) に基づく正式URL
 mod endpoints {
-    pub const CONNECT: &str = "https://paraclateconnect-vm44u3kpua-an.a.run.app";
-    pub const INGEST_SUMMARY: &str = "https://paraclateingestsummary-vm44u3kpua-an.a.run.app";
-    pub const INGEST_EVENT: &str = "https://paraclateingestevent-vm44u3kpua-an.a.run.app";
-    pub const GET_CONFIG: &str = "https://paraclategetconfig-vm44u3kpua-an.a.run.app";
+    pub const CONNECT: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateConnect";
+    pub const INGEST_SUMMARY: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateIngestSummary";
+    pub const INGEST_EVENT: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateIngestEvent";
+    pub const GET_CONFIG: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateGetConfig";
     /// Phase 8: カメラメタデータ同期 (Issue #121)
     /// mobes2.0チーム回答に基づき訂正 (2026-01-12)
     pub const CAMERA_METADATA: &str = "https://asia-northeast1-mobesorder.cloudfunctions.net/paraclateCameraMetadata";
@@ -485,12 +485,15 @@ impl ParaclateClient {
     ) -> Result<EventSendResult, ParaclateError> {
         use base64::Engine;
 
+        // Config取得（存在しなければscan_subnetsから自動作成）
         let config = self
             .config_repo
-            .get(tid, fid)
+            .ensure_config(tid, fid)
             .await
-            .map_err(|e| ParaclateError::Database(format!("Failed to get config: {}", e)))?
-            .ok_or_else(|| ParaclateError::Config("Config not found".to_string()))?;
+            .map_err(|e| ParaclateError::Database(format!("Failed to ensure config: {}", e)))?
+            .ok_or_else(|| ParaclateError::Config(format!(
+                "Config not found for tid={}, fid={} (not in scan_subnets)", tid, fid
+            )))?;
 
         // snapshotがあればBase64エンコードしてpayloadに含める
         if let Some(data) = &snapshot_data {
@@ -667,6 +670,156 @@ impl ParaclateClient {
         }
     }
 
+    /// カメラステータス変更イベント送信
+    ///
+    /// camera_lost / camera_recovered 発生時に mobes2.0 へ通知
+    /// mobes AI Chat がリアルタイムでカメラステータスを把握できるようにする
+    ///
+    /// IS22_SummaryMessage_FixRequest.md セクション10対応
+    pub async fn send_camera_status_change(
+        &self,
+        tid: &str,
+        fid: &str,
+        payload: super::types::CameraStatusChangePayload,
+    ) -> Result<bool, ParaclateError> {
+        // Config取得（存在しなければscan_subnetsから自動作成）
+        let config = self
+            .config_repo
+            .ensure_config(tid, fid)
+            .await
+            .map_err(|e| ParaclateError::Database(format!("Failed to ensure config: {}", e)))?
+            .ok_or_else(|| ParaclateError::Config(format!(
+                "Config not found for tid={}, fid={} (not in scan_subnets)", tid, fid
+            )))?;
+
+        if config.connection_status != ConnectionStatus::Connected {
+            // オフライン時はキューに追加
+            // mobes形式でラップ: { cameraStatusChange: {...} }
+            let wrapped_payload = serde_json::json!({
+                "cameraStatusChange": &payload
+            });
+
+            let queue_id = self
+                .queue_repo
+                .insert(SendQueueInsert {
+                    tid: tid.to_string(),
+                    fid: fid.to_string(),
+                    payload_type: PayloadType::Event,
+                    payload: wrapped_payload,
+                    reference_id: None,
+                    max_retries: None,
+                })
+                .await
+                .map_err(|e| ParaclateError::Queue(format!("Failed to enqueue: {}", e)))?;
+
+            debug!(
+                tid = %tid,
+                fid = %fid,
+                camera_id = %payload.camera_id,
+                new_status = %payload.new_status,
+                queue_id = queue_id,
+                "Camera status change enqueued (offline)"
+            );
+
+            return Ok(false);
+        }
+
+        let oath = self.get_lacis_oath(tid).await?;
+
+        // mobes2.0 Cloud Run エンドポイント
+        let url = endpoints::INGEST_EVENT;
+
+        // mobes2.0 ペイロード形式: { fid, payload: { cameraStatusChange: {...} } }
+        let wrapped_payload = serde_json::json!({
+            "fid": fid,
+            "payload": {
+                "cameraStatusChange": &payload
+            }
+        });
+
+        let mut req = self.http.post(url)
+            .header("Content-Type", "application/json")
+            .json(&wrapped_payload);
+
+        for (key, value) in oath.to_headers() {
+            req = req.header(&key, &value);
+        }
+
+        match req.send().await {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    info!(
+                        tid = %tid,
+                        camera_id = %payload.camera_id,
+                        camera_name = %payload.camera_name,
+                        new_status = %payload.new_status,
+                        reason = %payload.reason,
+                        "Camera status change sent to mobes"
+                    );
+                    Ok(true)
+                } else {
+                    let error_body = response.text().await.unwrap_or_default();
+                    warn!(
+                        tid = %tid,
+                        camera_id = %payload.camera_id,
+                        status = %status,
+                        error = %error_body,
+                        "Camera status change send failed"
+                    );
+
+                    // 失敗時はキューに追加してリトライ
+                    // mobes形式でラップ: { cameraStatusChange: {...} }
+                    let wrapped_payload = serde_json::json!({
+                        "cameraStatusChange": &payload
+                    });
+
+                    self.queue_repo
+                        .insert(SendQueueInsert {
+                            tid: tid.to_string(),
+                            fid: fid.to_string(),
+                            payload_type: PayloadType::Event,
+                            payload: wrapped_payload,
+                            reference_id: None,
+                            max_retries: None,
+                        })
+                        .await
+                        .map_err(|e| ParaclateError::Queue(format!("Failed to enqueue: {}", e)))?;
+
+                    Ok(false)
+                }
+            }
+            Err(e) => {
+                error!(
+                    tid = %tid,
+                    camera_id = %payload.camera_id,
+                    error = %e,
+                    "Camera status change send error"
+                );
+
+                // エラー時はキューに追加
+                // mobes形式でラップ: { cameraStatusChange: {...} }
+                let wrapped_payload = serde_json::json!({
+                    "cameraStatusChange": &payload
+                });
+
+                self.queue_repo
+                    .insert(SendQueueInsert {
+                        tid: tid.to_string(),
+                        fid: fid.to_string(),
+                        payload_type: PayloadType::Event,
+                        payload: wrapped_payload,
+                        reference_id: None,
+                        max_retries: None,
+                    })
+                    .await
+                    .map_err(|e| ParaclateError::Queue(format!("Failed to enqueue: {}", e)))?;
+
+                Ok(false)
+            }
+        }
+    }
+
     /// Emergency送信（優先度高）
     pub async fn send_emergency(
         &self,
@@ -694,12 +847,15 @@ impl ParaclateClient {
 
     /// キューを処理（バックグラウンドワーカー用）
     pub async fn process_queue(&self, tid: &str, fid: &str) -> Result<u32, ParaclateError> {
+        // Config取得（存在しなければscan_subnetsから自動作成）
         let config = self
             .config_repo
-            .get(tid, fid)
+            .ensure_config(tid, fid)
             .await
-            .map_err(|e| ParaclateError::Database(format!("Failed to get config: {}", e)))?
-            .ok_or_else(|| ParaclateError::Config("Config not found".to_string()))?;
+            .map_err(|e| ParaclateError::Database(format!("Failed to ensure config: {}", e)))?
+            .ok_or_else(|| ParaclateError::Config(format!(
+                "Config not found for tid={}, fid={} (not in scan_subnets)", tid, fid
+            )))?;
 
         if config.connection_status != ConnectionStatus::Connected {
             debug!(tid = %tid, fid = %fid, "Skipping queue processing - not connected");
@@ -738,11 +894,115 @@ impl ParaclateClient {
                 PayloadType::Event | PayloadType::Emergency => endpoints::INGEST_EVENT,
             };
 
-            // mobes2.0 ペイロード形式: { fid, payload: {...} }
-            let wrapped_payload = serde_json::json!({
-                "fid": fid,
-                "payload": item.payload
-            });
+            // mobes2.0 ペイロード形式
+            // Summary: { fid, payload: { summary, summaryId, periodStart, periodEnd } }
+            // GrandSummary: { fid, payload: { summary, summaryId, periodStart, periodEnd } }
+            // Event/Emergency: { fid, payload: {...} }
+            let wrapped_payload = match item.payload_type {
+                PayloadType::Summary => {
+                    // Summary: reference_idから数値ID取得
+                    let summary_id = item.reference_id.unwrap_or(0).to_string();
+                    let period_start = item.payload
+                        .get("summaryOverview")
+                        .and_then(|s| s.get("firstDetectAt"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let period_end = item.payload
+                        .get("summaryOverview")
+                        .and_then(|s| s.get("lastDetectAt"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    // summaryにsummaryIdを追加
+                    let mut summary = item.payload.clone();
+                    summary["summaryId"] = serde_json::Value::String(summary_id);
+
+                    // mobes2.0 Ingest API形式 (mobes_response_to_is22_ingest_api_20260113.md):
+                    // { fid, payload: { summary: { summaryId, ... }, periodStart, periodEnd } }
+                    serde_json::json!({
+                        "fid": fid,
+                        "payload": {
+                            "summary": summary,
+                            "periodStart": period_start,
+                            "periodEnd": period_end
+                        }
+                    })
+                }
+                PayloadType::GrandSummary => {
+                    // GrandSummary: reference_idが数値ID
+                    let summary_id = item.reference_id.unwrap_or(0).to_string();
+                    // shiftStart/shiftEndがない古いGrandSummaryはスキップ
+                    let period_start = item.payload
+                        .get("shiftStart")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let period_end = item.payload
+                        .get("shiftEnd")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    // periodStart/periodEndが空の場合はスキップ（mobesが拒否するため）
+                    if period_start.is_empty() || period_end.is_empty() {
+                        warn!(
+                            queue_id = item.queue_id,
+                            "Skipping GrandSummary without shiftStart/shiftEnd"
+                        );
+                        self.queue_repo.update_status(
+                            item.queue_id,
+                            SendQueueUpdate {
+                                status: QueueStatus::Skipped,
+                                retry_count: None,
+                                next_retry_at: None,
+                                last_error: Some("Missing shiftStart/shiftEnd".to_string()),
+                                http_status_code: None,
+                                sent_at: None,
+                            },
+                        ).await.ok();
+                        continue;
+                    }
+
+                    // summaryにsummaryIdを追加
+                    let mut summary = item.payload.clone();
+                    summary["summaryId"] = serde_json::Value::String(summary_id);
+
+                    // mobes2.0 Ingest API形式 (mobes_response_to_is22_ingest_api_20260113.md):
+                    // { fid, payload: { summary: { summaryId, ... }, periodStart, periodEnd } }
+                    serde_json::json!({
+                        "fid": fid,
+                        "payload": {
+                            "summary": summary,
+                            "periodStart": period_start,
+                            "periodEnd": period_end
+                        }
+                    })
+                }
+                PayloadType::Event | PayloadType::Emergency => {
+                    // mobes2.0 Ingest API形式: { fid, payload: { event: {...} } }
+                    // Note: 既存キューアイテムは logId で保存されている可能性があるため
+                    //       detection_log_id に変換して送信
+                    let mut event_payload = item.payload.clone();
+                    if let Some(log_id) = event_payload.get("logId").cloned() {
+                        event_payload.as_object_mut().map(|obj| {
+                            obj.remove("logId");
+                            obj.insert("detection_log_id".to_string(), log_id);
+                        });
+                    }
+                    serde_json::json!({
+                        "fid": fid,
+                        "payload": {
+                            "event": event_payload
+                        }
+                    })
+                }
+            };
+
+            // Debug: log the wrapped payload
+            debug!(
+                queue_id = item.queue_id,
+                payload_type = %item.payload_type,
+                wrapped_payload = %wrapped_payload,
+                "Sending to Ingest API"
+            );
 
             let mut req = self.http.post(url).json(&wrapped_payload);
             for (key, value) in oath.to_headers() {
@@ -763,7 +1023,7 @@ impl ParaclateClient {
                     } else {
                         let error_body = response.text().await.unwrap_or_default();
                         let error_msg = format!("HTTP {}: {}", status.as_u16(), error_body);
-                        self.queue_repo
+                        if let Err(e) = self.queue_repo
                             .mark_failed(
                                 item.queue_id,
                                 &error_msg,
@@ -771,10 +1031,13 @@ impl ParaclateClient {
                                 item.retry_count + 1,
                             )
                             .await
-                            .ok();
+                        {
+                            error!(queue_id = item.queue_id, error = %e, "Failed to mark queue item as failed");
+                        }
                         warn!(
                             queue_id = item.queue_id,
                             status = %status,
+                            error_body = %error_body,
                             "Send failed"
                         );
                     }
@@ -1062,8 +1325,12 @@ impl ParaclateClient {
             "AI chat request"
         );
 
+        // AI Chatは4段階LLM処理のため長時間かかる（実測23秒〜、コンテキスト量で増加）
+        // デフォルト30秒では不足するため300秒に延長
+        // UI側で思考中アニメーションを表示してユーザーフィードバック
         let mut req = self.http.post(url)
             .header("Content-Type", "application/json")
+            .timeout(Duration::from_secs(300))
             .json(&request);
 
         for (key, value) in oath.to_headers() {

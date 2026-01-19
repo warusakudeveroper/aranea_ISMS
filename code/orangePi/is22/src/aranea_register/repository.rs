@@ -7,7 +7,7 @@
 //! - aranea_registrationテーブルへのCRUD操作
 //! - 登録情報の永続化・取得
 
-use super::types::AraneaRegistration;
+use super::types::{AraneaRegistration, ManagedFacility};
 use chrono::{DateTime, Utc};
 use sqlx::{FromRow, MySqlPool};
 
@@ -217,5 +217,49 @@ impl AraneaRegistrationRepository {
             .await?;
 
         Ok(row.0)
+    }
+
+    /// Get managed facilities from scan_subnets with camera counts
+    ///
+    /// JOIN with cameras table to count cameras per subnet/fid
+    pub async fn get_managed_facilities(&self) -> crate::Result<Vec<ManagedFacility>> {
+        // scan_subnetsからFID設定済みのサブネットを取得し、
+        // camerasテーブルとJOINしてカメラ数をカウント
+        let rows: Vec<(String, Option<String>, Option<String>, String, i64)> = sqlx::query_as(
+            r#"
+            SELECT
+                s.fid,
+                s.tid,
+                s.facility_name,
+                s.cidr,
+                (
+                    SELECT COUNT(*)
+                    FROM cameras c
+                    WHERE c.ip_address LIKE CONCAT(
+                        SUBSTRING_INDEX(s.cidr, '.', 3), '.%'
+                    )
+                ) as camera_count
+            FROM scan_subnets s
+            WHERE s.fid IS NOT NULL
+              AND s.fid != ''
+              AND s.enabled = 1
+            ORDER BY s.fid
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let facilities = rows
+            .into_iter()
+            .map(|(fid, tid, facility_name, subnet, camera_count)| ManagedFacility {
+                fid,
+                tid,
+                facility_name,
+                subnet,
+                camera_count: camera_count as i32,
+            })
+            .collect();
+
+        Ok(facilities)
     }
 }

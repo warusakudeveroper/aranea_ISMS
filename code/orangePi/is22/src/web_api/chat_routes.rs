@@ -114,6 +114,37 @@ async fn create_message(
     State(state): State<AppState>,
     Json(msg): Json<ChatMessage>,
 ) -> impl IntoResponse {
+    // サマリー重複防止: summary-XXX-timestamp 形式のIDを検出
+    // summary-XXX が既に存在する場合はスキップ（古いキャッシュのブラウザ対策）
+    if msg.message_id.starts_with("summary-") {
+        // パターン: summary-{number} または summary-{number}-{timestamp}
+        let parts: Vec<&str> = msg.message_id.split('-').collect();
+        if parts.len() >= 3 {
+            // summary-XXX-timestamp 形式 → ベースID(summary-XXX)が存在するかチェック
+            let base_id = format!("{}-{}", parts[0], parts[1]);
+            let exists: Result<Option<(i32,)>, _> = sqlx::query_as(
+                "SELECT 1 FROM chat_messages WHERE message_id = ? LIMIT 1"
+            )
+            .bind(&base_id)
+            .fetch_optional(&state.pool)
+            .await;
+
+            if let Ok(Some(_)) = exists {
+                tracing::debug!(
+                    message_id = %msg.message_id,
+                    base_id = %base_id,
+                    "Skipping duplicate summary message (base already exists)"
+                );
+                return Json(serde_json::json!({
+                    "ok": true,
+                    "message_id": base_id,
+                    "skipped": true,
+                    "reason": "base_summary_exists"
+                }));
+            }
+        }
+    }
+
     let result = sqlx::query(
         r#"
         INSERT INTO chat_messages (

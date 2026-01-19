@@ -23,6 +23,14 @@ pub struct SummaryRepository {
     pool: MySqlPool,
 }
 
+impl Clone for SummaryRepository {
+    fn clone(&self) -> Self {
+        Self {
+            pool: self.pool.clone(),
+        }
+    }
+}
+
 impl SummaryRepository {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
@@ -308,6 +316,74 @@ impl SummaryRepository {
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
+    /// Summaryを保存または更新（UPSERT）
+    /// 同一期間の既存エントリがある場合は更新する
+    pub async fn upsert(&self, data: SummaryInsert) -> crate::Result<SummaryResult> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO ai_summary_cache
+                (tid, fid, summary_type, period_start, period_end,
+                 summary_text, summary_json, detection_count, severity_max,
+                 camera_ids, expires_at)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                summary_text = VALUES(summary_text),
+                summary_json = VALUES(summary_json),
+                detection_count = VALUES(detection_count),
+                severity_max = VALUES(severity_max),
+                camera_ids = VALUES(camera_ids),
+                expires_at = VALUES(expires_at),
+                created_at = CURRENT_TIMESTAMP(3)
+            "#,
+        )
+        .bind(&data.tid)
+        .bind(&data.fid)
+        .bind(data.summary_type.to_string())
+        .bind(data.period_start)
+        .bind(data.period_end)
+        .bind(&data.summary_text)
+        .bind(&data.summary_json)
+        .bind(data.detection_count)
+        .bind(data.severity_max)
+        .bind(&data.camera_ids)
+        .bind(data.expires_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| crate::Error::Database(e.to_string()))?;
+
+        let summary_id = result.last_insert_id();
+
+        info!(
+            summary_id = summary_id,
+            tid = %data.tid,
+            fid = %data.fid,
+            summary_type = %data.summary_type,
+            detection_count = data.detection_count,
+            "Summary upserted"
+        );
+
+        // camera_idsをVec<String>に変換
+        let camera_ids: Vec<String> = serde_json::from_value(data.camera_ids.clone())
+            .unwrap_or_default();
+
+        Ok(SummaryResult {
+            summary_id,
+            tid: data.tid,
+            fid: data.fid,
+            summary_type: data.summary_type,
+            period_start: data.period_start,
+            period_end: data.period_end,
+            summary_text: data.summary_text,
+            summary_json: data.summary_json,
+            detection_count: data.detection_count,
+            severity_max: data.severity_max,
+            camera_ids,
+            created_at: Utc::now(),
+            expires_at: data.expires_at,
+        })
+    }
+
     /// 期限切れSummaryを削除
     pub async fn delete_expired(&self) -> crate::Result<u64> {
         let result = sqlx::query(
@@ -337,6 +413,14 @@ pub struct ScheduleRepository {
     pool: MySqlPool,
 }
 
+impl Clone for ScheduleRepository {
+    fn clone(&self) -> Self {
+        Self {
+            pool: self.pool.clone(),
+        }
+    }
+}
+
 impl ScheduleRepository {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
@@ -360,7 +444,7 @@ impl ScheduleRepository {
                 interval_minutes = VALUES(interval_minutes),
                 scheduled_times = VALUES(scheduled_times),
                 enabled = VALUES(enabled),
-                next_run_at = VALUES(next_run_at),
+                -- next_run_at は既存値を保持（上書きしない）
                 updated_at = CURRENT_TIMESTAMP(3)
             "#,
         )

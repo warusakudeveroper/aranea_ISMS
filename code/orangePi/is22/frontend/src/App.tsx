@@ -355,15 +355,9 @@ function App() {
     <header className="h-14 border-b bg-card px-4 flex items-center justify-between flex-shrink-0">
       <div className="flex items-center gap-2">
         <Video className="h-6 w-6 text-primary" />
-        {/* モバイルでは短縮タイトル */}
-        {isMobile ? (
-          <h1 className="text-lg font-semibold">mAcT</h1>
-        ) : (
-          <>
-            <h1 className="text-lg font-semibold">Paraclate</h1>
-            <Badge variant="outline" className="text-xs">mobes AI control Tower</Badge>
-          </>
-        )}
+        {/* モバイル・デスクトップ共通タイトル */}
+        <h1 className="text-lg font-semibold">Paraclate</h1>
+        <Badge variant="outline" className="text-xs">mobes AI control Tower</Badge>
       </div>
       <div className="flex items-center gap-4">
         {/* WebSocket connection status + Polling cycle stats */}
@@ -533,8 +527,8 @@ function App() {
             cooldownSeconds={cooldownSeconds}
             executionState={executionState}
             isMobile={true}
-            summaryReport={latestSummaryReport}
-            onSummaryReportConsumed={() => setLatestSummaryReport(null)}
+            // モバイル版はsummaryReportを直接処理しない（デスクトップで処理→ChatSync経由で同期）
+            // これにより二重送信を防止
             chatSyncMessage={latestChatSync}
             onChatSyncConsumed={() => setLatestChatSync(null)}
           />

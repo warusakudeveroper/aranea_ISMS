@@ -779,6 +779,10 @@ export function SettingsModal({
           case "aranea":
             await fetchAraneaRegistrationStatus()
             break
+          case "ai":
+            // Paraclateタブ: 登録状態も取得（tid/fidが必要）
+            await fetchAraneaRegistrationStatus()
+            break
         }
       } finally {
         setLoading(false)
@@ -813,6 +817,10 @@ export function SettingsModal({
           fetchPollingLogs()
           break
         case "aranea":
+          fetchAraneaRegistrationStatus()
+          break
+        case "ai":
+          // Paraclateタブ: 登録状態も定期更新（tid/fidが必要）
           fetchAraneaRegistrationStatus()
           break
       }
@@ -1858,12 +1866,29 @@ export function SettingsModal({
                     Paraclate連携（mobes2.0）
                     {araneaRegistrationStatus?.registered ? (
                       <Badge variant="default" className="ml-2 bg-green-500">
-                        登録済み (FID: {araneaRegistrationStatus.fid})
+                        登録済み
                       </Badge>
                     ) : (
                       <Badge variant="secondary" className="ml-2">未登録</Badge>
                     )}
                   </CardTitle>
+                  {/* 管理対象施設一覧 */}
+                  {araneaRegistrationStatus?.managedFacilities && araneaRegistrationStatus.managedFacilities.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {araneaRegistrationStatus.managedFacilities.map((facility) => (
+                        <Badge
+                          key={facility.fid}
+                          variant="outline"
+                          className="text-xs font-normal"
+                          title={`${facility.subnet} - ${facility.cameraCount}台`}
+                        >
+                          <Building2 className="h-3 w-3 mr-1" />
+                          {facility.facilityName || `FID:${facility.fid}`}
+                          <span className="ml-1 text-muted-foreground">({facility.cameraCount})</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {/* Test Execution Section - テスト用強制生成 */}
@@ -2329,8 +2354,8 @@ export function SettingsModal({
                             {paraclate.status?.lastError && (
                               <span className="text-red-500">{paraclate.status.lastError}</span>
                             )}
-                            {paraclate.status?.lastSuccessAt ? (
-                              <span>最終同期: {new Date(paraclate.status.lastSuccessAt).toLocaleString()}</span>
+                            {paraclate.status?.lastSyncAt ? (
+                              <span>最終同期: {new Date(paraclate.status.lastSyncAt).toLocaleString()}</span>
                             ) : (
                               <span>最終同期: --</span>
                             )}

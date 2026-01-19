@@ -18,6 +18,7 @@
 //!   [Camera1取得(3s timeout)] → [is21 POST] → [Camera2取得] → ...
 //! ```
 
+use crate::access_absorber::{AccessAbsorberService, StreamPurpose};
 use crate::ai_client::{AIClient, AnalyzeRequest, AnalyzeResponse, CameraContext};
 use crate::camera_status_tracker::{CameraStatusEvent, CameraStatusTracker};
 use crate::config_store::{Camera, ConfigStore};
@@ -108,6 +109,9 @@ pub struct PollingOrchestrator {
     realtime_hub: Arc<RealtimeHub>,
     camera_status_tracker: Arc<CameraStatusTracker>,
     stream_gateway: Arc<StreamGateway>,
+    paraclate_client: Arc<crate::paraclate_client::ParaclateClient>,
+    /// AccessAbsorberService for camera brand-specific connection limits
+    access_absorber: Option<Arc<AccessAbsorberService>>,
     running: Arc<RwLock<bool>>,
     /// Active subnet polling loops (to prevent duplicate spawns)
     active_subnets: Arc<RwLock<HashSet<String>>>,
@@ -132,6 +136,8 @@ impl PollingOrchestrator {
         realtime_hub: Arc<RealtimeHub>,
         camera_status_tracker: Arc<CameraStatusTracker>,
         stream_gateway: Arc<StreamGateway>,
+        paraclate_client: Arc<crate::paraclate_client::ParaclateClient>,
+        access_absorber: Option<Arc<AccessAbsorberService>>,
         default_tid: String,
         default_fid: String,
     ) -> Self {
@@ -148,6 +154,8 @@ impl PollingOrchestrator {
             realtime_hub,
             camera_status_tracker,
             stream_gateway,
+            paraclate_client,
+            access_absorber,
             running: Arc::new(RwLock::new(false)),
             active_subnets: Arc::new(RwLock::new(HashSet::new())),
             default_tid,
@@ -307,6 +315,8 @@ impl PollingOrchestrator {
             let realtime_hub = self.realtime_hub.clone();
             let camera_status_tracker = self.camera_status_tracker.clone();
             let stream_gateway = self.stream_gateway.clone();
+            let paraclate_client = self.paraclate_client.clone();
+            let access_absorber = self.access_absorber.clone();
             let running = self.running.clone();
             let active_subnets = self.active_subnets.clone();
             let default_tid = self.default_tid.clone();
@@ -336,6 +346,8 @@ impl PollingOrchestrator {
                     realtime_hub,
                     camera_status_tracker,
                     stream_gateway,
+                    paraclate_client,
+                    access_absorber,
                     running,
                     default_tid,
                     default_fid,
@@ -395,6 +407,8 @@ impl PollingOrchestrator {
         let realtime_hub = self.realtime_hub.clone();
         let camera_status_tracker = self.camera_status_tracker.clone();
         let stream_gateway = self.stream_gateway.clone();
+        let paraclate_client = self.paraclate_client.clone();
+        let access_absorber = self.access_absorber.clone();
         let running = self.running.clone();
         let active_subnets = self.active_subnets.clone();
         let default_tid = self.default_tid.clone();
@@ -422,6 +436,8 @@ impl PollingOrchestrator {
                 realtime_hub,
                 camera_status_tracker,
                 stream_gateway,
+                paraclate_client,
+                access_absorber,
                 running,
                 default_tid,
                 default_fid,
@@ -496,6 +512,8 @@ impl PollingOrchestrator {
         realtime_hub: Arc<RealtimeHub>,
         camera_status_tracker: Arc<CameraStatusTracker>,
         stream_gateway: Arc<StreamGateway>,
+        paraclate_client: Arc<crate::paraclate_client::ParaclateClient>,
+        access_absorber: Option<Arc<AccessAbsorberService>>,
         running: Arc<RwLock<bool>>,
         default_tid: String,
         default_fid: String,
@@ -674,6 +692,8 @@ impl PollingOrchestrator {
                     &suggest_engine,
                     &realtime_hub,
                     &config_store,
+                    &paraclate_client,
+                    access_absorber.as_deref(),
                     &default_tid,
                     &default_fid,
                     Some(&polling_id),
@@ -717,6 +737,29 @@ impl PollingOrchestrator {
                                     "Failed to save camera_lost event"
                                 );
                             }
+
+                            // === Send camera status change to mobes (IS22_SummaryMessage_FixRequest.md section 10) ===
+                            let status_payload = crate::paraclate_client::types::CameraStatusChangePayload {
+                                tid: tid.to_string(),
+                                fid: fid.to_string(),
+                                event_type: "camera_status_change".to_string(),
+                                camera_id: camera.camera_id.clone(),
+                                camera_name: camera.name.clone(),
+                                camera_lacis_id: camera.lacis_id.clone(),
+                                ip_address: camera.ip_address.clone(),
+                                previous_status: "online".to_string(),
+                                new_status: "offline".to_string(),
+                                reason: "connection_lost".to_string(),
+                                detected_at: Utc::now(),
+                                error_details: error_msg.clone(),
+                            };
+                            if let Err(e) = paraclate_client.send_camera_status_change(tid, fid, status_payload).await {
+                                tracing::warn!(
+                                    camera_id = %camera.camera_id,
+                                    error = %e,
+                                    "Failed to send camera_lost status to mobes"
+                                );
+                            }
                         }
                         CameraStatusEvent::Recovered => {
                             // Log camera recovered event (severity 2)
@@ -736,6 +779,29 @@ impl PollingOrchestrator {
                                     camera_id = %camera.camera_id,
                                     error = %e,
                                     "Failed to save camera_recovered event"
+                                );
+                            }
+
+                            // === Send camera status change to mobes (IS22_SummaryMessage_FixRequest.md section 10) ===
+                            let status_payload = crate::paraclate_client::types::CameraStatusChangePayload {
+                                tid: tid.to_string(),
+                                fid: fid.to_string(),
+                                event_type: "camera_status_change".to_string(),
+                                camera_id: camera.camera_id.clone(),
+                                camera_name: camera.name.clone(),
+                                camera_lacis_id: camera.lacis_id.clone(),
+                                ip_address: camera.ip_address.clone(),
+                                previous_status: "offline".to_string(),
+                                new_status: "online".to_string(),
+                                reason: "connection_restored".to_string(),
+                                detected_at: Utc::now(),
+                                error_details: None,
+                            };
+                            if let Err(e) = paraclate_client.send_camera_status_change(tid, fid, status_payload).await {
+                                tracing::warn!(
+                                    camera_id = %camera.camera_id,
+                                    error = %e,
+                                    "Failed to send camera_recovered status to mobes"
                                 );
                             }
                         }
@@ -895,8 +961,8 @@ impl PollingOrchestrator {
 
     /// Poll a single camera with AI Event Log pipeline
     ///
-    /// Flow (AI Event Log v1.7):
-    /// 1. Capture snapshot via ffmpeg (RTSP direct)
+    /// Flow (AI Event Log v1.7 + Access Absorber):
+    /// 1. Capture snapshot via ffmpeg (RTSP direct) with AccessAbsorber rate limiting
     /// 2. Save to cache for CameraGrid display
     /// 3. Get previous frame from PrevFrameCache for diff analysis
     /// 4. Build AnalyzeRequest with preset configuration
@@ -919,6 +985,8 @@ impl PollingOrchestrator {
         suggest_engine: &SuggestEngine,
         realtime_hub: &RealtimeHub,
         config_store: &ConfigStore,
+        paraclate_client: &crate::paraclate_client::ParaclateClient,
+        access_absorber: Option<&AccessAbsorberService>,
         default_tid: &str,
         default_fid: &str,
         polling_cycle_id: Option<&str>,
@@ -931,11 +999,16 @@ impl PollingOrchestrator {
         let camera_ip = camera.ip_address.as_deref().unwrap_or("unknown");
         let preset_id = camera.preset_id.as_deref().unwrap_or("balanced");
 
-        // === Phase 1: Snapshot capture ===
+        // === Phase 1: Snapshot capture (with AccessAbsorber rate limiting) ===
         let snapshot_start = Instant::now();
         let capture_result = match tokio::time::timeout(
             Duration::from_millis(SNAPSHOT_TIMEOUT_MS),
-            snapshot_service.capture(camera),
+            snapshot_service.capture_with_absorber(
+                camera,
+                access_absorber,
+                StreamPurpose::Polling,
+                "polling_orchestrator",
+            ),
         )
         .await
         {
@@ -989,11 +1062,50 @@ impl PollingOrchestrator {
             captured_at_str.clone(),
         );
 
-        // Apply camera context if available
-        if let Some(ref context_json) = camera.camera_context {
-            if let Ok(context) = serde_json::from_value::<CameraContext>(context_json.clone()) {
-                request.camera_context = Some(context);
+        // Apply inference_config if available (merge with preset context)
+        // Note: camera_context is for LLM/Paraclate, inference_config is for IS21
+        if let Some(ref config_json) = camera.inference_config {
+            if let Ok(camera_cfg) = serde_json::from_value::<CameraContext>(config_json.clone()) {
+                // Merge: camera-specific settings override preset settings
+                if let Some(ref mut preset_ctx) = request.camera_context {
+                    // カメラ固有設定があればプリセットを上書き
+                    if camera_cfg.location_type.is_some() {
+                        preset_ctx.location_type = camera_cfg.location_type;
+                    }
+                    if camera_cfg.distance.is_some() {
+                        preset_ctx.distance = camera_cfg.distance;
+                    }
+                    if camera_cfg.expected_objects.is_some() {
+                        preset_ctx.expected_objects = camera_cfg.expected_objects;
+                    }
+                    if camera_cfg.excluded_objects.is_some() {
+                        preset_ctx.excluded_objects = camera_cfg.excluded_objects;
+                    }
+                    if camera_cfg.conf_override.is_some() {
+                        preset_ctx.conf_override = camera_cfg.conf_override;
+                    }
+                    if camera_cfg.nms_threshold.is_some() {
+                        preset_ctx.nms_threshold = camera_cfg.nms_threshold;
+                    }
+                    if camera_cfg.par_threshold.is_some() {
+                        preset_ctx.par_threshold = camera_cfg.par_threshold;
+                    }
+                } else {
+                    // プリセットにcontextがなければカメラ設定をそのまま使用
+                    request.camera_context = Some(camera_cfg);
+                }
             }
+        }
+
+        // Debug: log final conf_override after merge
+        if let Some(ref ctx) = request.camera_context {
+            tracing::debug!(
+                camera_id = %camera.camera_id,
+                preset_id = %preset_id,
+                conf_override = ?ctx.conf_override,
+                has_inference_config = camera.inference_config.is_some(),
+                "Final camera_context after merge"
+            );
         }
 
         // Add previous frame info for context
@@ -1051,9 +1163,9 @@ impl PollingOrchestrator {
         // === Phase 3: Database save (conditional) ===
         let save_start = Instant::now();
 
-        // Get TID/FID from defaults
-        let tid = default_tid;
-        let fid = default_fid;
+        // Get TID/FID from camera (fallback to defaults if not set)
+        let tid = camera.tid.as_deref().unwrap_or(default_tid);
+        let fid = camera.fid.as_deref().unwrap_or(default_fid);
         let lacis_id = camera.lacis_id.as_deref();
 
         // Parse camera context for persistence
@@ -1079,6 +1191,7 @@ impl PollingOrchestrator {
                     tid,
                     fid,
                     lacis_id,
+                    camera.lacis_id.as_deref(),
                     &result,
                     &image_data,
                     camera_context.as_ref(),
@@ -1138,6 +1251,92 @@ impl PollingOrchestrator {
                     timestamp: captured_at_str.clone(),
                 }))
                 .await;
+
+            // === Phase: Send detection event + snapshot to mobes ===
+            // mobes2.0 AI Chat がスナップショット画像を参照できるようにするため、
+            // 検出イベントと画像をParaclate Ingest Event APIに送信
+            if log_id > 0 {
+                // llm_designers_review(important).md準拠: 検出データ完全送信
+                // mobes2.0 Paraclate形式: フラット構造 + snake_case
+                let event_payload = crate::paraclate_client::types::EventPayload {
+                    tid: tid.to_string(),
+                    fid: fid.to_string(),
+                    detection_log_id: log_id,
+                    camera_id: camera.lacis_id.clone().unwrap_or_default(),
+                    captured_at,
+                    primary_event: result.primary_event.clone(),
+                    severity: result.severity,
+                    confidence: result.confidence,
+                    tags: result.tags.clone(),
+
+                    // DD19: フラット構造で全フィールド送信
+                    bboxes: if result.bboxes.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::to_value(&result.bboxes).unwrap_or_default())
+                    },
+                    count_hint: Some(result.count_hint),
+                    unknown_flag: Some(result.unknown_flag),
+                    schema_version: Some(result.schema_version.clone()),
+                    // DD19: person_details をJSONValueに変換
+                    person_details: result.person_details.as_ref()
+                        .map(|pd| serde_json::to_value(pd).unwrap_or_default()),
+                    // DD19: vehicle_details をJSONValueに変換
+                    vehicle_details: result.vehicle_details.as_ref()
+                        .map(|vd| serde_json::to_value(vd).unwrap_or_default()),
+                    suspicious: result.suspicious.as_ref()
+                        .map(|s| serde_json::to_value(s).unwrap_or_default()),
+                    frame_diff: result.frame_diff.as_ref()
+                        .map(|fd| serde_json::to_value(fd).unwrap_or_default()),
+                    loitering_detected: Some(result.frame_diff.as_ref()
+                        .and_then(|fd| fd.loitering.as_ref())
+                        .map(|l| l.detected)
+                        .unwrap_or(false)),
+                    is22_timings: Some(serde_json::json!({
+                        "snapshot_ms": snapshot_ms,
+                        "is21_roundtrip_ms": is21_roundtrip_ms,
+                        "is21_inference_ms": is21_inference_ms,
+                        "is21_yolo_ms": is21_yolo_ms,
+                        "is21_par_ms": is21_par_ms,
+                        "total_ms": processing_ms
+                    })),
+                    // PresetAppliedInfoから各フィールドを抽出
+                    preset_applied: result.preset_applied.as_ref()
+                        .map(|p| p.preset_id.clone()),
+                    preset_id: result.preset_applied.as_ref()
+                        .map(|p| p.preset_id.clone()),
+                    preset_version: result.preset_applied.as_ref()
+                        .map(|p| p.preset_version.clone()),
+
+                    snapshot_base64: None, // send_event_with_snapshotで設定される
+                    snapshot_mime_type: None,
+                    malfunction_type: None,
+                    malfunction_details: None,
+                };
+
+                // 非同期でイベント+スナップショットを送信（失敗してもポーリングは継続）
+                let send_result = paraclate_client
+                    .send_event_with_snapshot(tid, fid, event_payload, Some(image_data.clone()), log_id)
+                    .await;
+
+                match send_result {
+                    Ok(result) => {
+                        tracing::info!(
+                            log_id = log_id,
+                            queue_id = result.queue_id,
+                            success = result.success,
+                            "Detection event sent to mobes"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            log_id = log_id,
+                            error = %e,
+                            "Failed to send detection event to mobes (will retry via queue)"
+                        );
+                    }
+                }
+            }
 
             // Detailed logging with timing breakdown
             tracing::info!(

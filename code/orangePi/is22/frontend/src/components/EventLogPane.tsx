@@ -43,6 +43,7 @@ import { DetectionDetailModal } from "./DetectionDetailModal"
 import { ChatExpandModal } from "./ChatExpandModal"
 import { loadAIAssistantSettings } from "./SettingsModal"
 import aichatIcon from "@/assets/aichat_icon.svg"
+import ReactMarkdown from "react-markdown"
 
 // Execution state for patrol ticker
 type ExecutionState = "idle" | "accessing" | "cooldown" | "waiting"
@@ -916,29 +917,13 @@ Paraclate APP接続時は以下の高度な機能が利用できます:
     // Mark as processed
     processedSummaryIdsRef.current.add(summaryReport.summary_id)
 
-    // Format period for display
-    const formatPeriod = (start: string, end: string) => {
-      const startDate = new Date(start)
-      const endDate = new Date(end)
-      const formatTime = (d: Date) => d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
-      const formatDate = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`
-
-      if (startDate.getDate() === endDate.getDate()) {
-        return `${formatDate(startDate)} ${formatTime(startDate)}〜${formatTime(endDate)}`
-      } else {
-        return `${formatDate(startDate)} ${formatTime(startDate)}〜${formatDate(endDate)} ${formatTime(endDate)}`
-      }
-    }
-
-    const reportTypeLabel = summaryReport.report_type === "grand_summary" ? "シフトサマリー" : "定時サマリー"
-    const period = formatPeriod(summaryReport.period_start, summaryReport.period_end)
-
-    const content = summaryReport.detection_count > 0
-      ? `【${reportTypeLabel}】${period}\n検出: ${summaryReport.detection_count}件（${summaryReport.camera_count}台）\n最大重要度: ${summaryReport.severity_max}\n\n${summaryReport.summary_text}`
-      : `【${reportTypeLabel}】${period}\n検出イベントなし`
+    // LLMからのsummary_textをそのまま使用（余計なヘッダー追加は削除）
+    // LLM側で適切にフォーマットされたテキストが返ってくる前提
+    const content = summaryReport.summary_text
 
     const summaryMessage: ChatMessage = {
-      id: `summary-${summaryReport.summary_id}-${Date.now()}`,
+      // 決定的なID（全クライアントで同一）→ DB ON DUPLICATE KEY で重複防止
+      id: `summary-${summaryReport.summary_id}`,
       role: "system",
       content,
       timestamp: new Date(summaryReport.created_at),
@@ -1344,8 +1329,28 @@ Paraclate APP接続時は以下の高度な機能が利用できます:
                       (msg.role === "system" || msg.role === "assistant") && "bg-[#F0F0F0] text-[#1A1A1A] rounded-tl-sm"
                     )}
                   >
-                    {/* Message content */}
-                    <div className="leading-relaxed">{msg.content}</div>
+                    {/* Message content with Markdown support */}
+                    <div className="leading-relaxed">
+                      <ReactMarkdown
+                        components={{
+                          // Style markdown elements for chat display
+                          p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+                          ul: ({ children }) => <ul className="list-disc list-inside mb-1.5 ml-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal list-inside mb-1.5 ml-1">{children}</ol>,
+                          li: ({ children }) => <li className="mb-0.5">{children}</li>,
+                          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                          h1: ({ children }) => <h1 className="text-xs font-bold mb-1">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-xs font-bold mb-1">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-[11px] font-bold mb-0.5">{children}</h3>,
+                          code: ({ children }) => <code className="bg-gray-200 px-0.5 rounded text-[9px]">{children}</code>,
+                          pre: ({ children }) => <pre className="bg-gray-200 p-1 rounded text-[9px] overflow-x-auto my-1">{children}</pre>,
+                          a: ({ href, children }) => <a href={href} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
+                          hr: () => <hr className="my-1 border-gray-300" />,
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    </div>
                     {/* Timestamp */}
                     <div className={cn(
                       "text-[9px] mt-1",

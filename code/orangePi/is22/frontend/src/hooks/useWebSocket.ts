@@ -98,9 +98,23 @@ export interface ChatSyncMessage {
   message_id?: string
 }
 
+// Stream preemption notification from AccessAbsorber
+export interface StreamPreemptedMessage {
+  camera_id: string
+  session_id: string
+  preempted_purpose: string  // e.g., "suggest_play", "health_check"
+  preempted_by: string       // e.g., "click_modal"
+  user_message: {
+    title: string
+    message: string
+    severity: "info" | "warning" | "error"
+  }
+  exit_delay_sec: number     // Recommended delay before exiting (5 for suggest)
+}
+
 export interface HubMessage {
-  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated" | "cycle_stats" | "cooldown_tick" | "summary_report" | "chat_sync"
-  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | CycleStatsMessage | CooldownTickMessage | SummaryReportMessage | ChatSyncMessage | unknown
+  type: "event_log" | "suggest_update" | "system_status" | "camera_status" | "snapshot_updated" | "cycle_stats" | "cooldown_tick" | "summary_report" | "chat_sync" | "stream_preempted"
+  data: EventLogMessage | SystemStatusMessage | CameraStatusMessage | SnapshotUpdatedMessage | CycleStatsMessage | CooldownTickMessage | SummaryReportMessage | ChatSyncMessage | StreamPreemptedMessage | unknown
 }
 
 interface UseWebSocketOptions {
@@ -112,6 +126,7 @@ interface UseWebSocketOptions {
   onCooldownTick?: (msg: CooldownTickMessage) => void
   onSummaryReport?: (msg: SummaryReportMessage) => void
   onChatSync?: (msg: ChatSyncMessage) => void
+  onStreamPreempted?: (msg: StreamPreemptedMessage) => void
   onMessage?: (msg: HubMessage) => void
   reconnectInterval?: number
 }
@@ -164,6 +179,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             callbacks.onSummaryReport(msg.data as SummaryReportMessage)
           } else if (msg.type === "chat_sync" && callbacks.onChatSync) {
             callbacks.onChatSync(msg.data as ChatSyncMessage)
+          } else if (msg.type === "stream_preempted" && callbacks.onStreamPreempted) {
+            callbacks.onStreamPreempted(msg.data as StreamPreemptedMessage)
           }
 
           // Generic message handler

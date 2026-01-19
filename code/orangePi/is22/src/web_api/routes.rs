@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 
+use crate::access_absorber::AccessFamily;
 use crate::admission_controller::{LeaseRequest, LeaseResponse, StreamQuality};
 use crate::camera_brand::{
     AddGenericPathRequest, AddOuiRequest, AddTemplateRequest, CreateBrandRequest,
@@ -42,7 +43,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/cameras/:id/auth-test", post(auth_test_camera))
         .route("/api/cameras/:id/sync-preset", post(sync_preset_to_is21))
         .route("/api/cameras/:id/reactivate", post(reactivate_camera))
+        .route("/api/cameras/:id/access-family", put(update_camera_access_family))
+        .route("/api/cameras/activation-status", get(get_activation_status))
         .route("/api/cameras/restore-by-mac", post(restore_camera_by_mac))
+        // PTZ Control
+        .route("/api/cameras/:id/ptz/move", post(super::ptz_move))
+        .route("/api/cameras/:id/ptz/stop", post(super::ptz_stop))
+        .route("/api/cameras/:id/ptz/home", post(super::ptz_home))
+        .route("/api/cameras/:id/ptz/status", get(super::ptz_status))
         // Modal Leases
         .route("/api/modal/lease", post(request_lease))
         .route("/api/modal/lease/:id", delete(release_lease))
@@ -183,8 +191,10 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/api", super::summary_routes::summary_routes())
         // ParaclateClient (Phase 4: Issue #117)
         .nest("/api/paraclate", super::paraclate_routes::paraclate_routes())
-        // BqSyncService (Phase 5: Issue #118)
-        .nest("/api/bq-sync", super::bq_sync_routes::bq_sync_routes())
+        // Chat Messages (cross-device sync)
+        .nest("/api", super::chat_routes::chat_routes())
+        // Access Absorber (camera brand connection limits)
+        .nest("/api/access-absorber", super::access_absorber_routes::access_absorber_routes())
         .with_state(state)
 }
 
@@ -221,6 +231,21 @@ async fn create_camera(
                 state.polling.spawn_subnet_loop_if_needed(ip).await;
             }
 
+            // Auto-activate: Register to araneaDeviceGate if MAC is available
+            if camera.mac_address.is_some() {
+                let camera_id = camera.camera_id.clone();
+                let state_clone = state.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = auto_activate_camera(&state_clone, &camera_id).await {
+                        tracing::warn!(
+                            camera_id = %camera_id,
+                            error = %e,
+                            "Auto-activation failed (camera will need manual activation)"
+                        );
+                    }
+                });
+            }
+
             (StatusCode::CREATED, Json(ApiResponse::success(camera))).into_response()
         }
         Err(e) => e.into_response(),
@@ -230,8 +255,19 @@ async fn create_camera(
 async fn update_camera(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<UpdateCameraRequest>,
+    Json(mut req): Json<UpdateCameraRequest>,
 ) -> impl IntoResponse {
+    // SECURITY: lacis_id and cic are system-managed fields and cannot be manually updated
+    // These fields are only set via auto-activation (araneaDeviceGate registration)
+    if req.lacis_id.is_some() || req.cic.is_some() {
+        tracing::warn!(
+            camera_id = %id,
+            "Attempted to manually update lacis_id or cic - blocked"
+        );
+    }
+    req.lacis_id = None;
+    req.cic = None;
+
     match state.config_store.service().update_camera(&id, req).await {
         Ok(camera) => {
             let _ = state.config_store.refresh_cache().await;
@@ -282,6 +318,80 @@ async fn delete_camera(
             Json(serde_json::json!({"ok": true})).into_response()
         }
         Err(e) => e.into_response(),
+    }
+}
+
+/// Update camera access_family (manual override for connection limits)
+/// PUT /api/cameras/:id/access-family
+#[derive(Debug, Deserialize)]
+struct UpdateAccessFamilyRequest {
+    access_family: String,
+}
+
+async fn update_camera_access_family(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    Json(req): Json<UpdateAccessFamilyRequest>,
+) -> impl IntoResponse {
+    // Validate access_family value
+    let valid_families = ["tapo_ptz", "tapo_fixed", "vigi", "nvt", "hikvision", "dahua", "axis", "unknown"];
+    if !valid_families.contains(&req.access_family.as_str()) {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "ok": false,
+            "error": format!(
+                "Invalid access_family '{}'. Valid values: {}",
+                req.access_family,
+                valid_families.join(", ")
+            )
+        }))).into_response();
+    }
+
+    // Update access_family in database
+    let result = sqlx::query(
+        "UPDATE cameras SET access_family = ? WHERE camera_id = ?"
+    )
+        .bind(&req.access_family)
+        .bind(&camera_id)
+        .execute(&state.pool)
+        .await;
+
+    match result {
+        Ok(r) => {
+            if r.rows_affected() == 0 {
+                return (StatusCode::NOT_FOUND, Json(json!({
+                    "ok": false,
+                    "error": format!("Camera '{}' not found", camera_id)
+                }))).into_response();
+            }
+
+            let _ = state.config_store.refresh_cache().await;
+
+            tracing::info!(
+                camera_id = %camera_id,
+                access_family = %req.access_family,
+                "Manual access_family override applied"
+            );
+
+            Json(json!({
+                "ok": true,
+                "data": {
+                    "camera_id": camera_id,
+                    "access_family": req.access_family,
+                    "display_name": AccessFamily::from_str(&req.access_family).display_name()
+                }
+            })).into_response()
+        }
+        Err(e) => {
+            tracing::error!(
+                camera_id = %camera_id,
+                error = %e,
+                "Failed to update access_family"
+            );
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false,
+                "error": format!("Database error: {}", e)
+            }))).into_response()
+        }
     }
 }
 
@@ -727,6 +837,146 @@ async fn reactivate_camera(
     }
 }
 
+/// Get camera activation status
+/// GET /api/cameras/activation-status
+///
+/// Returns count of activated vs unactivated cameras.
+/// Unactivated cameras have no CIC (need araneaDeviceGate registration).
+async fn get_activation_status(State(state): State<AppState>) -> impl IntoResponse {
+    // Count cameras by activation status
+    // Use CAST to convert DECIMAL to SIGNED for sqlx compatibility
+    let result: Result<(i64, i64, i64), sqlx::Error> = sqlx::query_as(
+        r#"
+        SELECT
+            CAST(COUNT(*) AS SIGNED) as total,
+            CAST(SUM(CASE WHEN cic IS NOT NULL AND cic != '' THEN 1 ELSE 0 END) AS SIGNED) as activated,
+            CAST(SUM(CASE WHEN cic IS NULL OR cic = '' THEN 1 ELSE 0 END) AS SIGNED) as unactivated
+        FROM cameras
+        WHERE deleted_at IS NULL
+        "#,
+    )
+    .fetch_one(&state.pool)
+    .await;
+
+    match result {
+        Ok((total, activated, unactivated)) => {
+            let has_unactivated = unactivated > 0;
+            Json(serde_json::json!({
+                "ok": true,
+                "total_cameras": total,
+                "activated": activated,
+                "unactivated": unactivated,
+                "health": if has_unactivated { "warning" } else { "ok" },
+                "message": if has_unactivated {
+                    format!("{}台のカメラが未アクティベートです", unactivated)
+                } else {
+                    "全カメラがアクティベート済みです".to_string()
+                }
+            })).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get activation status");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": e.to_string()
+                })),
+            ).into_response()
+        }
+    }
+}
+
+/// Auto-activate a camera by registering it to araneaDeviceGate
+///
+/// Called automatically when a camera is registered (created) with a MAC address.
+/// This ensures cameras are immediately activated without manual intervention.
+///
+/// # Arguments
+/// * `state` - Application state
+/// * `camera_id` - Camera ID to activate
+///
+/// # Returns
+/// * `Ok(())` - Activation successful
+/// * `Err(e)` - Activation failed (logged as warning, camera needs manual activation)
+async fn auto_activate_camera(state: &AppState, camera_id: &str) -> crate::Result<()> {
+    use crate::camera_registry::{
+        CameraRegistrationRepository, CameraRegistryService, CameraRegisterRequest,
+    };
+
+    // Check if ARANEA_GATE_URL is configured
+    let gate_url = match &state.config.aranea_gate_url {
+        Some(url) => url.clone(),
+        None => {
+            tracing::debug!(
+                camera_id = %camera_id,
+                "Skipping auto-activation: ARANEA_GATE_URL not configured"
+            );
+            return Ok(());
+        }
+    };
+
+    // Get camera info for activation
+    let camera = state.config_store.service().get_camera(camera_id).await?
+        .ok_or_else(|| crate::Error::NotFound(format!("Camera {} not found", camera_id)))?;
+
+    let mac_address = match &camera.mac_address {
+        Some(mac) => mac.clone(),
+        None => {
+            tracing::debug!(
+                camera_id = %camera_id,
+                "Skipping auto-activation: no MAC address"
+            );
+            return Ok(());
+        }
+    };
+
+    // Create CameraRegistryService
+    let repository = CameraRegistrationRepository::new(state.pool.clone());
+    let service = CameraRegistryService::new(
+        gate_url,
+        repository,
+        state.config_store.clone(),
+    );
+
+    // Get product code from brand
+    let product_code = service.preview_lacis_id(camera_id).await
+        .ok()
+        .flatten()
+        .map(|lacis_id| lacis_id[16..20].to_string())
+        .unwrap_or_else(|| "0000".to_string());
+
+    // Create registration request
+    let request = CameraRegisterRequest {
+        camera_id: camera_id.to_string(),
+        mac_address,
+        product_code,
+        fid: camera.fid.clone(),
+        rid: camera.rid.clone(),
+    };
+
+    // Execute registration
+    let result = service.register_camera(request).await?;
+
+    if result.ok {
+        tracing::info!(
+            camera_id = %camera_id,
+            lacis_id = ?result.lacis_id,
+            cic = ?result.cic,
+            "Camera auto-activated successfully"
+        );
+        Ok(())
+    } else {
+        let err_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
+        tracing::warn!(
+            camera_id = %camera_id,
+            error = %err_msg,
+            "Camera auto-activation failed"
+        );
+        Err(crate::Error::Api(err_msg))
+    }
+}
+
 // ========================================
 // Modal Lease Handlers
 // ========================================
@@ -945,26 +1195,15 @@ async fn detection_log_stats(State(state): State<AppState>) -> impl IntoResponse
 
     let today_logs = today_result.unwrap_or(0);
 
-    // Get pending BQ sync count
-    let pending_bq: Result<i64, sqlx::Error> = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM bq_sync_queue WHERE status = 'pending'"
-    )
-    .fetch_one(&state.pool)
-    .await;
-
-    let pending_bq_sync = pending_bq.unwrap_or(0);
-
     Json(ApiResponse::success(serde_json::json!({
         "service_stats": {
             "logs_saved": stats.logs_saved,
-            "bq_queued": stats.bq_queued,
             "images_saved": stats.images_saved,
             "errors": stats.errors,
         },
         "database": {
             "total_logs": total_logs,
             "today_logs": today_logs,
-            "pending_bq_sync": pending_bq_sync,
         }
     })))
 }
@@ -3847,6 +4086,9 @@ struct BatchApproveItem {
     location: String,
     fid: String,
     credentials: Option<crate::ipcam_scan::ApproveCredentials>,
+    /// RT-07: Force register flag for category C devices (pending_auth)
+    #[serde(default)]
+    force_register: bool,
 }
 
 async fn approve_devices_batch(
@@ -3857,30 +4099,61 @@ async fn approve_devices_batch(
     let mut approved_ips = Vec::new();
 
     for item in req.devices {
-        let approve_req = crate::ipcam_scan::ApproveDeviceRequest {
-            display_name: item.display_name,
-            location: item.location,
-            fid: item.fid,
-            credentials: item.credentials,
-        };
-
         let ip = item.ip.clone();
-        match state.ipcam_scan.approve_device(&item.ip, &approve_req).await {
-            Ok(response) => {
-                // go2rtc registration is handled by polling_orchestrator at cycle start
-                approved_ips.push(ip.clone());
-                results.push(serde_json::json!({
-                    "ip": ip,
-                    "ok": true,
-                    "camera": response
-                }));
+
+        // RT-07: Check force_register flag to determine which registration path
+        if item.force_register {
+            // Category C device: use force_register_camera (no verification required)
+            let force_req = crate::ipcam_scan::ForceRegisterRequest {
+                name: item.display_name,
+                location: item.location,
+                fid: item.fid,
+            };
+
+            match state.ipcam_scan.force_register_camera(&item.ip, &force_req).await {
+                Ok(response) => {
+                    approved_ips.push(ip.clone());
+                    results.push(serde_json::json!({
+                        "ip": ip,
+                        "ok": true,
+                        "force_registered": true,
+                        "camera": response
+                    }));
+                }
+                Err(e) => {
+                    results.push(serde_json::json!({
+                        "ip": ip,
+                        "ok": false,
+                        "error": e.to_string()
+                    }));
+                }
             }
-            Err(e) => {
-                results.push(serde_json::json!({
-                    "ip": ip,
-                    "ok": false,
-                    "error": e.to_string()
-                }));
+        } else {
+            // Category B device: use approve_device (requires verification)
+            let approve_req = crate::ipcam_scan::ApproveDeviceRequest {
+                display_name: item.display_name,
+                location: item.location,
+                fid: item.fid,
+                credentials: item.credentials,
+            };
+
+            match state.ipcam_scan.approve_device(&item.ip, &approve_req).await {
+                Ok(response) => {
+                    // go2rtc registration is handled by polling_orchestrator at cycle start
+                    approved_ips.push(ip.clone());
+                    results.push(serde_json::json!({
+                        "ip": ip,
+                        "ok": true,
+                        "camera": response
+                    }));
+                }
+                Err(e) => {
+                    results.push(serde_json::json!({
+                        "ip": ip,
+                        "ok": false,
+                        "error": e.to_string()
+                    }));
+                }
             }
         }
     }
@@ -3995,6 +4268,7 @@ async fn clear_scanned_devices(State(state): State<AppState>) -> impl IntoRespon
 
 /// Force register device without authentication (#83 T2-10)
 /// Creates camera with status='pending_auth', polling_enabled=false
+/// Auto-activates the camera to araneaDeviceGate after registration
 async fn force_register_device(
     State(state): State<AppState>,
     Path(device_ip): Path<String>,
@@ -4004,6 +4278,19 @@ async fn force_register_device(
         Ok(response) => {
             // Refresh config cache
             let _ = state.config_store.refresh_cache().await;
+
+            // Auto-activate: Register to araneaDeviceGate
+            let camera_id = response.camera_id.clone();
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = auto_activate_camera(&state_clone, &camera_id).await {
+                    tracing::warn!(
+                        camera_id = %camera_id,
+                        error = %e,
+                        "Auto-activation failed for force-registered camera"
+                    );
+                }
+            });
 
             Json(serde_json::json!({
                 "ok": true,
@@ -4575,6 +4862,7 @@ async fn scan_selected_subnets(
         ports: None,
         timeout_ms: req.timeout_ms,
         concurrency: None,
+        brute_force: false, // デフォルトOFF
     };
 
     // create_job now returns Result<ScanJob> (single execution guard)

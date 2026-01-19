@@ -46,6 +46,46 @@ impl Default for CameraFamily {
     }
 }
 
+impl CameraFamily {
+    /// Convert to access_family string for Access Absorber
+    /// Maps camera family to connection limit profile
+    pub fn to_access_family(&self) -> &'static str {
+        match self {
+            // Tapo: defaults to tapo_ptz (most common Tapo cameras are PTZ)
+            // tapo_fixed should be set manually for fixed cameras if needed
+            CameraFamily::Tapo => "tapo_ptz",
+            CameraFamily::Vigi => "vigi",
+            CameraFamily::Axis => "axis",
+            CameraFamily::Hikvision => "hikvision",
+            CameraFamily::Dahua => "dahua",
+            CameraFamily::Nest => "unknown",
+            CameraFamily::Other => "unknown",
+            CameraFamily::Unknown => "unknown",
+        }
+    }
+
+    /// Generate ONVIF endpoint URL for PTZ control
+    /// Returns None for families that don't support ONVIF or have unknown ports
+    pub fn generate_onvif_endpoint(&self, ip: &str) -> Option<String> {
+        match self {
+            // TP-Link Tapo: ONVIF on port 2020
+            CameraFamily::Tapo => Some(format!("http://{}:2020/onvif/device_service", ip)),
+            // TP-Link VIGI: ONVIF on port 2020 (same as Tapo)
+            CameraFamily::Vigi => Some(format!("http://{}:2020/onvif/device_service", ip)),
+            // Hikvision: ONVIF on port 80
+            CameraFamily::Hikvision => Some(format!("http://{}:80/onvif/device_service", ip)),
+            // Dahua: ONVIF on port 80
+            CameraFamily::Dahua => Some(format!("http://{}:80/onvif/device_service", ip)),
+            // Axis: ONVIF on port 80
+            CameraFamily::Axis => Some(format!("http://{}:80/onvif/device_service", ip)),
+            // Nest: No ONVIF support
+            CameraFamily::Nest => None,
+            // Unknown: Cannot determine ONVIF port
+            CameraFamily::Other | CameraFamily::Unknown => None,
+        }
+    }
+}
+
 /// RTSP URL template per camera family
 /// Used to generate both main and sub stream URLs during device registration
 /// FIX-004: rtsp_sub自動登録対応

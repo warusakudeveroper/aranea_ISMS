@@ -132,6 +132,7 @@ export interface Camera {
   ptz_zoom_range: { min: number; max: number } | null;
   ptz_presets: string[] | null;
   ptz_home_supported: boolean;
+  ptz_disabled: boolean;   // PTZ操作UIを無効化
   // === 音声能力 ===
   audio_input_supported: boolean;
   audio_output_supported: boolean;
@@ -224,6 +225,7 @@ export interface UpdateCameraRequest {
   ptz_zoom_range?: { min: number; max: number };
   ptz_presets?: string[];
   ptz_home_supported?: boolean;
+  ptz_disabled?: boolean;  // PTZ操作UIを無効化
   // === 音声能力 ===
   audio_input_supported?: boolean;
   audio_output_supported?: boolean;
@@ -343,7 +345,8 @@ export interface DetectionReason {
 }
 
 // ScannedDevice - Backend API応答と完全一致
-// GET /api/ipcamscan/devices の devices[] 要素
+// GET /api/ipcamscan/devices-with-categories の devices[] 要素
+// Note: devices-with-categories は registered_camera_id/name をlacisID SSoTベースで付与
 export interface ScannedDevice {
   device_id: string;
   ip: string;                    // Backend: "ip" (NOT "ip_address")
@@ -370,7 +373,8 @@ export interface ScannedDevice {
   credential_password: string | null;  // 成功時のパスワード
   // Tried credentials list (for T3-10 plain-text display)
   tried_credentials?: TriedCredentialResult[];
-  // Category detail from backend
+  // Category classification from backend (lacisID SSoT)
+  category?: DeviceCategory;
   category_detail?: DeviceCategoryDetail;
   // For category F: registered camera info
   registered_camera_id?: number;
@@ -473,18 +477,20 @@ export interface Subnet {
 export type DeviceCategory = 'a' | 'b' | 'c' | 'd' | 'e' | 'f';
 
 // Device category detail (more specific classification)
+// Backend uses #[serde(rename_all = "snake_case")]
 export type DeviceCategoryDetail =
-  | 'RegisteredAuthenticated'   // A: 登録済み・認証OK
-  | 'RegisteredAuthIssue'       // A: 登録済み・認証要確認
-  | 'Registrable'               // B: 登録可能
-  | 'AuthRequired'              // C: 認証待ち
-  | 'PossibleCamera'            // D: カメラ可能性あり（OUI一致）
-  | 'NetworkEquipment'          // D: ネットワーク機器
-  | 'IoTDevice'                 // D: IoTデバイス
-  | 'UnknownDevice'             // D: 不明
-  | 'NonCamera'                 // E: 非カメラ
-  | 'LostConnection'            // F: 通信断
-  | 'StrayChild';               // F: 迷子カメラ（IP変更検出）
+  | 'registered'             // A: 登録済み（IP一致）
+  | 'registrable'            // B: 登録可能（認証成功）
+  | 'auth_required'          // C: 認証必要
+  | 'auth_failed'            // C: 認証失敗
+  | 'possible_camera'        // D: カメラ可能性あり（OUI一致）
+  | 'network_equipment'      // D: ネットワーク機器
+  | 'io_t_device'            // D: IoTデバイス
+  | 'unknown_device'         // D: 不明
+  | 'non_camera'             // E: 非カメラ
+  | 'lost_connection'        // F: 通信断
+  | 'stray_child'            // F: 迷子カメラ（IP変更検出）
+  | 'unknown';               // デフォルト
 
 // Category metadata for UI display
 export interface CategoryMeta {
@@ -854,15 +860,24 @@ export interface AraneaRegisterResult {
   error?: string;
 }
 
+// Managed facility info (from scan_subnets)
+export interface ManagedFacility {
+  fid: string;
+  facilityName?: string;
+  subnet: string;
+  cameraCount: number;
+}
+
 // Registration status (GET /api/register/status)
 export interface AraneaRegistrationStatus {
   registered: boolean;
   lacisId?: string;
   tid?: string;
-  fid?: string;           // Facility ID (DD09_IS22_WebUI)
+  fid?: string;           // Facility ID (DD09_IS22_WebUI) - legacy single FID
   cic?: string;
   registeredAt?: string;  // ISO8601
   lastSyncAt?: string;    // ISO8601
+  managedFacilities?: ManagedFacility[];  // 管理対象施設一覧（scan_subnetsから）
 }
 
 // Clear registration result

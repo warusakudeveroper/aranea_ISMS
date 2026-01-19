@@ -24,7 +24,8 @@ pub const LACIS_ID_LENGTH: usize = 20;
 pub const DEFAULT_PRODUCT_CODE: &str = "0000";
 
 /// デバイスタイプ (araneaDeviceGate登録用)
-pub const DEVICE_TYPE: &str = "aranea_ar-is801";
+/// TYPE_REGISTRY.md準拠: ar-is801ParaclateCamera
+pub const DEVICE_TYPE: &str = "ar-is801ParaclateCamera";
 
 /// ProductCode定義
 pub mod product_codes {
@@ -204,6 +205,7 @@ pub struct LacisOath {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserObject {
+    #[serde(rename = "lacisID")]  // AUTH_SPEC Section 5.3: userObject uses capital "ID"
     pub lacis_id: String,
     pub tid: String,
     pub type_domain: String,
@@ -224,11 +226,52 @@ pub struct DeviceMeta {
 }
 
 /// araneaDeviceGate登録レスポンス
+/// 実際のレスポンス構造:
+/// {
+///   "ok": true,
+///   "existing": true/false,
+///   "lacisId": "...",
+///   "userObject": { "cic_code": "...", "cic_active": true, "permission": 10 },
+///   "stateEndpoint": "..."
+/// }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GateRegisterResponse {
-    pub cic_code: Option<String>,
+    /// 登録成功フラグ
+    pub ok: Option<bool>,
+    /// 既存デバイスかどうか
+    pub existing: Option<bool>,
+    /// 登録されたLacisID
+    pub lacis_id: Option<String>,
+    /// デバイス情報 (CICを含む)
+    pub user_object: Option<GateUserObject>,
+    /// 状態報告エンドポイント
     pub state_endpoint: Option<String>,
+    /// MQTTエンドポイント
     pub mqtt_endpoint: Option<String>,
+    /// エラーメッセージ
     pub error: Option<String>,
+}
+
+/// Gate userObject (CIC情報を含む)
+#[derive(Debug, Clone, Deserialize)]
+pub struct GateUserObject {
+    /// CICコード
+    pub cic_code: Option<String>,
+    /// CIC有効フラグ
+    pub cic_active: Option<bool>,
+    /// 権限レベル
+    pub permission: Option<i32>,
+}
+
+impl GateRegisterResponse {
+    /// CICコードを取得 (userObject.cic_codeから抽出)
+    pub fn get_cic(&self) -> Option<String> {
+        self.user_object.as_ref().and_then(|u| u.cic_code.clone())
+    }
+
+    /// 登録成功かどうか
+    pub fn is_success(&self) -> bool {
+        self.ok.unwrap_or(false) && self.get_cic().is_some()
+    }
 }

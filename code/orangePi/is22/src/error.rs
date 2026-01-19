@@ -77,9 +77,21 @@ pub enum Error {
     #[error("Summary error: {0}")]
     Summary(String),
 
+    /// Paraclate client error
+    #[error("Paraclate error: {0}")]
+    Paraclate(String),
+
+    /// Access Absorber error (stream limit/connection control)
+    #[error("Access denied for camera {camera_id}: {message}")]
+    AccessAbsorber { camera_id: String, message: String },
+
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// SQLx database error
+    #[error("SQLx error: {0}")]
+    Sqlx(#[from] sqlx::Error),
 }
 
 impl IntoResponse for Error {
@@ -145,10 +157,25 @@ impl IntoResponse for Error {
                 "SUMMARY_ERROR",
                 msg.clone(),
             ),
+            Error::Paraclate(msg) => (
+                StatusCode::BAD_GATEWAY,
+                "PARACLATE_ERROR",
+                msg.clone(),
+            ),
+            Error::AccessAbsorber { camera_id, message } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ACCESS_DENIED",
+                format!("Camera {}: {}", camera_id, message),
+            ),
             Error::Internal(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
                 msg.clone(),
+            ),
+            Error::Sqlx(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "DATABASE_ERROR",
+                e.to_string(),
             ),
         };
 

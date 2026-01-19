@@ -4,11 +4,17 @@
 //! T3-6, T3-7: GrandSummary設計・実装
 //!
 //! ## 概要
-//! 複数のhourly Summaryを統合し、日次GrandSummaryを生成する。
+//! 複数のhourly Summaryを統合し、シフト単位のGrandSummaryを生成する。
+//!
+//! ## シフト単位集計
+//! GrandSummaryは「前回実行時刻〜今回実行時刻」の期間でSummaryを集計する。
+//! 例: scheduled_times = ["08:00", "15:00", "22:00"] の場合
+//!   - 08:00実行 → 前日22:00〜当日08:00のSummaryを集計
+//!   - 15:00実行 → 当日08:00〜15:00のSummaryを集計
+//!   - 22:00実行 → 当日15:00〜22:00のSummaryを集計
 //!
 //! ## タイムゾーン
 //! - scheduled_times（09:00等）はAsia/Tokyo（JST）基準
-//! - 日次境界もAsia/Tokyo基準で計算
 
 use super::repository::SummaryRepository;
 use super::types::{SummaryInsert, SummaryResult, SummaryType};
@@ -28,47 +34,46 @@ impl GrandSummaryGenerator {
         Self { repository }
     }
 
-    /// GrandSummary生成（複数Summaryを統合）
+    /// GrandSummary生成（シフト単位でSummaryを統合）
     ///
     /// # Arguments
     /// * `tid` - テナントID
     /// * `fid` - 施設ID
-    /// * `date` - 対象日付（Asia/Tokyo基準）
+    /// * `period_start` - シフト開始時刻（前回実行時刻）
+    /// * `period_end` - シフト終了時刻（今回実行時刻）
     ///
-    /// # Note
-    /// 日次境界はAsia/Tokyo（JST）基準で計算する。
-    /// UTCで計算すると日本時間9時間ズレて日次サマリーが正しく集計されない。
+    /// # シフト単位集計
+    /// scheduled_times = ["08:00", "15:00", "22:00"] の場合：
+    ///   - 08:00実行 → 前日22:00〜当日08:00のSummaryを集計
+    ///   - 15:00実行 → 当日08:00〜15:00のSummaryを集計
+    ///   - 22:00実行 → 当日15:00〜22:00のSummaryを集計
     pub async fn generate(
         &self,
         tid: &str,
         fid: &str,
-        date: NaiveDate,
+        period_start: DateTime<Utc>,
+        period_end: DateTime<Utc>,
     ) -> crate::Result<SummaryResult> {
+        // JSTで期間を表示用にフォーマット
+        let start_jst = period_start.with_timezone(&Tokyo);
+        let end_jst = period_end.with_timezone(&Tokyo);
+
         info!(
             tid = %tid,
             fid = %fid,
-            date = %date,
-            "Generating GrandSummary"
+            period_start = %start_jst.format("%Y-%m-%d %H:%M"),
+            period_end = %end_jst.format("%Y-%m-%d %H:%M"),
+            "Generating GrandSummary (shift-based)"
         );
 
-        // Asia/Tokyo（JST）基準で日次境界を設定
-        let period_start_jst = date
-            .and_hms_opt(0, 0, 0)
-            .expect("Invalid time")
-            .and_local_timezone(Tokyo)
-            .single()
-            .expect("Invalid timezone conversion");
-        let period_start = period_start_jst.with_timezone(&Utc);
-        let period_end = period_start + Duration::days(1);
-
-        // 1. 当日のhourly Summaryを全取得
+        // 1. 指定期間のhourly Summaryを取得
         let hourly_summaries = self
             .repository
             .get_by_period(tid, fid, SummaryType::Hourly, period_start, period_end)
             .await?;
 
         if hourly_summaries.is_empty() {
-            return self.create_empty_grand_summary(tid, fid, date).await;
+            return self.create_empty_grand_summary(tid, fid, period_start, period_end).await;
         }
 
         // 2. 統合情報を算出
@@ -88,10 +93,11 @@ impl GrandSummaryGenerator {
             included_summary_ids.push(summary.summary_id);
         }
 
-        // 3. 統合summary_text生成
+        // 3. 統合summary_text生成（シフト単位）
         let summary_text = format!(
-            "{}の日次サマリー: 合計{}件の検出（{}台のカメラ）\n{}個のhourlyサマリーを統合",
-            date.format("%Y-%m-%d"),
+            "シフトサマリー（{} 〜 {}）: 合計{}件の検出（{}台のカメラ）\n{}個のhourlyサマリーを統合",
+            start_jst.format("%m/%d %H:%M"),
+            end_jst.format("%H:%M"),
             total_detection_count,
             all_camera_ids.len(),
             hourly_summaries.len()
@@ -100,7 +106,8 @@ impl GrandSummaryGenerator {
         // 4. summary_json生成
         let summary_json = serde_json::json!({
             "type": "grand_summary",
-            "date": date.to_string(),
+            "shiftStart": period_start.to_rfc3339(),
+            "shiftEnd": period_end.to_rfc3339(),
             "includedSummaryIds": included_summary_ids,
             "totalDetectionCount": total_detection_count,
             "severityMax": severity_max,
@@ -108,11 +115,11 @@ impl GrandSummaryGenerator {
             "hourlySummaryCount": hourly_summaries.len()
         });
 
-        // 5. DBに保存
+        // 5. DBに保存（同一期間のGrandSummaryが既存の場合は更新）
         let camera_ids_vec: Vec<String> = all_camera_ids.into_iter().collect();
         let result = self
             .repository
-            .insert(SummaryInsert {
+            .upsert(SummaryInsert {
                 tid: tid.to_string(),
                 fid: fid.to_string(),
                 summary_type: SummaryType::Daily,
@@ -130,7 +137,7 @@ impl GrandSummaryGenerator {
 
         info!(
             summary_id = result.summary_id,
-            date = %date,
+            period = %format!("{} - {}", start_jst.format("%m/%d %H:%M"), end_jst.format("%H:%M")),
             detection_count = total_detection_count,
             included_count = included_summary_ids.len(),
             "GrandSummary generated successfully"
@@ -144,25 +151,21 @@ impl GrandSummaryGenerator {
         &self,
         tid: &str,
         fid: &str,
-        date: NaiveDate,
+        period_start: DateTime<Utc>,
+        period_end: DateTime<Utc>,
     ) -> crate::Result<SummaryResult> {
-        let period_start_jst = date
-            .and_hms_opt(0, 0, 0)
-            .expect("Invalid time")
-            .and_local_timezone(Tokyo)
-            .single()
-            .expect("Invalid timezone conversion");
-        let period_start = period_start_jst.with_timezone(&Utc);
-        let period_end = period_start + Duration::days(1);
+        let start_jst = period_start.with_timezone(&Tokyo);
+        let end_jst = period_end.with_timezone(&Tokyo);
 
         let summary_text = format!(
-            "{}の日次サマリー: 検出イベントなし",
-            date.format("%Y-%m-%d")
+            "シフトサマリー（{} 〜 {}）: 検出イベントなし",
+            start_jst.format("%m/%d %H:%M"),
+            end_jst.format("%H:%M")
         );
 
         let result = self
             .repository
-            .insert(SummaryInsert {
+            .upsert(SummaryInsert {
                 tid: tid.to_string(),
                 fid: fid.to_string(),
                 summary_type: SummaryType::Daily,
@@ -171,7 +174,8 @@ impl GrandSummaryGenerator {
                 summary_text,
                 summary_json: Some(serde_json::json!({
                     "type": "grand_summary",
-                    "date": date.to_string(),
+                    "shiftStart": period_start.to_rfc3339(),
+                    "shiftEnd": period_end.to_rfc3339(),
                     "includedSummaryIds": [],
                     "totalDetectionCount": 0,
                     "severityMax": 0,
@@ -187,7 +191,7 @@ impl GrandSummaryGenerator {
 
         debug!(
             summary_id = result.summary_id,
-            date = %date,
+            period = %format!("{} - {}", start_jst.format("%m/%d %H:%M"), end_jst.format("%H:%M")),
             "Empty GrandSummary created"
         );
 

@@ -1106,8 +1106,8 @@ export function ScanModal({
 
         if (job.status === "success") {
           console.log("[ScanModal] === JOB SUCCESS - FETCHING DEVICES ===")
-          // Fetch discovered devices
-          const devicesUrl = `${API_BASE_URL}/api/ipcamscan/devices`
+          // Fetch discovered devices with category enrichment (lacisID SSoT)
+          const devicesUrl = `${API_BASE_URL}/api/ipcamscan/devices-with-categories`
           console.log("[ScanModal] Fetching devices from:", devicesUrl)
           const devicesResponse = await fetch(devicesUrl)
           console.log("[ScanModal] Devices response status:", devicesResponse.status, devicesResponse.statusText)
@@ -1412,8 +1412,8 @@ export function ScanModal({
         }
       }
 
-      // Fetch whatever devices were found so far
-      const devicesResponse = await fetch(`${API_BASE_URL}/api/ipcamscan/devices`)
+      // Fetch whatever devices were found so far (with category enrichment for lacisID SSoT)
+      const devicesResponse = await fetch(`${API_BASE_URL}/api/ipcamscan/devices-with-categories`)
       if (devicesResponse.ok) {
         const devicesData = await devicesResponse.json()
         const devicesList = devicesData.devices || devicesData.data || devicesData

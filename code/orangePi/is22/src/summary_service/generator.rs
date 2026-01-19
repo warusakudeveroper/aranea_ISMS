@@ -72,7 +72,7 @@ impl SummaryGenerator {
             .get_by_tid_fid(tid, Some(fid), 10000)
             .await?
             .into_iter()
-            .filter(|log| log.detected_at >= period_start && log.detected_at <= period_end)
+            .filter(|log| log.captured_at >= period_start && log.captured_at <= period_end)
             .collect::<Vec<_>>();
 
         if logs.is_empty() {
@@ -90,9 +90,9 @@ impl SummaryGenerator {
             let stats = camera_stats.entry(camera_id).or_default();
 
             stats.detection_count += 1;
-            let severity = log.suspicious_score.unwrap_or(0.0) as i32;
+            let severity = log.severity;
             stats.severity_max = stats.severity_max.max(severity);
-            stats.detection_ids.push(log.id);
+            stats.detection_ids.push(log.log_id.unwrap_or(0));
 
             severity_max = severity_max.max(severity);
         }
@@ -255,17 +255,17 @@ impl SummaryGenerator {
     /// PayloadBuilderを取得（設定値からis22の登録情報を取得）
     async fn get_payload_builder(&self) -> crate::Result<PayloadBuilder> {
         let is22_lacis_id = self
-            .get_config_value("aranea_lacis_id")
+            .get_config_value("aranea.lacis_id")
             .await
             .ok_or_else(|| crate::Error::Config("IS22 LacisID not configured".into()))?;
 
         let tid = self
-            .get_config_value("aranea_tid")
+            .get_config_value("aranea.tid")
             .await
             .ok_or_else(|| crate::Error::Config("TID not configured".into()))?;
 
         let cic = self
-            .get_config_value("aranea_cic")
+            .get_config_value("aranea.cic")
             .await
             .ok_or_else(|| crate::Error::Config("CIC not configured".into()))?;
 
@@ -291,14 +291,14 @@ impl SummaryGenerator {
         detection_log: &crate::detection_log_service::DetectionLog,
     ) -> crate::Result<SummaryResult> {
         let now = Utc::now();
-        let severity = detection_log.suspicious_score.unwrap_or(0.0) as i32;
+        let severity = detection_log.severity;
 
         let summary_text = format!(
-            "緊急検出: {} - カメラ {} で severity {} の検出\n検出理由: {:?}",
+            "緊急検出: {} - カメラ {} で severity {} の検出\n検出理由: {}",
             now.format("%Y-%m-%d %H:%M:%S"),
             detection_log.camera_id,
             severity,
-            detection_log.detection_reason
+            detection_log.primary_event
         );
 
         let camera_id = detection_log
@@ -312,8 +312,8 @@ impl SummaryGenerator {
                 tid: tid.to_string(),
                 fid: fid.to_string(),
                 summary_type: SummaryType::Emergency,
-                period_start: detection_log.detected_at,
-                period_end: detection_log.detected_at,
+                period_start: detection_log.captured_at,
+                period_end: detection_log.captured_at,
                 summary_text,
                 summary_json: None,
                 detection_count: 1,
@@ -326,7 +326,7 @@ impl SummaryGenerator {
 
         warn!(
             summary_id = result.summary_id,
-            detection_id = detection_log.id,
+            detection_id = detection_log.log_id.unwrap_or(0),
             severity = severity,
             "Emergency summary generated"
         );

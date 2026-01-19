@@ -153,4 +153,9 @@ impl AdmissionController {
         let policy = self.policy.read().await;
         self.lease_manager.cleanup(policy.heartbeat_grace_sec as u64).await;
     }
+
+    /// Get lease by ID (for PTZ authentication)
+    pub async fn get_lease_by_id(&self, lease_id: &uuid::Uuid) -> Option<ModalLease> {
+        self.lease_manager.get_lease(lease_id).await
+    }
 }

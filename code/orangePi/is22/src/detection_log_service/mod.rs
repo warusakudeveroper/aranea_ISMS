@@ -51,6 +51,8 @@ pub struct DetectionLog {
     // Detail data (JSON)
     pub tags: Vec<String>,
     pub person_details: Option<serde_json::Value>,
+    /// DD19対応: 車両詳細情報
+    pub vehicle_details: Option<serde_json::Value>,
     pub bboxes: Option<serde_json::Value>,
     pub suspicious: Option<serde_json::Value>,
 
@@ -86,19 +88,6 @@ pub struct DetectionLog {
     pub created_at: DateTime<Utc>,
     pub synced_to_bq: bool,
     pub synced_at: Option<DateTime<Utc>>,
-}
-
-/// BQ sync queue entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BqSyncEntry {
-    pub queue_id: Option<u64>,
-    pub table_name: String,
-    pub record_id: u64,
-    pub operation: String,
-    pub payload: serde_json::Value,
-    pub retry_count: i32,
-    pub status: String,
-    pub created_at: DateTime<Utc>,
 }
 
 /// Storage quota configuration
@@ -171,8 +160,6 @@ pub struct DetectionLogConfig {
     pub cloud_path_prefix: Option<String>,
     /// Storage quota settings
     pub quota: StorageQuotaConfig,
-    /// Enable BQ sync
-    pub enable_bq_sync: bool,
 }
 
 impl Default for DetectionLogConfig {
@@ -181,7 +168,6 @@ impl Default for DetectionLogConfig {
             image_base_path: PathBuf::from("/var/lib/is22/events"),
             cloud_path_prefix: None,
             quota: StorageQuotaConfig::default(),
-            enable_bq_sync: true,
         }
     }
 }
@@ -232,7 +218,6 @@ pub struct DetectionLogService {
 #[derive(Debug, Clone, Default)]
 pub struct ServiceStats {
     pub logs_saved: u64,
-    pub bq_queued: u64,
     pub images_saved: u64,
     pub errors: u64,
 }
@@ -331,12 +316,6 @@ impl DetectionLogService {
         // 3. Insert to database
         let log_id = self.insert_detection_log(&log).await?;
 
-        // 4. Queue for BQ sync if enabled
-        let enable_bq_sync = self.config.read().await.enable_bq_sync;
-        if enable_bq_sync {
-            self.queue_for_bq(log_id, &log).await?;
-        }
-
         // Update stats
         {
             let mut stats = self.stats.write().await;
@@ -408,6 +387,9 @@ impl DetectionLogService {
             .map(|pd| serde_json::to_value(pd))
             .transpose()?;
 
+        // DD19対応: 車両詳細
+        let vehicle_details = response.vehicle_details.clone();
+
         let bboxes = if !response.bboxes.is_empty() {
             Some(serde_json::to_value(&response.bboxes)?)
         } else {
@@ -451,6 +433,7 @@ impl DetectionLogService {
             unknown_flag: response.unknown_flag,
             tags: response.tags.clone(),
             person_details,
+            vehicle_details,
             bboxes,
             suspicious,
             frame_diff: frame_diff_json,
@@ -502,6 +485,7 @@ impl DetectionLogService {
     async fn insert_detection_log(&self, log: &DetectionLog) -> Result<u64> {
         let tags_json = serde_json::to_string(&log.tags)?;
         let person_details_json = log.person_details.as_ref().map(|v| v.to_string());
+        let vehicle_details_json = log.vehicle_details.as_ref().map(|v| v.to_string());
         let bboxes_json = log.bboxes.as_ref().map(|v| v.to_string());
         let suspicious_json = log.suspicious.as_ref().map(|v| v.to_string());
         let frame_diff_json = log.frame_diff.as_ref().map(|v| v.to_string());
@@ -514,7 +498,7 @@ impl DetectionLogService {
                 tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, confidence, count_hint, unknown_flag,
-                tags, person_details, bboxes, suspicious,
+                tags, person_details, vehicle_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
                 context_applied, camera_context,
@@ -526,7 +510,7 @@ impl DetectionLogService {
                 ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?,
                 ?, ?,
@@ -551,6 +535,7 @@ impl DetectionLogService {
         .bind(log.unknown_flag)
         .bind(&tags_json)
         .bind(&person_details_json)
+        .bind(&vehicle_details_json)
         .bind(&bboxes_json)
         .bind(&suspicious_json)
         .bind(&frame_diff_json)
@@ -572,47 +557,6 @@ impl DetectionLogService {
         Ok(result.last_insert_id())
     }
 
-    /// Queue record for BQ synchronization
-    async fn queue_for_bq(&self, log_id: u64, log: &DetectionLog) -> Result<()> {
-        // Build BQ payload (subset of columns for BQ)
-        let payload = serde_json::json!({
-            "log_id": log_id,
-            "tid": log.tid,
-            "fid": log.fid,
-            "camera_id": log.camera_id,
-            "lacis_id": log.lacis_id,
-            "captured_at": log.captured_at.to_rfc3339(),
-            "analyzed_at": log.analyzed_at.to_rfc3339(),
-            "primary_event": log.primary_event,
-            "severity": log.severity,
-            "confidence": log.confidence,
-            "count_hint": log.count_hint,
-            "tags": log.tags,
-            "preset_id": log.preset_id,
-            "loitering_detected": log.loitering_detected,
-            "image_path_local": log.image_path_local,
-            "schema_version": log.schema_version,
-        });
-
-        sqlx::query(
-            r#"
-            INSERT INTO bq_sync_queue (table_name, record_id, operation, payload, status)
-            VALUES ('detection_logs', ?, 'INSERT', ?, 'pending')
-            "#,
-        )
-        .bind(log_id)
-        .bind(payload.to_string())
-        .execute(&self.pool)
-        .await?;
-
-        {
-            let mut stats = self.stats.write().await;
-            stats.bq_queued += 1;
-        }
-
-        Ok(())
-    }
-
     // ========================================
     // Query Methods
     // ========================================
@@ -625,7 +569,7 @@ impl DetectionLogService {
                 log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
-                tags, person_details, bboxes, suspicious,
+                tags, person_details, vehicle_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
                 context_applied, camera_context,
@@ -653,7 +597,7 @@ impl DetectionLogService {
                 log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
-                tags, person_details, bboxes, suspicious,
+                tags, person_details, vehicle_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
                 context_applied, camera_context,
@@ -683,7 +627,7 @@ impl DetectionLogService {
                 log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
-                tags, person_details, bboxes, suspicious,
+                tags, person_details, vehicle_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
                 context_applied, camera_context,
@@ -714,7 +658,7 @@ impl DetectionLogService {
                     log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                     captured_at, analyzed_at,
                     primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
-                    tags, person_details, bboxes, suspicious,
+                    tags, person_details, vehicle_details, bboxes, suspicious,
                     frame_diff, loitering_detected,
                     preset_id, preset_version, output_schema,
                     context_applied, camera_context,
@@ -740,7 +684,7 @@ impl DetectionLogService {
                     log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                     captured_at, analyzed_at,
                     primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
-                    tags, person_details, bboxes, suspicious,
+                    tags, person_details, vehicle_details, bboxes, suspicious,
                     frame_diff, loitering_detected,
                     preset_id, preset_version, output_schema,
                     context_applied, camera_context,
@@ -776,7 +720,7 @@ impl DetectionLogService {
                 log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
-                tags, person_details, bboxes, suspicious,
+                tags, person_details, vehicle_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
                 context_applied, camera_context,
@@ -807,7 +751,7 @@ impl DetectionLogService {
                 log_id, tid, fid, camera_id, lacis_id, camera_lacis_id,
                 captured_at, analyzed_at,
                 primary_event, severity, CAST(confidence AS DOUBLE) AS confidence, count_hint, unknown_flag,
-                tags, person_details, bboxes, suspicious,
+                tags, person_details, vehicle_details, bboxes, suspicious,
                 frame_diff, loitering_detected,
                 preset_id, preset_version, output_schema,
                 context_applied, camera_context,
@@ -837,6 +781,12 @@ impl DetectionLogService {
 
         let person_details: Option<serde_json::Value> = row
             .try_get::<Option<String>, _>("person_details")?
+            .map(|s| serde_json::from_str(&s))
+            .transpose()?;
+
+        // DD19対応: 車両詳細
+        let vehicle_details: Option<serde_json::Value> = row
+            .try_get::<Option<String>, _>("vehicle_details")?
             .map(|s| serde_json::from_str(&s))
             .transpose()?;
 
@@ -888,6 +838,7 @@ impl DetectionLogService {
             unknown_flag: row.try_get("unknown_flag")?,
             tags,
             person_details,
+            vehicle_details,
             bboxes,
             suspicious,
             frame_diff,
@@ -916,7 +867,7 @@ impl DetectionLogService {
         self.stats.read().await.clone()
     }
 
-    /// Mark log as synced to BQ
+    /// Mark log as synced (for Ingest API tracking)
     pub async fn mark_synced(&self, log_id: u64) -> Result<()> {
         sqlx::query(
             r#"
@@ -932,67 +883,28 @@ impl DetectionLogService {
         Ok(())
     }
 
-    /// Get pending BQ sync queue entries
-    pub async fn get_pending_bq_sync(&self, limit: u32) -> Result<Vec<BqSyncEntry>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT
-                queue_id, table_name, record_id, operation, payload,
-                retry_count, status, created_at
-            FROM bq_sync_queue
-            WHERE status = 'pending'
-            ORDER BY created_at ASC
-            LIMIT ?
-            "#,
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut entries = Vec::new();
-        for row in rows {
-            let payload_str: String = row.try_get("payload")?;
-            let payload: serde_json::Value = serde_json::from_str(&payload_str)?;
-            let created_at: chrono::NaiveDateTime = row.try_get("created_at")?;
-
-            entries.push(BqSyncEntry {
-                queue_id: Some(row.try_get("queue_id")?),
-                table_name: row.try_get("table_name")?,
-                record_id: row.try_get("record_id")?,
-                operation: row.try_get("operation")?,
-                payload,
-                retry_count: row.try_get("retry_count")?,
-                status: row.try_get("status")?,
-                created_at: DateTime::from_naive_utc_and_offset(created_at, Utc),
-            });
-        }
-
-        Ok(entries)
-    }
-
-    /// Update BQ sync queue entry status
-    pub async fn update_bq_sync_status(
+    /// Update cloud path (snapshot_url) for a detection log
+    ///
+    /// T4-3: LacisFiles連携
+    /// Event送信成功後にstoragePath（恒久参照子）を保存
+    pub async fn update_cloud_path(
         &self,
-        queue_id: u64,
-        status: &str,
-        error: Option<&str>,
+        log_id: u64,
+        cloud_path: &str,
     ) -> Result<()> {
         sqlx::query(
             r#"
-            UPDATE bq_sync_queue
-            SET status = ?,
-                last_error = ?,
-                retry_count = retry_count + 1,
-                processed_at = IF(? = 'success', NOW(3), NULL)
-            WHERE queue_id = ?
+            UPDATE detection_logs
+            SET image_path_cloud = ?
+            WHERE log_id = ?
             "#,
         )
-        .bind(status)
-        .bind(error)
-        .bind(status)
-        .bind(queue_id)
+        .bind(cloud_path)
+        .bind(log_id)
         .execute(&self.pool)
         .await?;
+
+        tracing::debug!(log_id = log_id, cloud_path = %cloud_path, "Updated cloud path");
 
         Ok(())
     }
@@ -1522,7 +1434,6 @@ mod tests {
     fn test_default_config() {
         let config = DetectionLogConfig::default();
         assert_eq!(config.image_base_path, PathBuf::from("/var/lib/is22/events"));
-        assert!(config.enable_bq_sync);
         assert_eq!(config.quota.max_images_per_camera, 1000);
         assert_eq!(config.quota.max_bytes_per_camera, 500 * 1024 * 1024);
         assert_eq!(config.quota.max_total_bytes, 10 * 1024 * 1024 * 1024);

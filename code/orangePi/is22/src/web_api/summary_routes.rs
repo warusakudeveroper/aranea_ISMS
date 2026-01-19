@@ -25,6 +25,7 @@ use axum::{
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::realtime_hub::{HubMessage, SummaryReportMessage};
 use crate::state::AppState;
 use crate::summary_service::{
     ReportSchedule, ReportType, SummaryInsert, SummaryResult, SummaryType,
@@ -755,6 +756,84 @@ async fn force_generate_hourly(
         .await
     {
         Ok(result) => {
+            // Paraclate APPへ送信（Ingest API）
+            if let Some(json) = &result.summary_json {
+                match state
+                    .paraclate_client
+                    .send_summary(&result.tid, &result.fid, json.clone(), result.summary_id)
+                    .await
+                {
+                    Ok(queue_id) => {
+                        tracing::info!(
+                            queue_id = queue_id,
+                            summary_id = result.summary_id,
+                            "Force-hourly summary queued for Paraclate APP"
+                        );
+                    }
+                    Err(e) => {
+                        // 送信失敗してもSummary生成自体は成功扱い
+                        tracing::warn!(
+                            error = %e,
+                            summary_id = result.summary_id,
+                            "Failed to queue force-hourly summary for Paraclate APP"
+                        );
+                    }
+                }
+            }
+
+            // Paraclate LLM APIでリッチなサマリーテキストを取得
+            let llm_summary_text = match state
+                .paraclate_client
+                .send_ai_chat(
+                    &tid,
+                    &fid,
+                    &format!("直近{}時間の定時サマリーを生成してください", req.hours),
+                    None,
+                    None,
+                )
+                .await
+            {
+                Ok(response) => {
+                    if let Some(text) = response.message {
+                        tracing::info!(
+                            summary_id = result.summary_id,
+                            llm_text_len = text.len(),
+                            "LLM summary received from Paraclate (force-hourly)"
+                        );
+                        Some(text)
+                    } else {
+                        tracing::warn!(
+                            summary_id = result.summary_id,
+                            "No message in LLM response, using local summary"
+                        );
+                        None
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        summary_id = result.summary_id,
+                        "Failed to get LLM summary, using local summary"
+                    );
+                    None
+                }
+            };
+
+            // チャットへ報告（RealtimeHub経由）
+            // LLMサマリーがあればそれを使用、なければローカル生成のサマリーを使用
+            let final_summary_text = llm_summary_text.unwrap_or_else(|| result.summary_text.clone());
+            state.realtime.broadcast(HubMessage::SummaryReport(SummaryReportMessage {
+                report_type: "summary".to_string(),
+                summary_id: result.summary_id,
+                period_start: result.period_start.to_rfc3339(),
+                period_end: result.period_end.to_rfc3339(),
+                detection_count: result.detection_count,
+                severity_max: result.severity_max,
+                camera_count: result.camera_ids.len(),
+                summary_text: final_summary_text,
+                created_at: Utc::now().to_rfc3339(),
+            })).await;
+
             let response = ForceGenerateResponse {
                 summary_id: result.summary_id,
                 summary_type: "hourly".to_string(),
@@ -907,6 +986,82 @@ async fn force_generate_grand(
         .await
     {
         Ok(result) => {
+            // Paraclate APPへ送信（Ingest API）
+            match state
+                .paraclate_client
+                .send_grand_summary(&tid, &fid, summary_json.clone(), result.summary_id)
+                .await
+            {
+                Ok(queue_id) => {
+                    tracing::info!(
+                        queue_id = queue_id,
+                        summary_id = result.summary_id,
+                        "Force-grand summary queued for Paraclate APP"
+                    );
+                }
+                Err(e) => {
+                    // 送信失敗してもGrandSummary生成自体は成功扱い
+                    tracing::warn!(
+                        error = %e,
+                        summary_id = result.summary_id,
+                        "Failed to queue force-grand summary for Paraclate APP"
+                    );
+                }
+            }
+
+            // Paraclate LLM APIでリッチなGrandSummaryテキストを取得
+            let llm_summary_text = match state
+                .paraclate_client
+                .send_ai_chat(
+                    &tid,
+                    &fid,
+                    &format!("直近{}時間のシフトサマリー（GrandSummary）を生成してください", hours),
+                    None,
+                    None,
+                )
+                .await
+            {
+                Ok(response) => {
+                    if let Some(text) = response.message {
+                        tracing::info!(
+                            summary_id = result.summary_id,
+                            llm_text_len = text.len(),
+                            "LLM grand summary received from Paraclate (force-grand)"
+                        );
+                        Some(text)
+                    } else {
+                        tracing::warn!(
+                            summary_id = result.summary_id,
+                            "No message in LLM response, using local grand summary"
+                        );
+                        None
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        summary_id = result.summary_id,
+                        "Failed to get LLM grand summary, using local summary"
+                    );
+                    None
+                }
+            };
+
+            // チャットへ報告（RealtimeHub経由）
+            // LLMサマリーがあればそれを使用、なければローカル生成のサマリーを使用
+            let final_summary_text = llm_summary_text.unwrap_or_else(|| summary_text.clone());
+            state.realtime.broadcast(HubMessage::SummaryReport(SummaryReportMessage {
+                report_type: "grand_summary".to_string(),
+                summary_id: result.summary_id,
+                period_start: period_start.to_rfc3339(),
+                period_end: period_end.to_rfc3339(),
+                detection_count: total_detection_count,
+                severity_max: max_severity,
+                camera_count: all_camera_ids.len(),
+                summary_text: final_summary_text,
+                created_at: Utc::now().to_rfc3339(),
+            })).await;
+
             let response = ForceGenerateResponse {
                 summary_id: result.summary_id,
                 summary_type: "grand_summary".to_string(),

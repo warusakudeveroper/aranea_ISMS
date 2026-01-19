@@ -65,6 +65,11 @@ impl AraneaRegisterService {
         }
     }
 
+    /// Get repository reference for direct access
+    pub fn repository(&self) -> &AraneaRegistrationRepository {
+        &self.repository
+    }
+
     /// Register device to araneaDeviceGate
     ///
     /// ## 処理フロー
@@ -341,8 +346,18 @@ impl AraneaRegisterService {
             .map(|v| v == "true")
             .unwrap_or(false);
 
+        // scan_subnetsから管理対象施設を取得（未登録でも表示）
+        let managed_facilities = self
+            .repository
+            .get_managed_facilities()
+            .await
+            .unwrap_or_default();
+
         if !registered {
-            return Ok(RegistrationStatus::default());
+            return Ok(RegistrationStatus {
+                managed_facilities,
+                ..Default::default()
+            });
         }
 
         let lacis_id = self.get_config_value(config_keys::LACIS_ID).await;
@@ -362,6 +377,7 @@ impl AraneaRegisterService {
             cic,
             registered_at,
             last_sync_at,
+            managed_facilities,
         })
     }
 

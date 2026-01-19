@@ -66,22 +66,24 @@ describe('型定義の確認', () => {
     expect(categories).toHaveLength(6)
   })
 
-  it('DeviceCategoryDetail に LostConnection と StrayChild が含まれる', () => {
+  it('DeviceCategoryDetail に lost_connection と stray_child が含まれる', () => {
     // 型チェックのみ - コンパイルが通れば OK
+    // Backend uses snake_case for DeviceCategoryDetail
     const details: DeviceCategoryDetail[] = [
-      'RegisteredAuthenticated',
-      'RegisteredAuthIssue',
-      'Registrable',
-      'AuthRequired',
-      'PossibleCamera',
-      'NetworkEquipment',
-      'IoTDevice',
-      'UnknownDevice',
-      'NonCamera',
-      'LostConnection',
-      'StrayChild',
+      'registered',
+      'registrable',
+      'auth_required',
+      'auth_failed',
+      'possible_camera',
+      'network_equipment',
+      'io_t_device',
+      'unknown_device',
+      'non_camera',
+      'lost_connection',
+      'stray_child',
+      'unknown',
     ]
-    expect(details).toHaveLength(11)
+    expect(details).toHaveLength(12)
   })
 
   it('CameraStatus に pending_auth が含まれる - T3-9', () => {

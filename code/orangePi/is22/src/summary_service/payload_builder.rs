@@ -193,15 +193,46 @@ impl PayloadBuilder {
     }
 
     /// 検出詳細をJSON文字列にフォーマット
-    /// mobes summaryImageContext.ts 対応: confidence追加
+    /// DD19対応: person_details, vehicle_details, bboxes, suspicious, tags, frame_diff を追加送信
     fn format_detection_detail(&self, log: &DetectionLog) -> String {
+        // analyzed/detected は primary_event から導出
+        let analyzed = log.primary_event != "camera_lost" && log.primary_event != "camera_recovered";
+        let detected = log.primary_event != "none" && analyzed;
+
         serde_json::json!({
+            // 基本情報
             "detection_id": log.log_id,
             "camera_id": log.camera_id,
+            "captured_at": log.captured_at.to_rfc3339(),
             "primary_event": log.primary_event,
             "severity": log.severity,
             "confidence": log.confidence,
-            "count_hint": log.count_hint
+            "count_hint": log.count_hint,
+            "unknown_flag": log.unknown_flag,
+            "analyzed": analyzed,
+            "detected": detected,
+            "schema_version": log.schema_version,
+
+            // DD19: 人物詳細（LLMサマリー生成に必須）
+            "person_details": log.person_details,
+
+            // DD19: 車両詳細（車両属性認識結果）
+            "vehicle_details": log.vehicle_details,
+
+            // DD19: バウンディングボックス詳細（PAR tags含む）
+            "bboxes": log.bboxes,
+
+            // DD19: 不審度判定（factors, level, score）
+            "suspicious": log.suspicious,
+
+            // DD19: タグ配列
+            "tags": log.tags,
+
+            // DD19: フレーム差分情報
+            "frame_diff": log.frame_diff,
+
+            // DD19: 徘徊検出フラグ
+            "loitering_detected": log.loitering_detected
         })
         .to_string()
     }

@@ -743,23 +743,78 @@ export function CameraDetailModal({
             </Section>
           )}
 
-          {/* PTZ Capabilities */}
-          {camera.ptz_supported && (
-            <Section title="PTZ能力" icon={<Move3d className="h-4 w-4" />}>
-              <div className="flex flex-wrap gap-2">
-                {camera.ptz_continuous && <Badge variant="secondary">連続移動</Badge>}
-                {camera.ptz_absolute && <Badge variant="secondary">絶対位置</Badge>}
-                {camera.ptz_relative && <Badge variant="secondary">相対移動</Badge>}
-                {camera.ptz_home_supported && <Badge variant="secondary">ホーム</Badge>}
-              </div>
-              {camera.ptz_presets && camera.ptz_presets.length > 0 && (
-                <div className="mt-2 text-sm">
-                  <span className="text-muted-foreground">プリセット:</span>{" "}
-                  {camera.ptz_presets.length}個
+          {/* PTZ Capabilities - PTZ非対応カメラでもグレーアウト表示 */}
+          <Section
+            title="PTZ能力"
+            icon={<Move3d className={cn("h-4 w-4", !camera.ptz_supported && "text-muted-foreground")} />}
+          >
+            {!camera.ptz_supported ? (
+              /* PTZ非対応カメラ: グレーアウト表示 */
+              <div className="opacity-50">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="checkbox"
+                    id="ptz-enabled-disabled"
+                    checked={false}
+                    disabled
+                    className="h-4 w-4 rounded border-gray-300 cursor-not-allowed"
+                  />
+                  <label htmlFor="ptz-enabled-disabled" className="text-sm text-muted-foreground">
+                    PTZ操作UIを表示する
+                  </label>
                 </div>
-              )}
-            </Section>
-          )}
+                <p className="text-xs text-muted-foreground">
+                  このカメラはPTZ（パン・チルト・ズーム）に対応していません
+                </p>
+              </div>
+            ) : (
+              /* PTZ対応カメラ: 通常表示 */
+              <>
+                {/* PTZ無効化チェックボックス */}
+                <FormField label="PTZ操作" editable>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="ptz-enabled"
+                      checked={!getValue("ptz_disabled")}
+                      onChange={(e) => updateField("ptz_disabled", !e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <label htmlFor="ptz-enabled" className="text-sm">
+                      PTZ操作UIを表示する
+                    </label>
+                  </div>
+                </FormField>
+                {/* ONVIFエンドポイント設定（PTZ操作に必須） */}
+                <FormField label="ONVIF URL" editable>
+                  <input
+                    type="text"
+                    className="input-field text-xs font-mono"
+                    value={getValue("onvif_endpoint") ?? ""}
+                    onChange={(e) => updateField("onvif_endpoint", e.target.value)}
+                    placeholder="http://192.168.x.x:2020/onvif/device_service"
+                  />
+                </FormField>
+                {!getValue("onvif_endpoint") && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    PTZ操作にはONVIFエンドポイントの設定が必要です。Tapoは通常ポート2020です。
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {camera.ptz_continuous && <Badge variant="secondary">連続移動</Badge>}
+                  {camera.ptz_absolute && <Badge variant="secondary">絶対位置</Badge>}
+                  {camera.ptz_relative && <Badge variant="secondary">相対移動</Badge>}
+                  {camera.ptz_home_supported && <Badge variant="secondary">ホーム</Badge>}
+                </div>
+                {camera.ptz_presets && camera.ptz_presets.length > 0 && (
+                  <div className="mt-2 text-sm">
+                    <span className="text-muted-foreground">プリセット:</span>{" "}
+                    {camera.ptz_presets.length}個
+                  </div>
+                )}
+              </>
+            )}
+          </Section>
 
           {/* Audio Capabilities */}
           {(camera.audio_input_supported || camera.audio_output_supported) && (

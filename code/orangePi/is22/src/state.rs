@@ -2,11 +2,11 @@
 //!
 //! Holds all shared components and state
 
+use crate::access_absorber::AccessAbsorberService;
 use crate::admission_controller::AdmissionController;
 use crate::ai_client::AIClient;
 use crate::aranea_register::AraneaRegisterService;
 use crate::auto_attunement::AutoAttunementService;
-use crate::bq_sync_service::BqSyncService;
 use crate::camera_brand::CameraBrandService;
 use crate::camera_sync::CameraSyncService;
 use crate::config_store::ConfigStore;
@@ -18,6 +18,7 @@ use crate::overdetection_analyzer::OverdetectionAnalyzer;
 use crate::polling_orchestrator::PollingOrchestrator;
 use crate::prev_frame_cache::PrevFrameCache;
 use crate::preset_loader::PresetLoader;
+use crate::ptz_controller::PtzService;
 use crate::realtime_hub::RealtimeHub;
 use crate::snapshot_service::SnapshotService;
 use crate::stream_gateway::StreamGateway;
@@ -137,10 +138,12 @@ pub struct AppState {
     pub pubsub_subscriber: Arc<PubSubSubscriber>,
     /// FidValidator (Issue #119: テナント-FID所属検証)
     pub fid_validator: Arc<FidValidator>,
-    /// BqSyncService (Phase 5: Issue #118)
-    pub bq_sync_service: Option<Arc<BqSyncService>>,
     /// CameraSyncService (Phase 8: Issue #121)
     pub camera_sync: Option<Arc<CameraSyncService>>,
+    /// AccessAbsorberService (Camera brand-specific connection limits)
+    pub access_absorber: Option<Arc<AccessAbsorberService>>,
+    /// PtzService (PTZ camera control)
+    pub ptz_service: Arc<PtzService>,
 }
 
 /// System health metrics

@@ -218,7 +218,10 @@ export function CameraTile({
                 src={currentUrl}
                 alt={camera.name}
                 className={cn("absolute inset-0 w-full h-full", imageObjectClass)}
-                style={{ objectPosition: 'center center' }}
+                style={{
+                  objectPosition: 'center center',
+                  transform: `rotate(${camera.rotation || 0}deg)`,
+                }}
                 loading="lazy"
                 onError={() => setImageError(true)}
               />
@@ -232,7 +235,10 @@ export function CameraTile({
                     imageObjectClass,
                     animationClass
                   )}
-                  style={{ objectPosition: 'center center' }}
+                  style={{
+                    objectPosition: 'center center',
+                    transform: `rotate(${camera.rotation || 0}deg)`,
+                  }}
                   onError={() => setImageError(true)}
                 />
               )}
@@ -368,7 +374,10 @@ export function CameraTile({
               src={currentUrl}
               alt={camera.name}
               className={cn("absolute inset-0 w-full h-full", imageObjectClass)}
-              style={{ objectPosition: 'center center' }}
+              style={{
+                objectPosition: 'center center',
+                transform: `rotate(${camera.rotation || 0}deg)`,
+              }}
               loading="lazy"
               onError={() => setImageError(true)}
             />
@@ -382,7 +391,10 @@ export function CameraTile({
                   imageObjectClass,
                   animationClass
                 )}
-                style={{ objectPosition: 'center center' }}
+                style={{
+                  objectPosition: 'center center',
+                  transform: `rotate(${camera.rotation || 0}deg)`,
+                }}
                 onError={() => setImageError(true)}
               />
             )}

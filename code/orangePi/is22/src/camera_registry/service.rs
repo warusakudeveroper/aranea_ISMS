@@ -74,9 +74,31 @@ impl CameraRegistryService {
             "Starting camera registration"
         );
 
+        // 0. MACアドレス正規化 (コロン/ハイフン除去、大文字12桁)
+        let normalized_mac = request
+            .mac_address
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .collect::<String>()
+            .to_uppercase();
+
+        if normalized_mac.len() != 12 {
+            return Ok(CameraRegisterResponse::error(format!(
+                "Invalid MAC address: {} (expected 12 hex digits, got {})",
+                request.mac_address,
+                normalized_mac.len()
+            )));
+        }
+
+        debug!(
+            original_mac = %request.mac_address,
+            normalized_mac = %normalized_mac,
+            "Normalized MAC address"
+        );
+
         // 1. LacisID生成
         let lacis_id = match try_generate_camera_lacis_id(
-            &request.mac_address,
+            &normalized_mac,
             Some(&request.product_code),
         ) {
             Ok(id) => id,
@@ -91,42 +113,61 @@ impl CameraRegistryService {
 
         debug!(lacis_id = %lacis_id, "Generated LacisID");
 
-        // 2. ConfigStoreからTID, is22のCICを取得
+        // 2. ConfigStoreからTID, テナントプライマリ認証情報を取得
+        // AUTH_SPEC.md Section 5.2: 登録実行者はTenant Primary (permission >= 61)
         let tid = self
-            .get_config_value("aranea_tid")
+            .get_config_value("aranea.tid")
             .await
             .ok_or_else(|| crate::Error::Config("TID not configured".into()))?;
 
-        let is22_cic = self
-            .get_config_value("aranea_cic")
+        let tenant_primary_lacis_id = self
+            .get_config_value("tenant_primary.lacis_id")
             .await
-            .ok_or_else(|| crate::Error::Config("IS22 CIC not configured".into()))?;
+            .ok_or_else(|| crate::Error::Config("Tenant Primary LacisID not configured".into()))?;
 
-        let _is22_lacis_id = self
-            .get_config_value("aranea_lacis_id")
+        let tenant_primary_email = self
+            .get_config_value("tenant_primary.email")
             .await
-            .ok_or_else(|| crate::Error::Config("IS22 LacisID not configured".into()))?;
+            .ok_or_else(|| crate::Error::Config("Tenant Primary Email not configured".into()))?;
+
+        let tenant_primary_cic = self
+            .get_config_value("tenant_primary.cic")
+            .await
+            .ok_or_else(|| crate::Error::Config("Tenant Primary CIC not configured".into()))?;
 
         // 3. araneaDeviceGateへ登録
         let gate_response = self
-            .register_to_gate(&lacis_id, &tid, &is22_cic, &request)
+            .register_to_gate(
+                &lacis_id,
+                &tid,
+                &tenant_primary_lacis_id,
+                &tenant_primary_email,
+                &tenant_primary_cic,
+                &normalized_mac,
+                &request,
+            )
             .await;
 
         let (cic, state, error_message) = match gate_response {
             Ok(resp) => {
-                if let Some(cic) = resp.cic_code {
+                // CICはuserObject.cic_codeから取得
+                if let Some(cic) = resp.get_cic() {
                     info!(
                         lacis_id = %lacis_id,
                         cic = %cic,
+                        existing = resp.existing.unwrap_or(false),
                         "Camera registered to araneaDeviceGate"
                     );
                     (cic, RegistrationState::Registered, None)
                 } else {
-                    let err = resp.error.unwrap_or_else(|| "Unknown error".to_string());
+                    let err = resp.error.clone().unwrap_or_else(|| "No CIC in response".to_string());
                     warn!(
                         lacis_id = %lacis_id,
                         error = %err,
-                        "Gate registration failed"
+                        ok = ?resp.ok,
+                        existing = ?resp.existing,
+                        user_object = ?resp.user_object,
+                        "Gate registration failed - no CIC received"
                     );
                     (String::new(), RegistrationState::Failed, Some(err))
                 }
@@ -174,32 +215,38 @@ impl CameraRegistryService {
     }
 
     /// araneaDeviceGateへ登録リクエスト
+    /// AUTH_SPEC.md Section 5.3準拠: lacisOathはテナントプライマリの認証情報
     async fn register_to_gate(
         &self,
-        lacis_id: &str,
+        camera_lacis_id: &str,
         tid: &str,
-        is22_cic: &str,
+        tenant_primary_lacis_id: &str,
+        tenant_primary_email: &str,
+        tenant_primary_cic: &str,
+        normalized_mac: &str,
         request: &CameraRegisterRequest,
     ) -> crate::Result<GateRegisterResponse> {
-        // ペイロード構築
+        // ペイロード構築 (AUTH_SPEC.md Section 5.3準拠)
         let payload = GateRegisterPayload {
             lacis_oath: LacisOath {
-                lacis_id: lacis_id.to_string(),
-                user_id: tid.to_string(),
-                cic: is22_cic.to_string(), // 親デバイス(IS22)のCICで認証
-                method: "cic".to_string(),
+                // lacisOath: テナントプライマリの認証情報
+                lacis_id: tenant_primary_lacis_id.to_string(),
+                user_id: tenant_primary_email.to_string(),
+                cic: tenant_primary_cic.to_string(),
+                method: "register".to_string(),
             },
             user_object: UserObject {
-                lacis_id: lacis_id.to_string(),
+                // userObject: 登録するカメラの情報
+                lacis_id: camera_lacis_id.to_string(),
                 tid: tid.to_string(),
-                type_domain: "aranea".to_string(),
+                type_domain: "araneaDevice".to_string(),
                 device_type: DEVICE_TYPE.to_string(),
             },
             device_meta: DeviceMeta {
-                mac_address: request.mac_address.clone(),
+                mac_address: normalized_mac.to_string(),
                 product_type: PRODUCT_TYPE.to_string(),
                 product_code: request.product_code.clone(),
-                parent_lacis_id: self.get_config_value("aranea_lacis_id").await,
+                parent_lacis_id: self.get_config_value("aranea.lacis_id").await, // IS22のLacisID
                 camera_name: None,
             },
         };
@@ -218,8 +265,15 @@ impl CameraRegistryService {
             .map_err(|e| crate::Error::Network(e.to_string()))?;
 
         let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+
+        debug!(
+            status = %status,
+            body = %body,
+            "Gate response received"
+        );
+
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
             error!(
                 status = %status,
                 body = %body,
@@ -231,10 +285,11 @@ impl CameraRegistryService {
             )));
         }
 
-        response
-            .json::<GateRegisterResponse>()
-            .await
-            .map_err(|e| crate::Error::Parse(e.to_string()))
+        serde_json::from_str::<GateRegisterResponse>(&body)
+            .map_err(|e| {
+                error!(error = %e, body = %body, "Failed to parse Gate response");
+                crate::Error::Parse(format!("{}: {}", e, body))
+            })
     }
 
     /// カメラの登録状態を取得
@@ -384,7 +439,7 @@ impl CameraRegistryService {
     /// 未登録カメラを一括登録
     pub async fn register_pending_cameras(&self) -> crate::Result<Vec<CameraRegisterResponse>> {
         let tid = self
-            .get_config_value("aranea_tid")
+            .get_config_value("aranea.tid")
             .await
             .ok_or_else(|| crate::Error::Config("TID not configured".into()))?;
 
@@ -505,7 +560,8 @@ mod tests {
 
     #[test]
     fn test_device_type_constant() {
-        assert_eq!(DEVICE_TYPE, "aranea_ar-is801");
+        // TYPE_REGISTRY.md準拠: ar-is801ParaclateCamera
+        assert_eq!(DEVICE_TYPE, "ar-is801ParaclateCamera");
     }
 
     #[test]

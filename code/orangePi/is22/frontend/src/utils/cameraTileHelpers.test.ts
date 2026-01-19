@@ -77,6 +77,7 @@ function createMockCamera(overrides: Partial<Camera> = {}): Camera {
     ptz_zoom_range: null,
     ptz_presets: null,
     ptz_home_supported: false,
+    ptz_disabled: false,
     audio_input_supported: false,
     audio_output_supported: false,
     audio_codec: null,

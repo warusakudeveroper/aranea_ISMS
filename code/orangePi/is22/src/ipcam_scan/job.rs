@@ -66,6 +66,9 @@ pub struct ScanJob {
     pub ports: Vec<u16>,
     pub timeout_ms: u32,
     pub concurrency: u8,
+    /// Brute Force Mode: OFFの場合、カメラの可能性が低いデバイスはクレデンシャル試行をスキップ
+    #[serde(default)]
+    pub brute_force: bool,
     pub status: JobStatus,
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
@@ -320,5 +323,8 @@ pub struct ScanJobRequest {
     pub ports: Option<Vec<u16>>,
     pub timeout_ms: Option<u32>,
     pub concurrency: Option<u8>,
+    /// Brute Force Mode: OFFの場合、カメラの可能性が低いデバイスはクレデンシャル試行をスキップ
+    #[serde(default)]
+    pub brute_force: bool,
 }
 

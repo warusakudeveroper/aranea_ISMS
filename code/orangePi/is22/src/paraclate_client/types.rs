@@ -525,20 +525,24 @@ impl std::fmt::Display for CameraMalfunctionType {
 }
 
 /// Event送信ペイロード
+///
+/// mobes2.0 Paraclate Ingest API形式:
+/// - snake_case キー名
+/// - フラット構造（detailsネストなし）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct EventPayload {
     /// テナントID
     pub tid: String,
     /// 施設ID
     pub fid: String,
     /// 検出ログID
-    pub log_id: u64,
-    /// カメラのLacisID
-    pub camera_lacis_id: String,
-    /// 検出時刻
+    pub detection_log_id: u64,
+    /// カメラID (LacisID形式)
+    pub camera_id: String,
+    /// 検出時刻 (ISO8601)
     pub captured_at: DateTime<Utc>,
-    /// プライマリイベント (person, vehicle, etc.)
+    /// プライマリイベント (human, vehicle, etc.)
     pub primary_event: String,
     /// 重要度 (0-3)
     pub severity: i32,
@@ -546,22 +550,112 @@ pub struct EventPayload {
     pub confidence: f32,
     /// タグ一覧
     pub tags: Vec<String>,
-    /// 検出詳細（JSONシリアライズ済み）
+
+    // === DD19: フラット構造で送信 ===
+
+    /// バウンディングボックス詳細
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
+    pub bboxes: Option<serde_json::Value>,
+    /// 検出人数ヒント
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count_hint: Option<i32>,
+    /// 未知フラグ
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unknown_flag: Option<bool>,
+    /// スキーマバージョン
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<String>,
+    /// 人物詳細（LLMサマリー生成に必須）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub person_details: Option<serde_json::Value>,
+    /// 車両詳細（DD19対応）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vehicle_details: Option<serde_json::Value>,
+    /// 不審度判定（factors, level, score）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suspicious: Option<serde_json::Value>,
+    /// フレーム差分情報（camera_status, person_changes）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_diff: Option<serde_json::Value>,
+    /// 徘徊検出フラグ
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loitering_detected: Option<bool>,
+    /// 処理時間情報
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is22_timings: Option<serde_json::Value>,
+    /// プリセット適用
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset_applied: Option<String>,
+    /// プリセットID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
+    /// プリセットバージョン
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset_version: Option<String>,
+
+    // === スナップショット ===
+
     /// スナップショット画像（Base64エンコード）
-    /// mobes2.0 LacisFiles連携: JSON bodyに含めて送信
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_base64: Option<String>,
-    /// スナップショットのMIMEタイプ（例: image/jpeg）
+    /// スナップショットのMIMEタイプ
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_mime_type: Option<String>,
+
+    // === カメラ不調 ===
+
     /// カメラ不調種別（不調報告時のみ）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub malfunction_type: Option<CameraMalfunctionType>,
     /// 不調詳細情報
     #[serde(skip_serializing_if = "Option::is_none")]
     pub malfunction_details: Option<serde_json::Value>,
+}
+
+// ============================================================
+// Camera Status Change Event (mobes2.0 AI Chat用)
+// ============================================================
+
+/// カメラステータス変更イベントペイロード
+///
+/// mobes2.0 AI Chatがカメラのロスト/復帰状態を追跡するために使用
+/// IS22_SummaryMessage_FixRequest.md セクション10対応
+///
+/// 送信タイミング:
+/// - camera_lost: カメラ接続がロストした時点
+/// - camera_recovered: カメラ接続が復帰した時点
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraStatusChangePayload {
+    /// テナントID
+    pub tid: String,
+    /// 施設ID
+    pub fid: String,
+    /// イベント種別 (常に "camera_status_change")
+    pub event_type: String,
+    /// カメラID
+    pub camera_id: String,
+    /// カメラ名（ユーザーフレンドリーな表示名）
+    pub camera_name: String,
+    /// カメラのLacisID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub camera_lacis_id: Option<String>,
+    /// カメラのIPアドレス
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_address: Option<String>,
+    /// 変更前ステータス ("online" / "offline")
+    pub previous_status: String,
+    /// 変更後ステータス ("online" / "offline")
+    pub new_status: String,
+    /// ステータス変更理由
+    /// - camera_lost: "connection_lost", "timeout", "stream_error"
+    /// - camera_recovered: "connection_restored"
+    pub reason: String,
+    /// 検出日時
+    pub detected_at: DateTime<Utc>,
+    /// エラー詳細（ロスト時のみ）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_details: Option<String>,
 }
 
 /// Event送信レスポンス (Paraclate APPからの応答)

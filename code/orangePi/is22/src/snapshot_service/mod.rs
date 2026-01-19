@@ -7,7 +7,11 @@
 //! - Image caching for display
 //! - Previous image retention for IS21 diff detection
 //! - RtspManager経由でカメラへの多重アクセスを防止
+//! - AccessAbsorber経由でブランド固有の接続制限を管理
 
+use crate::access_absorber::{
+    AbsorberError, AccessAbsorberService, StreamPurpose, StreamType,
+};
 use crate::config_store::Camera;
 use crate::error::{Error, Result};
 use crate::rtsp_manager::RtspManager;
@@ -214,6 +218,185 @@ impl SnapshotService {
                 source = "http",
                 "Snapshot captured via HTTP"
             );
+            return Ok(CaptureResult {
+                data,
+                source: SnapshotSource::Http,
+            });
+        }
+
+        Err(Error::Internal(format!(
+            "No RTSP or snapshot URL available for camera {}",
+            camera.camera_id
+        )))
+    }
+
+    /// Capture snapshot with Access Absorber integration
+    ///
+    /// AccessAbsorberを経由してカメラブランド固有の接続制限を適用。
+    /// - 同時接続数チェック
+    /// - 再接続間隔チェック
+    /// - 排他ロックチェック
+    /// - セッション管理
+    ///
+    /// # Arguments
+    /// * `camera` - Target camera
+    /// * `absorber` - AccessAbsorberService (optional - None時は制限なしで動作)
+    /// * `purpose` - Stream purpose (Polling, Snapshot, ClickModal, etc.)
+    /// * `client_id` - Client identifier for session tracking
+    ///
+    /// # Returns
+    /// - Ok(CaptureResult) - Snapshot captured successfully
+    /// - Err(Error::AccessAbsorber) - Access denied by Absorber (with user message)
+    /// - Err(Error::*) - Other errors
+    pub async fn capture_with_absorber(
+        &self,
+        camera: &Camera,
+        absorber: Option<&AccessAbsorberService>,
+        purpose: StreamPurpose,
+        client_id: &str,
+    ) -> Result<CaptureResult> {
+        // 1. go2rtc経由はAbsorber制限対象外（既存接続を再利用）
+        match self.try_go2rtc_snapshot(&camera.camera_id).await {
+            Ok(Some(data)) => {
+                tracing::debug!(
+                    camera_id = %camera.camera_id,
+                    size = data.len(),
+                    source = "go2rtc",
+                    purpose = ?purpose,
+                    "Snapshot captured via go2rtc (Absorber bypassed - reusing existing stream)"
+                );
+                return Ok(CaptureResult {
+                    data,
+                    source: SnapshotSource::Go2rtc,
+                });
+            }
+            Ok(None) => {
+                // No active viewers, proceed with Absorber check
+            }
+            Err(e) => {
+                tracing::debug!(
+                    camera_id = %camera.camera_id,
+                    error = %e,
+                    "go2rtc snapshot check failed, proceeding to Absorber check"
+                );
+            }
+        }
+
+        // 2. Access Absorber制限チェック（存在する場合）
+        let session_id = if let Some(abs) = absorber {
+            match abs
+                .acquire_stream(
+                    &camera.camera_id,
+                    purpose,
+                    client_id,
+                    StreamType::Main,
+                    false, // No preemption for snapshots
+                )
+                .await
+            {
+                Ok(result) => {
+                    tracing::debug!(
+                        camera_id = %camera.camera_id,
+                        session_id = %result.token.session_id,
+                        purpose = ?purpose,
+                        "Absorber session acquired"
+                    );
+                    Some(result.token.session_id)
+                }
+                Err(e) => {
+                    // Convert AbsorberError to user-friendly Error
+                    let user_msg = e.to_user_message();
+                    tracing::warn!(
+                        camera_id = %camera.camera_id,
+                        purpose = ?purpose,
+                        error_type = ?e,
+                        user_message = %user_msg.message,
+                        "Absorber denied access"
+                    );
+                    return Err(Error::AccessAbsorber {
+                        camera_id: camera.camera_id.clone(),
+                        message: user_msg.message,
+                    });
+                }
+            }
+        } else {
+            None
+        };
+
+        // 3. RTSP capture (with RtspManager lock)
+        let result = self.capture_rtsp_with_fallback(camera).await;
+
+        // 4. Release Absorber session (if acquired)
+        if let Some(sid) = session_id {
+            if let Some(abs) = absorber {
+                if let Err(e) = abs.release_stream(&sid).await {
+                    tracing::warn!(
+                        camera_id = %camera.camera_id,
+                        session_id = %sid,
+                        error = %e,
+                        "Failed to release Absorber session"
+                    );
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Internal: RTSP capture with main→sub→HTTP fallback
+    async fn capture_rtsp_with_fallback(&self, camera: &Camera) -> Result<CaptureResult> {
+        let has_rtsp = camera.rtsp_main.is_some() || camera.rtsp_sub.is_some();
+
+        if has_rtsp {
+            // RtspManager lock
+            let _lease = self.rtsp_manager.acquire(&camera.camera_id).await
+                .map_err(|e| Error::Internal(format!(
+                    "RTSP busy for camera {}: {}",
+                    camera.camera_id, e
+                )))?;
+
+            // Try main stream
+            if let Some(ref main_url) = camera.rtsp_main {
+                match self.capture_rtsp(main_url, self.ffmpeg_timeout_main).await {
+                    Ok(data) => {
+                        return Ok(CaptureResult {
+                            data,
+                            source: SnapshotSource::Ffmpeg,
+                        });
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            camera_id = %camera.camera_id,
+                            error = %e,
+                            "Main stream failed, trying sub"
+                        );
+                    }
+                }
+            }
+
+            // Try sub stream
+            if let Some(ref sub_url) = camera.rtsp_sub {
+                match self.capture_rtsp(sub_url, self.ffmpeg_timeout_sub).await {
+                    Ok(data) => {
+                        return Ok(CaptureResult {
+                            data,
+                            source: SnapshotSource::Ffmpeg,
+                        });
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            camera_id = %camera.camera_id,
+                            error = %e,
+                            "Sub stream failed, trying HTTP"
+                        );
+                    }
+                }
+            }
+        }
+
+        // HTTP fallback
+        if let Some(ref url) = camera.snapshot_url {
+            let data = self.capture_http(url).await?;
             return Ok(CaptureResult {
                 data,
                 source: SnapshotSource::Http,

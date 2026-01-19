@@ -189,6 +189,7 @@ impl Preset {
 
     /// Create parking preset
     /// v2.0: 駐車場・倉庫向け（warehouseを吸収）
+    /// Note: conf_overrideは0.35を基準とし、カメラ個別設定で調整する
     pub fn parking() -> Self {
         Self {
             id: preset_ids::PARKING.to_string(),
@@ -203,7 +204,7 @@ impl Preset {
             enable_frame_diff: true,
             return_bboxes: true,
             output_schema: Some("parking".to_string()),
-            conf_override: Some(0.45),
+            conf_override: Some(0.35),  // 標準値。カメラ個別のcamera_contextで調整可能
             nms_threshold: None,
             par_threshold: None,
             suggested_interval_sec: 20,

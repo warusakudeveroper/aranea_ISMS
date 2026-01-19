@@ -26,16 +26,16 @@ impl ConfigRepository {
     const CAMERA_COLUMNS: &'static str = r#"
         camera_id, name, location, floor, rid,
         rtsp_main, rtsp_sub, rtsp_username, rtsp_password, snapshot_url,
-        family, manufacturer, model, ip_address, mac_address, lacis_id, cic,
+        family, access_family, manufacturer, model, ip_address, mac_address, lacis_id, cic,
         enabled, polling_enabled, polling_interval_sec, suggest_policy_weight,
-        camera_context, rotation, fit_mode, fid, tid, sort_order,
+        camera_context, inference_config, rotation, fit_mode, fid, tid, sort_order,
         preset_id, preset_version, ai_enabled, ai_interval_sec,
         serial_number, hardware_id, firmware_version, onvif_endpoint,
         rtsp_port, http_port, onvif_port,
         resolution_main, codec_main, fps_main, bitrate_main,
         resolution_sub, codec_sub, fps_sub, bitrate_sub,
         ptz_supported, ptz_continuous, ptz_absolute, ptz_relative,
-        ptz_pan_range, ptz_tilt_range, ptz_zoom_range, ptz_presets, ptz_home_supported,
+        ptz_pan_range, ptz_tilt_range, ptz_zoom_range, ptz_presets, ptz_home_supported, ptz_disabled,
         audio_input_supported, audio_output_supported, audio_codec,
         onvif_profiles, onvif_scopes, onvif_network_interfaces, onvif_capabilities,
         discovery_method, last_verified_at, last_rescan_at, deleted_at,
@@ -193,6 +193,7 @@ impl ConfigRepository {
         if req.ptz_absolute.is_some() { set_clauses.push("ptz_absolute = ?".to_string()); }
         if req.ptz_relative.is_some() { set_clauses.push("ptz_relative = ?".to_string()); }
         if req.ptz_home_supported.is_some() { set_clauses.push("ptz_home_supported = ?".to_string()); }
+        if req.ptz_disabled.is_some() { set_clauses.push("ptz_disabled = ?".to_string()); }
         if req.audio_input_supported.is_some() { set_clauses.push("audio_input_supported = ?".to_string()); }
         if req.audio_output_supported.is_some() { set_clauses.push("audio_output_supported = ?".to_string()); }
 
@@ -217,6 +218,7 @@ impl ConfigRepository {
 
         // JSON fields
         if req.camera_context.is_some() { set_clauses.push("camera_context = ?".to_string()); }
+        if req.inference_config.is_some() { set_clauses.push("inference_config = ?".to_string()); }
         if req.ptz_pan_range.is_some() { set_clauses.push("ptz_pan_range = ?".to_string()); }
         if req.ptz_tilt_range.is_some() { set_clauses.push("ptz_tilt_range = ?".to_string()); }
         if req.ptz_zoom_range.is_some() { set_clauses.push("ptz_zoom_range = ?".to_string()); }
@@ -289,6 +291,7 @@ impl ConfigRepository {
         if let Some(v) = req.ptz_absolute { q = q.bind(v); }
         if let Some(v) = req.ptz_relative { q = q.bind(v); }
         if let Some(v) = req.ptz_home_supported { q = q.bind(v); }
+        if let Some(v) = req.ptz_disabled { q = q.bind(v); }
         if let Some(v) = req.audio_input_supported { q = q.bind(v); }
         if let Some(v) = req.audio_output_supported { q = q.bind(v); }
 
@@ -313,6 +316,7 @@ impl ConfigRepository {
 
         // JSON fields
         if let Some(ref v) = req.camera_context { q = q.bind(v); }
+        if let Some(ref v) = req.inference_config { q = q.bind(v); }
         if let Some(ref v) = req.ptz_pan_range { q = q.bind(v); }
         if let Some(ref v) = req.ptz_tilt_range { q = q.bind(v); }
         if let Some(ref v) = req.ptz_zoom_range { q = q.bind(v); }

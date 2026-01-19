@@ -90,21 +90,21 @@ describe('PhaseIndicator weights (T3-7)', () => {
 })
 
 describe('Category F device display (T3-8)', () => {
-  it('LostConnection デバイスが正しく判定される', () => {
+  it('lost_connection デバイスが正しく判定される', () => {
     const device = createCategorizedDevice({
       category: 'f',
-      category_detail: 'LostConnection' as DeviceCategoryDetail,
+      category_detail: 'lost_connection' as DeviceCategoryDetail,
       registered_camera_name: 'ロビーカメラ',
     })
 
     expect(device.category).toBe('f')
-    expect(device.category_detail).toBe('LostConnection')
+    expect(device.category_detail).toBe('lost_connection')
   })
 
-  it('StrayChild デバイスが ipChanged: true を持つ', () => {
+  it('stray_child デバイスが ipChanged: true を持つ', () => {
     const device = createCategorizedDevice({
       category: 'f',
-      category_detail: 'StrayChild' as DeviceCategoryDetail,
+      category_detail: 'stray_child' as DeviceCategoryDetail,
       ip_changed: true,
       ipChanged: true,
       registered_camera_name: '迷子カメラ',
@@ -156,45 +156,45 @@ describe('Tried credentials display (T3-10)', () => {
 })
 
 describe('Device categorization edge cases', () => {
-  it('RegisteredAuthenticated は カテゴリ A', () => {
+  it('registered は カテゴリ A', () => {
     const device = createCategorizedDevice({
       category: 'a',
-      category_detail: 'RegisteredAuthenticated' as DeviceCategoryDetail,
+      category_detail: 'registered' as DeviceCategoryDetail,
     })
     expect(device.category).toBe('a')
   })
 
-  it('Registrable は カテゴリ B', () => {
+  it('registrable は カテゴリ B', () => {
     const device = createCategorizedDevice({
       category: 'b',
-      category_detail: 'Registrable' as DeviceCategoryDetail,
+      category_detail: 'registrable' as DeviceCategoryDetail,
       credential_status: 'success',
       model: 'Tapo C100',
     })
     expect(device.category).toBe('b')
   })
 
-  it('AuthRequired は カテゴリ C', () => {
+  it('auth_required は カテゴリ C', () => {
     const device = createCategorizedDevice({
       category: 'c',
-      category_detail: 'AuthRequired' as DeviceCategoryDetail,
+      category_detail: 'auth_required' as DeviceCategoryDetail,
       credential_status: 'failed',
     })
     expect(device.category).toBe('c')
   })
 
-  it('PossibleCamera は カテゴリ D', () => {
+  it('possible_camera は カテゴリ D', () => {
     const device = createCategorizedDevice({
       category: 'd',
-      category_detail: 'PossibleCamera' as DeviceCategoryDetail,
+      category_detail: 'possible_camera' as DeviceCategoryDetail,
     })
     expect(device.category).toBe('d')
   })
 
-  it('NonCamera は カテゴリ E', () => {
+  it('non_camera は カテゴリ E', () => {
     const device = createCategorizedDevice({
       category: 'e',
-      category_detail: 'NonCamera' as DeviceCategoryDetail,
+      category_detail: 'non_camera' as DeviceCategoryDetail,
     })
     expect(device.category).toBe('e')
   })

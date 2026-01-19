@@ -344,6 +344,10 @@ pub struct AnalyzeResponse {
     #[serde(default)]
     pub person_details: Option<Vec<PersonDetail>>,
 
+    /// DD19対応: 車両詳細情報
+    #[serde(default)]
+    pub vehicle_details: Option<serde_json::Value>,
+
     #[serde(default)]
     pub suspicious: Option<SuspiciousInfo>,
 
@@ -434,7 +438,17 @@ impl AiClient {
         if let Some(ref context) = request.camera_context {
             let hints_json = serde_json::to_string(context)
                 .map_err(|e| Error::Internal(format!("Failed to serialize camera_context: {}", e)))?;
+            tracing::info!(
+                camera_id = %request.camera_id,
+                hints_json = %hints_json,
+                "Sending hints_json to IS21"
+            );
             form = form.text("hints_json", hints_json);
+        } else {
+            tracing::warn!(
+                camera_id = %request.camera_id,
+                "No camera_context - hints_json not sent"
+            );
         }
 
         // Add previous image for frame diff
@@ -460,6 +474,17 @@ impl AiClient {
         }
 
         let result: AnalyzeResponse = resp.json().await?;
+
+        // Temporary debug: log IS21 response details
+        tracing::info!(
+            camera_id = %result.camera_id,
+            detected = result.detected,
+            primary_event = %result.primary_event,
+            bbox_count = result.bboxes.len(),
+            confidence = result.confidence,
+            "IS21 response received"
+        );
+
         Ok(result)
     }
 

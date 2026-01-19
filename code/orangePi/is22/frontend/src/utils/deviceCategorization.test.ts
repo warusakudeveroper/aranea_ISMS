@@ -32,10 +32,10 @@ function createMockDevice(overrides: Partial<ScannedDevice> = {}): ScannedDevice
 }
 
 describe('categorizeDevice', () => {
-  describe('カテゴリF（LostConnection/StrayChild）判定', () => {
-    it('category_detail が LostConnection の場合、カテゴリ f を返す', () => {
+  describe('カテゴリF（lost_connection/stray_child）判定', () => {
+    it('category_detail が lost_connection の場合、カテゴリ f を返す', () => {
       const device = createMockDevice({
-        category_detail: 'LostConnection',
+        category_detail: 'lost_connection',
         registered_camera_id: 1,
         registered_camera_name: 'ロビーカメラ',
       })
@@ -45,9 +45,9 @@ describe('categorizeDevice', () => {
       expect(result).toBe('f')
     })
 
-    it('category_detail が StrayChild の場合、カテゴリ f を返す', () => {
+    it('category_detail が stray_child の場合、カテゴリ f を返す', () => {
       const device = createMockDevice({
-        category_detail: 'StrayChild',
+        category_detail: 'stray_child',
         ip_changed: true,
         registered_camera_id: 1,
         registered_camera_name: '迷子カメラ',
@@ -68,19 +68,9 @@ describe('categorizeDevice', () => {
       expect(result).toBe('a')
     })
 
-    it('category_detail が RegisteredAuthenticated の場合、カテゴリ a を返す', () => {
+    it('category_detail が registered の場合、カテゴリ a を返す', () => {
       const device = createMockDevice({
-        category_detail: 'RegisteredAuthenticated',
-      })
-      const registeredIPs = new Set<string>()
-
-      const result = categorizeDevice(device, registeredIPs)
-      expect(result).toBe('a')
-    })
-
-    it('category_detail が RegisteredAuthIssue の場合、カテゴリ a を返す', () => {
-      const device = createMockDevice({
-        category_detail: 'RegisteredAuthIssue',
+        category_detail: 'registered',
       })
       const registeredIPs = new Set<string>()
 
@@ -90,9 +80,9 @@ describe('categorizeDevice', () => {
   })
 
   describe('カテゴリB（登録可能）判定', () => {
-    it('category_detail が Registrable の場合、カテゴリ b を返す', () => {
+    it('category_detail が registrable の場合、カテゴリ b を返す', () => {
       const device = createMockDevice({
-        category_detail: 'Registrable',
+        category_detail: 'registrable',
       })
       const registeredIPs = new Set<string>()
 
@@ -122,9 +112,9 @@ describe('categorizeDevice', () => {
   })
 
   describe('カテゴリC（認証必要）判定', () => {
-    it('category_detail が AuthRequired の場合、カテゴリ c を返す', () => {
+    it('category_detail が auth_required の場合、カテゴリ c を返す', () => {
       const device = createMockDevice({
-        category_detail: 'AuthRequired',
+        category_detail: 'auth_required',
       })
       const registeredIPs = new Set<string>()
 
@@ -153,9 +143,9 @@ describe('categorizeDevice', () => {
   })
 
   describe('カテゴリD（その他カメラ）判定', () => {
-    it('category_detail が PossibleCamera の場合、カテゴリ d を返す', () => {
+    it('category_detail が possible_camera の場合、カテゴリ d を返す', () => {
       const device = createMockDevice({
-        category_detail: 'PossibleCamera',
+        category_detail: 'possible_camera',
       })
       const registeredIPs = new Set<string>()
 
@@ -183,9 +173,9 @@ describe('categorizeDevice', () => {
   })
 
   describe('カテゴリE（非カメラ）判定', () => {
-    it('category_detail が NonCamera の場合、カテゴリ e を返す', () => {
+    it('category_detail が non_camera の場合、カテゴリ e を返す', () => {
       const device = createMockDevice({
-        category_detail: 'NonCamera',
+        category_detail: 'non_camera',
       })
       const registeredIPs = new Set<string>()
 
@@ -208,12 +198,12 @@ describe('categorizeDevice', () => {
 describe('categorizeAndSortDevices', () => {
   it('デバイスをカテゴリ順にソートする（a → f → b → c → d → e）', () => {
     const devices: ScannedDevice[] = [
-      createMockDevice({ ip: '192.168.1.5', category_detail: 'NonCamera' }),         // e
-      createMockDevice({ ip: '192.168.1.2', category_detail: 'Registrable' }),       // b
-      createMockDevice({ ip: '192.168.1.4', category_detail: 'PossibleCamera' }),    // d
-      createMockDevice({ ip: '192.168.1.3', category_detail: 'AuthRequired' }),      // c
-      createMockDevice({ ip: '192.168.1.1', category_detail: 'RegisteredAuthenticated' }), // a
-      createMockDevice({ ip: '192.168.1.6', category_detail: 'LostConnection' }),    // f
+      createMockDevice({ ip: '192.168.1.5', category_detail: 'non_camera' }),        // e
+      createMockDevice({ ip: '192.168.1.2', category_detail: 'registrable' }),       // b
+      createMockDevice({ ip: '192.168.1.4', category_detail: 'possible_camera' }),   // d
+      createMockDevice({ ip: '192.168.1.3', category_detail: 'auth_required' }),     // c
+      createMockDevice({ ip: '192.168.1.1', category_detail: 'registered' }),        // a
+      createMockDevice({ ip: '192.168.1.6', category_detail: 'lost_connection' }),   // f
     ]
     const registeredIPs = new Set<string>()
 
@@ -232,9 +222,9 @@ describe('categorizeAndSortDevices', () => {
 
   it('同カテゴリ内ではIP順にソートする', () => {
     const devices: ScannedDevice[] = [
-      createMockDevice({ ip: '192.168.1.30', category_detail: 'Registrable' }),
-      createMockDevice({ ip: '192.168.1.10', category_detail: 'Registrable' }),
-      createMockDevice({ ip: '192.168.1.20', category_detail: 'Registrable' }),
+      createMockDevice({ ip: '192.168.1.30', category_detail: 'registrable' }),
+      createMockDevice({ ip: '192.168.1.10', category_detail: 'registrable' }),
+      createMockDevice({ ip: '192.168.1.20', category_detail: 'registrable' }),
     ]
     const registeredIPs = new Set<string>()
 
@@ -251,13 +241,13 @@ describe('categorizeAndSortDevices', () => {
     const devices: ScannedDevice[] = [
       createMockDevice({
         ip: '192.168.1.100',
-        category_detail: 'LostConnection',
+        category_detail: 'lost_connection',
         registered_camera_name: 'ロビーカメラ',
         ip_changed: false,
       }),
       createMockDevice({
         ip: '192.168.1.200',
-        category_detail: 'StrayChild',
+        category_detail: 'stray_child',
         registered_camera_name: '迷子カメラ',
         ip_changed: true,
       }),

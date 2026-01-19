@@ -35,6 +35,8 @@ pub struct Camera {
     pub snapshot_url: Option<String>,
     /// Stored as VARCHAR in MySQL, converted to/from CameraFamily
     pub family: String,
+    /// Access Absorber family (for connection limit management)
+    pub access_family: Option<String>,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub ip_address: Option<String>,
@@ -45,7 +47,10 @@ pub struct Camera {
     pub polling_enabled: bool,
     pub polling_interval_sec: i32,
     pub suggest_policy_weight: i32,
+    /// LLM/Paraclateサマリー生成用の説明テキスト
     pub camera_context: Option<serde_json::Value>,
+    /// IS21推論パラメータ（プリセットとマージ）
+    pub inference_config: Option<serde_json::Value>,
     pub rotation: i32,
     pub fit_mode: String,  // 'fit' or 'trim'
     pub fid: Option<String>,
@@ -85,6 +90,8 @@ pub struct Camera {
     pub ptz_zoom_range: Option<serde_json::Value>,
     pub ptz_presets: Option<serde_json::Value>,
     pub ptz_home_supported: bool,
+    /// PTZ操作UIを無効化するフラグ（デフォルトFALSE）
+    pub ptz_disabled: bool,
     // === 音声能力 ===
     pub audio_input_supported: bool,
     pub audio_output_supported: bool,
@@ -221,7 +228,10 @@ pub struct UpdateCameraRequest {
     pub polling_interval_sec: Option<i32>,
     pub suggest_policy_weight: Option<i32>,
     // === カメラコンテキスト・表示 ===
+    /// LLM/Paraclateサマリー生成用の説明テキスト
     pub camera_context: Option<serde_json::Value>,
+    /// IS21推論パラメータ（プリセットとマージ）
+    pub inference_config: Option<serde_json::Value>,
     pub rotation: Option<i32>,
     pub fit_mode: Option<String>,
     pub sort_order: Option<i32>,
@@ -262,6 +272,8 @@ pub struct UpdateCameraRequest {
     pub ptz_zoom_range: Option<serde_json::Value>,
     pub ptz_presets: Option<serde_json::Value>,
     pub ptz_home_supported: Option<bool>,
+    /// PTZ操作UIを無効化するフラグ
+    pub ptz_disabled: Option<bool>,
     // === 音声能力 ===
     pub audio_input_supported: Option<bool>,
     pub audio_output_supported: Option<bool>,

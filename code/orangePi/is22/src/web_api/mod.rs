@@ -6,11 +6,19 @@
 //! - Request validation
 //! - Response formatting
 
+mod access_absorber_routes;
+mod chat_routes;
+mod paraclate_routes;
+mod ptz_routes;
 mod register_routes;
 mod routes;
 mod sdm_routes;
 mod summary_routes;
 
+pub use access_absorber_routes::access_absorber_routes;
+pub use chat_routes::chat_routes;
+pub use paraclate_routes::paraclate_routes;
+pub use ptz_routes::{ptz_home, ptz_move, ptz_status, ptz_stop};
 pub use register_routes::register_routes;
 pub use routes::create_router;
 pub use sdm_routes::sdm_routes;

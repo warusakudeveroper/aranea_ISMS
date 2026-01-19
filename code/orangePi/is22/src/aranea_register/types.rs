@@ -158,6 +158,17 @@ pub struct RegisterResult {
     pub error: Option<String>,
 }
 
+/// 管理対象施設情報 (scan_subnetsから取得)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedFacility {
+    pub fid: String,
+    pub tid: Option<String>,
+    pub facility_name: Option<String>,
+    pub subnet: String,
+    pub camera_count: i32,
+}
+
 /// 登録状態 (GET /api/register/status応答用)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,6 +186,9 @@ pub struct RegistrationStatus {
     pub registered_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync_at: Option<DateTime<Utc>>,
+    /// 管理対象施設一覧 (scan_subnetsから派生)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub managed_facilities: Vec<ManagedFacility>,
 }
 
 impl Default for RegistrationStatus {
@@ -187,6 +201,7 @@ impl Default for RegistrationStatus {
             cic: None,
             registered_at: None,
             last_sync_at: None,
+            managed_facilities: Vec::new(),
         }
     }
 }

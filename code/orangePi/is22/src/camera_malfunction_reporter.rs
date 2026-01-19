@@ -53,12 +53,12 @@ impl CameraMalfunctionReporter {
             "Reporting camera malfunction"
         );
 
-        // 不調イベント用ペイロードを構築
+        // 不調イベント用ペイロードを構築（mobes2.0形式: snake_case + フラット構造）
         let event_payload = EventPayload {
             tid: tid.to_string(),
             fid: fid.to_string(),
-            log_id: 0, // 不調報告は検出ログIDなし
-            camera_lacis_id: camera_lacis_id.to_string(),
+            detection_log_id: 0, // 不調報告は検出ログIDなし
+            camera_id: camera_lacis_id.to_string(),
             captured_at: Utc::now(),
             primary_event: "camera_malfunction".to_string(),
             severity: match malfunction_type {
@@ -73,7 +73,20 @@ impl CameraMalfunctionReporter {
                 "malfunction".to_string(),
                 malfunction_type.to_string(),
             ],
-            details: None,
+            // フラット構造: detailsフィールドは削除
+            bboxes: None,
+            count_hint: None,
+            unknown_flag: None,
+            schema_version: None,
+            person_details: None,
+            vehicle_details: None,
+            suspicious: None,
+            frame_diff: None,
+            loitering_detected: None,
+            is22_timings: None,
+            preset_applied: None,
+            preset_id: None,
+            preset_version: None,
             snapshot_base64: None,
             snapshot_mime_type: None,
             malfunction_type: Some(malfunction_type.clone()),

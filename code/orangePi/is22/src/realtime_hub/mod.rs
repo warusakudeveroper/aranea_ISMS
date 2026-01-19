@@ -40,6 +40,9 @@ pub enum HubMessage {
     SummaryReport(SummaryReportMessage),
     /// Chat message sync (cross-device real-time sync)
     ChatSync(ChatSyncMessage),
+    /// AccessAbsorber stream preemption notification
+    /// Notifies clients that their stream was preempted by higher priority request
+    StreamPreempted(StreamPreemptedMessage),
 }
 
 /// Event log message
@@ -185,6 +188,32 @@ pub struct ChatMessageData {
     pub is_hiding: bool,
 }
 
+/// Stream preemption notification message
+/// Sent when AccessAbsorber preempts a stream due to higher priority request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamPreemptedMessage {
+    /// Camera ID that was preempted
+    pub camera_id: String,
+    /// Session ID that was preempted
+    pub session_id: String,
+    /// Purpose of the preempted stream (e.g., "suggest_play")
+    pub preempted_purpose: String,
+    /// Purpose of the preempting stream (e.g., "click_modal")
+    pub preempted_by: String,
+    /// User message for display
+    pub user_message: PreemptionUserMessage,
+    /// Recommended exit delay in seconds (5 for suggest)
+    pub exit_delay_sec: u32,
+}
+
+/// User message for preemption feedback
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreemptionUserMessage {
+    pub title: String,
+    pub message: String,
+    pub severity: String,
+}
+
 /// Client connection
 struct ClientConnection {
     id: Uuid,
@@ -247,6 +276,7 @@ impl RealtimeHub {
             HubMessage::CooldownTick(_) => "cooldown_tick",
             HubMessage::SummaryReport(_) => "summary_report",
             HubMessage::ChatSync(_) => "chat_sync",
+            HubMessage::StreamPreempted(_) => "stream_preempted",
         };
         tracing::info!(message_type = %msg_type, "Broadcasting message to clients");
 

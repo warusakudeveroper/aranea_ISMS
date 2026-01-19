@@ -207,6 +207,73 @@ impl ConfigRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    /// 設定が存在しない場合、scan_subnetsから自動作成
+    ///
+    /// ## ロジック
+    /// 1. 既存configがあればそれを返す
+    /// 2. なければscan_subnetsでtid/fidの組み合わせを検証
+    /// 3. 有効なら同tidの既存configからendpointを取得してconfig作成
+    pub async fn ensure_config(&self, tid: &str, fid: &str) -> Result<Option<ParaclateConfig>, sqlx::Error> {
+        // 既存configチェック
+        if let Some(config) = self.get(tid, fid).await? {
+            return Ok(Some(config));
+        }
+
+        // scan_subnetsでtid/fid検証
+        let subnet_valid: Option<(String,)> = sqlx::query_as(
+            r#"
+            SELECT fid
+            FROM scan_subnets
+            WHERE tid = ? AND fid = ?
+            LIMIT 1
+            "#,
+        )
+        .bind(tid)
+        .bind(fid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if subnet_valid.is_none() {
+            // 無効なtid/fid組み合わせ（scan_subnetsに存在しない）
+            tracing::debug!(tid = %tid, fid = %fid, "tid/fid not found in scan_subnets, skipping auto-create");
+            return Ok(None);
+        }
+
+        // 同じtidの既存configからendpointを取得
+        let existing_endpoint: Option<(String,)> = sqlx::query_as(
+            r#"
+            SELECT endpoint
+            FROM paraclate_config
+            WHERE tid = ? AND connection_status = 'connected'
+            LIMIT 1
+            "#,
+        )
+        .bind(tid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        // デフォルトエンドポイント（mobes2.0 Cloud Functions）
+        let endpoint = existing_endpoint
+            .map(|e| e.0)
+            .unwrap_or_else(|| "https://asia-northeast1-mobesorder.cloudfunctions.net".to_string());
+
+        // Config自動作成
+        tracing::info!(tid = %tid, fid = %fid, endpoint = %endpoint, "Auto-creating paraclate_config from scan_subnets");
+
+        let config_id = self.insert(ParaclateConfigInsert {
+            tid: tid.to_string(),
+            fid: fid.to_string(),
+            endpoint,
+            report_interval_minutes: None,
+            grand_summary_times: None,
+            retention_days: None,
+            attunement: None,
+        }).await?;
+
+        // 作成したconfigを返す
+        self.get_by_id(config_id).await
+    }
+
     fn row_to_config(&self, row: &sqlx::mysql::MySqlRow) -> ParaclateConfig {
         let grand_summary_json: String = row.get("grand_summary_times");
         let grand_summary_times: Vec<String> =
@@ -334,7 +401,8 @@ impl SendQueueRepository {
         }
         if let Some(next) = update.next_retry_at {
             query.push_str(", next_retry_at = ?");
-            params.push(Some(next.to_rfc3339()));
+            // MySQL datetime(3) format: "YYYY-MM-DD HH:MM:SS.mmm"
+            params.push(Some(next.format("%Y-%m-%d %H:%M:%S%.3f").to_string()));
         }
         if let Some(error) = &update.last_error {
             query.push_str(", last_error = ?");
@@ -346,7 +414,8 @@ impl SendQueueRepository {
         }
         if let Some(sent) = update.sent_at {
             query.push_str(", sent_at = ?");
-            params.push(Some(sent.to_rfc3339()));
+            // MySQL datetime(3) format: "YYYY-MM-DD HH:MM:SS.mmm"
+            params.push(Some(sent.format("%Y-%m-%d %H:%M:%S%.3f").to_string()));
         }
 
         query.push_str(" WHERE queue_id = ?");

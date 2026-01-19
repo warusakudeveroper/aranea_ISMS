@@ -15,6 +15,8 @@ use super::generator::SummaryGenerator;
 use super::grand_summary::{calculate_next_grand_summary_time, GrandSummaryGenerator};
 use super::repository::ScheduleRepository;
 use super::types::{ReportSchedule, ReportType};
+use crate::paraclate_client::ParaclateClient;
+use crate::realtime_hub::{HubMessage, RealtimeHub, SummaryReportMessage};
 use chrono::{DateTime, Duration, Utc};
 use std::sync::Arc;
 use tokio::time::Duration as TokioDuration;
@@ -28,6 +30,10 @@ pub struct SummaryScheduler {
     summary_generator: Arc<SummaryGenerator>,
     /// GrandSummary生成サービス
     grand_summary_generator: Arc<GrandSummaryGenerator>,
+    /// Paraclate APPクライアント（Ingest API送信用）
+    paraclate_client: Arc<ParaclateClient>,
+    /// RealtimeHub（チャットへの報告用）
+    realtime: Arc<RealtimeHub>,
     /// チェック間隔（秒）
     tick_interval_secs: u64,
 }
@@ -38,11 +44,15 @@ impl SummaryScheduler {
         schedule_repository: ScheduleRepository,
         summary_generator: Arc<SummaryGenerator>,
         grand_summary_generator: Arc<GrandSummaryGenerator>,
+        paraclate_client: Arc<ParaclateClient>,
+        realtime: Arc<RealtimeHub>,
     ) -> Self {
         Self {
             schedule_repository,
             summary_generator,
             grand_summary_generator,
+            paraclate_client,
+            realtime,
             tick_interval_secs: 60, // 1分間隔
         }
     }
@@ -131,10 +141,90 @@ impl SummaryScheduler {
             .generate(&schedule.tid, &schedule.fid, period_start, period_end)
             .await?;
 
-        // TODO: Paraclate APPへ送信（Phase 4で実装）
-        // if let Some(json) = &result.summary_json {
-        //     self.paraclate_client.send_summary(json.clone()).await?;
-        // }
+        // Paraclate APPへ送信（Ingest API）
+        if let Some(json) = &result.summary_json {
+            match self
+                .paraclate_client
+                .send_summary(&result.tid, &result.fid, json.clone(), result.summary_id)
+                .await
+            {
+                Ok(queue_id) => {
+                    info!(
+                        queue_id = queue_id,
+                        summary_id = result.summary_id,
+                        "Summary queued for Paraclate APP"
+                    );
+                }
+                Err(e) => {
+                    // 送信失敗してもSummary生成自体は成功扱い
+                    warn!(
+                        error = %e,
+                        summary_id = result.summary_id,
+                        "Failed to queue summary for Paraclate APP"
+                    );
+                }
+            }
+        }
+
+        // Paraclate LLM APIでリッチなサマリーテキストを取得
+        // mobes_SummaryArchitecture_Analysis_20260114.md準拠
+        let llm_summary_text = match self
+            .paraclate_client
+            .send_ai_chat(
+                &schedule.tid,
+                &schedule.fid,
+                &format!("直近{}分間の定時サマリーを生成してください", interval),
+                None,
+                None,
+            )
+            .await
+        {
+            Ok(response) => {
+                if let Some(text) = response.message {
+                    info!(
+                        summary_id = result.summary_id,
+                        llm_text_len = text.len(),
+                        "LLM summary received from Paraclate"
+                    );
+                    Some(text)
+                } else {
+                    warn!(
+                        summary_id = result.summary_id,
+                        "No message in LLM response, using local summary"
+                    );
+                    None
+                }
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    summary_id = result.summary_id,
+                    "Failed to get LLM summary, using local summary"
+                );
+                None
+            }
+        };
+
+        // チャットへ報告（RealtimeHub経由）
+        // LLMサマリーがある場合のみ送信（IS22ローカル生成サマリーは使用しない）
+        if let Some(llm_text) = llm_summary_text {
+            self.realtime.broadcast(HubMessage::SummaryReport(SummaryReportMessage {
+                report_type: "summary".to_string(),
+                summary_id: result.summary_id,
+                period_start: result.period_start.to_rfc3339(),
+                period_end: result.period_end.to_rfc3339(),
+                detection_count: result.detection_count,
+                severity_max: result.severity_max,
+                camera_count: result.camera_ids.len(),
+                summary_text: llm_text,
+                created_at: Utc::now().to_rfc3339(),
+            })).await;
+        } else {
+            warn!(
+                summary_id = result.summary_id,
+                "Skipping chat broadcast - no LLM summary available"
+            );
+        }
 
         // 次回実行時刻を更新
         let next_run = now + Duration::minutes(interval as i64);
@@ -152,41 +242,131 @@ impl SummaryScheduler {
         Ok(())
     }
 
-    /// GrandSummary実行
+    /// GrandSummary実行（シフト単位集計）
     async fn execute_grand_summary(
         &self,
         schedule: &ReportSchedule,
         now: DateTime<Utc>,
     ) -> crate::Result<()> {
-        // JSTで現在の日付を取得
-        let date = now.date_naive();
+        // シフト開始時刻 = 前回実行時刻（初回はデフォルトで8時間前）
+        let period_start = schedule.last_run_at.unwrap_or_else(|| {
+            // 初回実行時は8時間前をデフォルトとする
+            now - Duration::hours(8)
+        });
+        let period_end = now;
 
         info!(
             tid = %schedule.tid,
             fid = %schedule.fid,
-            date = %date,
-            "Executing scheduled grand summary"
+            period_start = %period_start,
+            period_end = %period_end,
+            "Executing scheduled grand summary (shift-based)"
         );
 
-        // GrandSummary生成
+        // GrandSummary生成（シフト単位）
         let result = self
             .grand_summary_generator
-            .generate(&schedule.tid, &schedule.fid, date)
+            .generate(&schedule.tid, &schedule.fid, period_start, period_end)
             .await?;
 
-        // TODO: Paraclate APPへ送信（Phase 4で実装）
-        // if let Some(json) = &result.summary_json {
-        //     self.paraclate_client.send_grand_summary(json.clone()).await?;
-        // }
+        // Paraclate APPへ送信（Ingest API）
+        if let Some(json) = &result.summary_json {
+            match self
+                .paraclate_client
+                .send_grand_summary(&result.tid, &result.fid, json.clone(), result.summary_id)
+                .await
+            {
+                Ok(queue_id) => {
+                    info!(
+                        queue_id = queue_id,
+                        summary_id = result.summary_id,
+                        "GrandSummary queued for Paraclate APP"
+                    );
+                }
+                Err(e) => {
+                    // 送信失敗してもGrandSummary生成自体は成功扱い
+                    warn!(
+                        error = %e,
+                        summary_id = result.summary_id,
+                        "Failed to queue grand summary for Paraclate APP"
+                    );
+                }
+            }
+        }
 
-        // 次回実行時刻を計算
-        let scheduled_times = schedule.scheduled_times.clone().unwrap_or_default();
-        let next_run = if scheduled_times.is_empty() {
-            // デフォルト: 翌日09:00
-            now + Duration::days(1)
-        } else {
-            calculate_next_grand_summary_time(&scheduled_times, now)?
+        // シフト時間を計算
+        let shift_hours = (period_end - period_start).num_hours();
+
+        // Paraclate LLM APIでリッチなGrandSummaryテキストを取得
+        // mobes_SummaryArchitecture_Analysis_20260114.md準拠
+        let llm_summary_text = match self
+            .paraclate_client
+            .send_ai_chat(
+                &schedule.tid,
+                &schedule.fid,
+                &format!("直近{}時間のシフトサマリー（GrandSummary）を生成してください", shift_hours),
+                None,
+                None,
+            )
+            .await
+        {
+            Ok(response) => {
+                if let Some(text) = response.message {
+                    info!(
+                        summary_id = result.summary_id,
+                        llm_text_len = text.len(),
+                        "LLM grand summary received from Paraclate"
+                    );
+                    Some(text)
+                } else {
+                    warn!(
+                        summary_id = result.summary_id,
+                        "No message in LLM response, using local grand summary"
+                    );
+                    None
+                }
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    summary_id = result.summary_id,
+                    "Failed to get LLM grand summary, using local summary"
+                );
+                None
+            }
         };
+
+        // チャットへ報告（RealtimeHub経由）
+        // LLMサマリーがある場合のみ送信（IS22ローカル生成サマリーは使用しない）
+        if let Some(llm_text) = llm_summary_text {
+            self.realtime.broadcast(HubMessage::SummaryReport(SummaryReportMessage {
+                report_type: "grand_summary".to_string(),
+                summary_id: result.summary_id,
+                period_start: result.period_start.to_rfc3339(),
+                period_end: result.period_end.to_rfc3339(),
+                detection_count: result.detection_count,
+                severity_max: result.severity_max,
+                camera_count: result.camera_ids.len(),
+                summary_text: llm_text,
+                created_at: Utc::now().to_rfc3339(),
+            })).await;
+        } else {
+            warn!(
+                summary_id = result.summary_id,
+                "Skipping chat broadcast - no LLM grand summary available"
+            );
+        }
+
+        // 次回実行時刻を計算（configから最新の時刻設定を取得）
+        let scheduled_times = match self.paraclate_client.get_config(&schedule.tid, &schedule.fid).await {
+            Ok(Some(config)) if !config.grand_summary_times.is_empty() => {
+                config.grand_summary_times
+            }
+            _ => schedule.scheduled_times.clone().unwrap_or_else(|| {
+                vec!["09:00".to_string(), "17:00".to_string(), "21:00".to_string()]
+            }),
+        };
+        let next_run = calculate_next_grand_summary_time(&scheduled_times, now)?;
 
         self.schedule_repository
             .update_last_run(schedule.schedule_id, now, next_run)
@@ -220,8 +400,23 @@ impl SummaryScheduler {
         };
         self.schedule_repository.upsert(&summary_schedule).await?;
 
-        // GrandSummary（09:00, 17:00, 21:00 JST）
-        let scheduled_times = vec!["09:00".to_string(), "17:00".to_string(), "21:00".to_string()];
+        // GrandSummary時刻をconfigから取得（なければデフォルト）
+        let scheduled_times = match self.paraclate_client.get_config(tid, fid).await {
+            Ok(Some(config)) => {
+                if config.grand_summary_times.is_empty() {
+                    vec!["09:00".to_string(), "17:00".to_string(), "21:00".to_string()]
+                } else {
+                    config.grand_summary_times
+                }
+            }
+            _ => vec!["09:00".to_string(), "17:00".to_string(), "21:00".to_string()],
+        };
+        debug!(
+            tid = %tid,
+            fid = %fid,
+            times = ?scheduled_times,
+            "GrandSummary times from config"
+        );
         let next_grand = calculate_next_grand_summary_time(&scheduled_times, now)?;
 
         let grand_summary_schedule = ReportSchedule {
