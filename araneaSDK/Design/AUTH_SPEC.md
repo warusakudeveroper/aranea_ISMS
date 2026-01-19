@@ -497,3 +497,283 @@ bool MqttManager::begin(const String& url,
 1. **最小権限原則**: 必要最小限の権限のみ付与
 2. **監査証跡**: 全操作をBigQueryに記録
 3. **異常検知**: 連続失敗の検知とアラート
+
+---
+
+## 10. Paraclate API認証（LacisOath HTTPヘッダー形式）
+
+### 10.1 概要
+
+Paraclate（IS21/IS22 → mobes2.0 Cloud Run）間の通信では、HTTPヘッダーベースの**LacisOath認証**を使用します。
+これはセクション5のLacisOath（デバイス登録用ボディベース）とは異なる形式です。
+
+| 項目 | LacisOath (登録用) | LacisOath (Paraclate用) |
+|------|-------------------|------------------------|
+| 用途 | デバイス登録 | API認証 |
+| 場所 | リクエストボディ | HTTPヘッダー |
+| 形式 | JSON object | Authorization ヘッダー |
+| 要素 | lacisId + userId + cic + method | lacisId + tid + cic + timestamp |
+
+### 10.2 ヘッダー形式
+
+```
+Authorization: LacisOath <base64-encoded-json>
+```
+
+### 10.3 Base64エンコード前のJSON構造
+
+```json
+{
+  "lacisId": "3022E051D815448B0001",
+  "tid": "T2025120621041161827",
+  "cic": "605123",
+  "timestamp": "2026-01-10T22:54:51Z"
+}
+```
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| lacisId | string | 送信元デバイスのLacisID（20桁） |
+| tid | string | テナントID（T+19桁） |
+| cic | string | デバイスのCIC（6桁数字） |
+| timestamp | string | リクエスト時刻（ISO8601 UTC） |
+
+### 10.4 対象エンドポイント
+
+| API | URL | Method |
+|-----|-----|--------|
+| Connect | https://paraclateconnect-vm44u3kpua-an.a.run.app | POST |
+| IngestSummary | https://paraclateingestsummary-vm44u3kpua-an.a.run.app | POST |
+| IngestEvent | https://paraclateingestevent-vm44u3kpua-an.a.run.app | POST |
+| GetConfig | https://paraclategetconfig-vm44u3kpua-an.a.run.app/config/{tid}?fid={fid} | GET |
+
+### 10.5 リクエストボディ形式
+
+Ingest系APIでは以下のラッピング形式が必須：
+
+```json
+{
+  "fid": "0150",
+  "payload": {
+    "summary": { ... },
+    "periodStart": "...",
+    "periodEnd": "..."
+  }
+}
+```
+
+### 10.6 実装例（Rust / IS22）
+
+```rust
+// src/paraclate_client/types.rs
+
+impl LacisOath {
+    /// HTTPヘッダを生成
+    ///
+    /// mobes2.0 Paraclate API認証形式:
+    /// Authorization: LacisOath <base64-encoded-json>
+    pub fn to_headers(&self) -> Vec<(String, String)> {
+        use base64::Engine;
+
+        // 認証ペイロードを構築
+        let auth_payload = serde_json::json!({
+            "lacisId": self.lacis_id,
+            "tid": self.tid,
+            "cic": self.cic,
+            "timestamp": chrono::Utc::now().to_rfc3339_opts(
+                chrono::SecondsFormat::Secs, true
+            )
+        });
+
+        // Base64エンコード
+        let json_str = serde_json::to_string(&auth_payload)
+            .unwrap_or_default();
+        let encoded = base64::engine::general_purpose::STANDARD
+            .encode(json_str.as_bytes());
+
+        let mut headers = vec![
+            ("Authorization".to_string(), format!("LacisOath {}", encoded)),
+        ];
+
+        // blessingがある場合は追加ヘッダとして付与（越境アクセス用）
+        if let Some(blessing) = &self.blessing {
+            headers.push((
+                "X-Lacis-Blessing".to_string(),
+                blessing.clone()
+            ));
+        }
+
+        headers
+    }
+}
+```
+
+### 10.7 実装例（Python / IS21）
+
+```python
+# src/aranea_common/lacis_oath.py
+
+import base64
+import json
+from datetime import datetime, timezone
+
+def generate_lacis_oath_header(lacis_id: str, tid: str, cic: str) -> dict:
+    """LacisOath認証ヘッダーを生成"""
+    auth_payload = {
+        "lacisId": lacis_id,
+        "tid": tid,
+        "cic": cic,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    }
+
+    json_str = json.dumps(auth_payload, separators=(',', ':'))
+    encoded = base64.b64encode(json_str.encode()).decode()
+
+    return {
+        "Authorization": f"LacisOath {encoded}"
+    }
+```
+
+### 10.8 実装例（Shell / テスト用）
+
+```bash
+#!/bin/bash
+
+LACIS_ID="3022E051D815448B0001"
+TID="T2025120621041161827"
+CIC="605123"
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+AUTH_PAYLOAD="{\"lacisId\":\"${LACIS_ID}\",\"tid\":\"${TID}\",\"cic\":\"${CIC}\",\"timestamp\":\"${TIMESTAMP}\"}"
+OAUTH_HEADER=$(echo -n "$AUTH_PAYLOAD" | base64 -w 0)
+
+curl -X POST 'https://paraclateconnect-vm44u3kpua-an.a.run.app' \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: LacisOath $OAUTH_HEADER" \
+  -d '{"fid":"0150","payload":{"deviceType":"is22","version":"0.1.0"}}'
+```
+
+### 10.9 Backend検証フロー（mobes2.0側）
+
+```typescript
+// functions/src/paraclate/auth.ts
+
+interface LacisOathPayload {
+  lacisId: string;
+  tid: string;
+  cic: string;
+  timestamp: string;
+}
+
+async function validateLacisOathHeader(
+  authHeader: string
+): Promise<ValidationResult> {
+  // 1. ヘッダー形式チェック
+  if (!authHeader?.startsWith('LacisOath ')) {
+    return { valid: false, error: 'AUTH_FAILED', reason: 'Authorization header required' };
+  }
+
+  // 2. Base64デコード
+  const base64Part = authHeader.slice('LacisOath '.length);
+  let payload: LacisOathPayload;
+  try {
+    const jsonStr = Buffer.from(base64Part, 'base64').toString('utf-8');
+    payload = JSON.parse(jsonStr);
+  } catch (e) {
+    return { valid: false, error: 'AUTH_FAILED', reason: 'Invalid base64 or JSON' };
+  }
+
+  // 3. タイムスタンプ検証（5分以内）
+  const requestTime = new Date(payload.timestamp);
+  const now = new Date();
+  const diffMs = Math.abs(now.getTime() - requestTime.getTime());
+  if (diffMs > 5 * 60 * 1000) {
+    return { valid: false, error: 'AUTH_FAILED', reason: 'Timestamp too old' };
+  }
+
+  // 4. Firestore検証
+  const userObjectRef = db.collection('userObject').doc(payload.lacisId);
+  const userObject = await userObjectRef.get();
+
+  if (!userObject.exists) {
+    return { valid: false, error: 'AUTH_FAILED', reason: 'Device not registered' };
+  }
+
+  const data = userObject.data();
+
+  // 5. TID検証
+  if (data.lacis.tid !== payload.tid) {
+    return { valid: false, error: 'AUTH_FAILED', reason: 'TID mismatch' };
+  }
+
+  // 6. CIC検証
+  if (data.lacis.cic_code !== payload.cic) {
+    return { valid: false, error: 'AUTH_FAILED', reason: 'Invalid CIC' };
+  }
+
+  // 7. CIC有効性チェック
+  if (data.lacis.cic_active === false) {
+    return { valid: false, error: 'AUTH_FAILED', reason: 'CIC disabled' };
+  }
+
+  return { valid: true, lacisId: payload.lacisId, tid: payload.tid };
+}
+```
+
+### 10.10 エラーレスポンス形式
+
+認証失敗時のレスポンス：
+
+```json
+{
+  "error": "Unauthorized",
+  "code": "AUTH_FAILED",
+  "reason": "Authorization header required",
+  "timestamp": "2026-01-10T22:52:01.897Z"
+}
+```
+
+| エラーコード | reason | 原因 |
+|-------------|--------|------|
+| AUTH_FAILED | Authorization header required | ヘッダー未設定 |
+| AUTH_FAILED | Invalid base64 or JSON | Base64/JSONパースエラー |
+| AUTH_FAILED | Timestamp too old | timestampが5分以上前 |
+| AUTH_FAILED | Device not registered | lacisIdが未登録 |
+| AUTH_FAILED | TID mismatch | tidが一致しない |
+| AUTH_FAILED | Invalid CIC | cicが一致しない |
+| AUTH_FAILED | CIC disabled | cicが無効化されている |
+
+### 10.11 旧形式との比較（非推奨）
+
+**旧形式（非推奨）**:
+```
+X-Lacis-ID: 3022E051D815448B0001
+X-Lacis-TID: T2025120621041161827
+X-Lacis-CIC: 605123
+```
+
+**新形式（必須）**:
+```
+Authorization: LacisOath eyJsYWNpc0lkIjoiMzAyMkUwNT...
+```
+
+旧形式は2026年1月以降のエンドポイントでは**サポートされません**。
+
+### 10.12 認証情報の保存場所
+
+| システム | 保存先 | キー |
+|---------|-------|------|
+| IS22 (Rust) | MySQL settings | aranea.lacis_id, aranea.tid, aranea.cic |
+| IS21 (Python) | YAML config | lacis_id, tid, cic |
+| ESP32 | NVS | lacisId, tid, cic |
+
+### 10.13 Blessing（越境アクセス）
+
+別テナントへのアクセスが必要な場合、追加ヘッダーを使用：
+
+```
+Authorization: LacisOath <base64-json>
+X-Lacis-Blessing: <blessing-token>
+```
+
+Blessingトークンは対象テナントのTenant Primaryが発行。

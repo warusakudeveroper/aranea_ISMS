@@ -62,6 +62,8 @@ AraneaSDKは、mobes2.0とaraneaDeviceの連携を確実に行うための開発
 | 006 | is06 | 6ch出力（PWM対応） |
 | 010 | is10 | ルーター検査デバイス |
 | 020 | is20 | ネットワーク監視 |
+| 021 | is21 | 画像解析推論サーバー (aranea_ar-is21) |
+| 022 | is22 | RTSPカメラ総合管理サーバー (aranea_ar-is22) |
 
 ### Default Tenant (市山水産株式会社)
 ```
@@ -78,6 +80,16 @@ CIC: 263238
 | DeviceGate | https://us-central1-mobesorder.cloudfunctions.net/araneaDeviceGate |
 | StateReport | https://us-central1-mobesorder.cloudfunctions.net/deviceStateReport |
 | MQTT Bridge | wss://aranea-mqtt-bridge-*.run.app |
+
+### Paraclate Endpoints (IS21/IS22 → mobes2.0)
+| Purpose | URL | Auth |
+|---------|-----|------|
+| Connect | https://paraclateconnect-vm44u3kpua-an.a.run.app | LacisOath Header |
+| IngestSummary | https://paraclateingestsummary-vm44u3kpua-an.a.run.app | LacisOath Header |
+| IngestEvent | https://paraclateingestevent-vm44u3kpua-an.a.run.app | LacisOath Header |
+| GetConfig | https://paraclategetconfig-vm44u3kpua-an.a.run.app/config/{tid}?fid={fid} | LacisOath Header |
+
+**注意**: Paraclate APIは `Authorization: LacisOath <base64-json>` 形式で認証。詳細は [AUTH_SPEC.md Section 10](./AUTH_SPEC.md) を参照。
 
 ---
 

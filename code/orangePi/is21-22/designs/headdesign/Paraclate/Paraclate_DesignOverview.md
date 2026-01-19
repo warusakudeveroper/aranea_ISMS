@@ -72,7 +72,7 @@ Paraclateはギリシア語由来のそこで見守る精霊を表し、この�
 
 の形式でmobes2.0の認証を行う。
 - tid,fid,lacisID,cicの取り扱いなどについてはaraneaSDKのナレッジおよびMetatronコマンドなどを用いて確認必要
-- 現時点ではis22にaranearegistor系の機能実装を行なっていないのでここについても実装タスクを作成する。code/ESP32/global/src/AraneaRegister.cppの実装を参考にすること。現在位置としてはまだスキーマ整備も行われていない。
+- ✅ **実装済み(2026-01)**: is22にaranearegister機能を実装完了。DD01_AraneaRegister.mdに詳細設計、src/aranea_register/にRust実装。スキーマ定義はaranea_ar-is22.schema.jsonを参照。
 - TypeDomain=araneaDevice, Type=ar-is22CamServer, Prefix=3(araneaDevice共通), ProductType=022, ProductCode=0000(末尾の追い番ないので4進ルール的仕様として0000)
 - これまで開発環境としてlacisOath認証による権限境界を意識しない仕様として進めてきたが以降はtid権限境界、fid=施設としての管理を必要とする。
 - 詳しくはhttps://github.com/warusakudeveroper/mobes2.0のlacisOath仕様関連の把握が必要である。
@@ -82,7 +82,7 @@ Paraclateはギリシア語由来のそこで見守る精霊を表し、この�
   テナントプライマリ:soejim@mijeos.com
   テナントプライマリlacisID:18217487937895888001
   テナントプライマリCIC:204965`
-- is22およびis21の傘下のカメラ類はlacisOathの
+- is22およびis21の傘下のカメラ類はlacisOathの認証体系に基づき、is801 paraclateCameraとして個別のlacisIDを持つ
 - is22はそのtidが持つ全fidのアクセス権限を持つ
 - is22のuserObjectDetailスキーマでは傘下のカメラのlacisIDリスト、Paraclateでの設定項目を値として持つ。
 - 最終的に検出ログの全てをBQにポストする(サマリー系を強化する方向)、この場合にイベントID,サマリーIDベースとなりProclateにイベントを送信する必要はなくなるのでこの部分については検証が必要。処理としてはそちらの方が良い。

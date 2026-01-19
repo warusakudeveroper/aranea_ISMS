@@ -67,6 +67,10 @@ Paraclate/
 | DD03 | [DD03_ParaclateClient.md](DD03_ParaclateClient.md) | Paraclate APP連携、送信キュー | DD01, DD02 |
 | DD04 | [DD04_BqSyncService.md](DD04_BqSyncService.md) | BigQuery同期バッチ処理 | DD02 |
 | DD05 | [DD05_CameraRegistry.md](DD05_CameraRegistry.md) | カメラ台帳、カメラlacisID | DD01 |
+| DD06 | [DD06_LinuxCommonModules.md](DD06_LinuxCommonModules.md) | Linux共通モジュール (aranea_common) | - |
+| DD07 | [DD07_IS21_Baseline.md](DD07_IS21_Baseline.md) | IS21 ParaclateEdge基盤 | DD06 |
+| DD08 | [DD08_IS21_WebUI.md](DD08_IS21_WebUI.md) | IS21 AraneaWebUI | DD07 |
+| DD09 | [DD09_IS22_WebUI.md](DD09_IS22_WebUI.md) | IS22 WebUI Paraclate連携 | DD03 |
 
 ## 3. 実装依存関係
 

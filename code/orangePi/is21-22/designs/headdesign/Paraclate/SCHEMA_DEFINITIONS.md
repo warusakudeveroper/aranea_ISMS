@@ -22,13 +22,13 @@
 | 項目 | 値 |
 |------|------|
 | TypeDomain | araneaDevice |
-| Type | ar-is22CamServer |
+| Type | aranea_ar-is22 |
 | Prefix | 3 |
 | ProductType | 022 |
 | ProductCode | 0000 |
 | LacisID形式 | `3022{MAC12桁}0000` |
 
-### 1.2 typeSettings/araneaDevice/ar-is22CamServer
+### 1.2 typeSettings/araneaDevice/aranea_ar-is22
 
 ```json
 {
@@ -233,39 +233,199 @@
 
 ---
 
-## 2. is801 ParaclateCamera スキーマ
+## 2. is21 Inference Server スキーマ
 
 ### 2.1 基本情報
 
 | 項目 | 値 |
 |------|------|
 | TypeDomain | araneaDevice |
-| Type | ar-is801ParaclateCamera |
+| Type | aranea_ar-is21 |
+| Prefix | 3 |
+| ProductType | 021 |
+| ProductCode | 0001 |
+| LacisID形式 | `3021{MAC12桁}0001` |
+
+### 2.2 typeSettings/araneaDevice/aranea_ar-is21
+
+```json
+{
+  "displayName": "Paraclate Inference Server",
+  "description": "AI推論サーバー。カメラスナップショットの物体検出・シーン分析・異常検知を行う",
+  "version": 1,
+  "productType": "021",
+  "productCodes": ["0001"],
+
+  "stateSchema": {
+    "type": "object",
+    "properties": {
+      "serverStatus": {
+        "type": "string",
+        "enum": ["running", "stopped", "error", "maintenance"],
+        "description": "サーバー稼働状態"
+      },
+      "inferenceEngine": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ready", "busy", "error", "initializing"],
+            "description": "推論エンジン状態"
+          },
+          "modelLoaded": { "type": "boolean", "description": "モデルロード状態" },
+          "gpuAvailable": { "type": "boolean", "description": "GPU利用可能" },
+          "gpuMemoryUsedMb": { "type": "integer", "description": "GPU使用メモリ(MB)" }
+        },
+        "required": ["status", "modelLoaded"]
+      },
+      "statistics": {
+        "type": "object",
+        "properties": {
+          "totalInferences": { "type": "integer", "description": "総推論回数" },
+          "successRate": { "type": "number", "minimum": 0, "maximum": 100, "description": "成功率(%)" },
+          "avgLatencyMs": { "type": "integer", "description": "平均推論時間(ms)" },
+          "queueSize": { "type": "integer", "description": "待機キューサイズ" }
+        }
+      },
+      "connectedClients": {
+        "type": "object",
+        "properties": {
+          "is22Count": { "type": "integer", "description": "接続中のIS22数" },
+          "lastRequestAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "required": ["serverStatus", "inferenceEngine"]
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "inference": {
+        "type": "object",
+        "properties": {
+          "maxConcurrent": { "type": "integer", "minimum": 1, "maximum": 8, "default": 2 },
+          "timeoutSec": { "type": "integer", "minimum": 5, "maximum": 120, "default": 30 },
+          "batchSize": { "type": "integer", "minimum": 1, "maximum": 16, "default": 1 },
+          "priorityMode": {
+            "type": "string",
+            "enum": ["fifo", "round_robin", "priority"],
+            "default": "fifo"
+          }
+        }
+      },
+      "model": {
+        "type": "object",
+        "properties": {
+          "detectionThreshold": { "type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.5 },
+          "nmsThreshold": { "type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.4 },
+          "maxDetections": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+        }
+      },
+      "paraclate": {
+        "type": "object",
+        "properties": {
+          "endpoint": { "type": "string", "format": "uri" },
+          "reportIntervalMinutes": { "type": "integer", "minimum": 5, "maximum": 60, "default": 15 }
+        }
+      }
+    }
+  },
+
+  "capabilities": [
+    "object_detection",
+    "scene_analysis",
+    "anomaly_detection",
+    "batch_inference",
+    "gpu_acceleration",
+    "paraclate_reporting"
+  ],
+
+  "semanticTags": [
+    "AI推論",
+    "物体検出",
+    "シーン分析",
+    "異常検知",
+    "画像処理"
+  ]
+}
+```
+
+### 2.3 userObject_detail/is21InferenceServer
+
+```json
+{
+  "firmware": {
+    "version": "0.1.0",
+    "buildDate": "2026-01-10T00:00:00Z",
+    "modules": ["onnxruntime", "opencv", "cuda"]
+  },
+
+  "config": {
+    "inference": {
+      "maxConcurrent": 2,
+      "timeoutSec": 30,
+      "batchSize": 1,
+      "priorityMode": "fifo"
+    },
+    "model": {
+      "detectionThreshold": 0.5,
+      "nmsThreshold": 0.4,
+      "maxDetections": 20
+    },
+    "paraclate": {
+      "endpoint": "https://us-central1-mobesorder.cloudfunctions.net/paraclateAPI",
+      "reportIntervalMinutes": 15
+    }
+  },
+
+  "status": {
+    "online": true,
+    "lastSeen": "2026-01-10T00:00:00Z",
+    "heap": 512000000,
+    "uptime": 86400
+  },
+
+  "network": {
+    "ip": "192.168.3.240",
+    "gateway": "192.168.3.1",
+    "subnet": "255.255.255.0"
+  },
+
+  "hardware": {
+    "gpu": "NVIDIA RTX 3060",
+    "gpuMemoryMb": 12288,
+    "cudaVersion": "12.0",
+    "cpuCores": 8,
+    "ramGb": 32
+  },
+
+  "connectedServers": [
+    {
+      "lacisId": "3022E051D815448B0001",
+      "ip": "192.168.125.246",
+      "name": "HALE京都丹波口"
+    }
+  ]
+}
+```
+
+---
+
+## 3. is801 ParaclateCamera スキーマ
+
+### 3.1 基本情報
+
+| 項目 | 値 |
+|------|------|
+| TypeDomain | araneaDevice |
+| Type | aranea_ar-is801 |
 | Prefix | 3 |
 | ProductType | 801 |
-| ProductCode | カメラブランドで割り振り |
-| LacisID形式 | `3801{MAC12桁}{BrandCode4桁}` |
+| ProductCode | 0000（固定） |
+| LacisID形式 | `3801{MAC12桁}0000` |
 
-### 2.2 ProductCode (カメラブランド)
-
-| ProductCode | ブランド | 備考 |
-|-------------|---------|------|
-| 0001 | Generic/Unknown | 不明ブランド |
-| 0010 | Hikvision | 海康威視 |
-| 0011 | Dahua | 大華 |
-| 0012 | Uniview | 宇視 |
-| 0020 | Axis | アクシス |
-| 0021 | Hanwha (Samsung) | ハンファ |
-| 0022 | Bosch | ボッシュ |
-| 0030 | TP-Link (Tapo) | タポ |
-| 0031 | Reolink | リオリンク |
-| 0032 | Amcrest | アムクレスト |
-| 0040 | Panasonic | パナソニック |
-| 0041 | Sony | ソニー |
-| 0050 | EZVIZ | 萤石 |
-| 0096 | ISMS Custom | カスタム |
-
-### 2.3 typeSettings/araneaDevice/ar-is801ParaclateCamera
+### 3.2 typeSettings/araneaDevice/aranea_ar-is801
 
 ```json
 {
@@ -273,7 +433,7 @@
   "description": "is22 CamServerに接続されるRTSPカメラの仮想araneaDevice表現",
   "version": 1,
   "productType": "801",
-  "productCodes": ["0001", "0010", "0011", "0012", "0020", "0021", "0022", "0030", "0031", "0032", "0040", "0041", "0050", "0096"],
+  "productCodes": ["0000"],
 
   "stateSchema": {
     "type": "object",
@@ -382,7 +542,7 @@
 }
 ```
 
-### 2.4 userObject_detail/is801ParaclateCamera
+### 3.3 userObject_detail/is801ParaclateCamera
 
 ```json
 {
@@ -447,16 +607,16 @@
 
 ---
 
-## 3. araneaDeviceStates スキーマ
+## 4. araneaDeviceStates スキーマ
 
-### 3.1 is22 CamServer
+### 4.1 is22 CamServer
 
 ```json
 {
   "lacisId": "3022AABBCCDDEEFF0000",
   "tid": "T2025120621041161827",
   "fid": ["0150", "0151"],
-  "type": "ar-is22CamServer",
+  "type": "aranea_ar-is22",
 
   "state": {
     "serverStatus": "running",
@@ -493,14 +653,14 @@
 }
 ```
 
-### 3.2 is801 ParaclateCamera
+### 4.2 is801 ParaclateCamera
 
 ```json
 {
   "lacisId": "3801AABBCCDDEEFF0010",
   "tid": "T2025120621041161827",
   "fid": ["0150"],
-  "type": "ar-is801ParaclateCamera",
+  "type": "aranea_ar-is801",
 
   "state": {
     "connectionStatus": "online",
@@ -533,7 +693,7 @@
 
 ---
 
-## 4. deviceStateReport フォーマット
+## 5. deviceStateReport フォーマット
 
 ### 4.1 is22 CamServer レポート
 
@@ -545,7 +705,7 @@
     "cic": "123456"
   },
   "report": {
-    "type": "ar-is22CamServer",
+    "type": "aranea_ar-is22",
     "state": {
       "serverStatus": "running",
       "cameraStats": {
@@ -569,7 +729,7 @@
 }
 ```
 
-### 4.2 is22からのカメラバッチレポート
+### 5.2 is22からのカメラバッチレポート
 
 ```json
 {
@@ -581,7 +741,7 @@
   "reports": [
     {
       "lacisId": "3801AABBCCDDEEFF0010",
-      "type": "ar-is801ParaclateCamera",
+      "type": "aranea_ar-is801",
       "state": {
         "connectionStatus": "online",
         "lastCapturedAt": "2026-01-10T05:50:00Z",
@@ -595,7 +755,7 @@
     },
     {
       "lacisId": "3801112233445566001",
-      "type": "ar-is801ParaclateCamera",
+      "type": "aranea_ar-is801",
       "state": {
         "connectionStatus": "offline",
         "errorCount24h": 3
@@ -608,9 +768,9 @@
 
 ---
 
-## 5. Paraclate Summary スキーマ
+## 6. Paraclate Summary スキーマ
 
-### 5.1 Summary レポート
+### 6.1 Summary レポート
 
 ```json
 {
@@ -658,20 +818,24 @@
 
 ---
 
-## 6. 実装チェックリスト
+## 7. 実装チェックリスト
 
-### 6.1 mobes2.0側（araneaSDK提供）
+### 7.1 mobes2.0側（araneaSDK提供）
 
 - [x] userObject共通スキーマ（既存）
-- [ ] typeSettings/araneaDevice/ar-is22CamServer 登録
-- [ ] typeSettings/araneaDevice/ar-is801ParaclateCamera 登録
-- [ ] ProductType 022 (is22) 登録
+- [x] typeSettings/araneaDevice/aranea_ar-is22 登録 ✅ 2026-01-10
+- [x] typeSettings/araneaDevice/aranea_ar-is21 登録 ✅ 2026-01-10
+- [x] typeSettings/araneaDevice/aranea_ar-is801 登録 ✅ 2026-01-10
+- [x] ProductType 022 (is22) 登録 ✅
+- [x] ProductType 021 (is21) 登録 ✅
 - [ ] ProductType 801 (is801) 登録
 
-### 6.2 is22側（実装責任）
+### 7.2 is22/is21側（実装責任）
 
-- [x] AraneaRegister Phase 1 実装
+- [x] AraneaRegister Phase 1 実装（is22）✅ CIC=605123
+- [ ] AraneaRegister Phase 1 実装（is21）⏳ 共有ライブラリ化後
 - [ ] userObject_detail/is22 構造実装
+- [ ] userObject_detail/is21 構造実装
 - [ ] userObject_detail/is801 構造実装
 - [ ] deviceStateReport 送信実装
 - [ ] Paraclate Summary 送信実装
@@ -679,7 +843,7 @@
 
 ---
 
-## 7. MECE確認
+## 8. MECE確認
 
 本スキーマ定義は以下のMECE原則を満たす：
 

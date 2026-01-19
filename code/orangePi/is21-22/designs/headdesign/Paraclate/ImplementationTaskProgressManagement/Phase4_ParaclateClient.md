@@ -33,7 +33,7 @@ lacisOath認証を用いた安全な通信を実現する。
 
 ### T4-1: client.rs HTTPクライアント実装
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: L
 
@@ -59,7 +59,7 @@ lacisOath認証を用いた安全な通信を実現する。
 
 ### T4-2: lacisOath認証ヘッダ実装
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -84,7 +84,7 @@ X-Lacis-CIC: {cic}
 
 ### T4-3: snapshot連携（LacisFiles）
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-11)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -111,7 +111,9 @@ X-Lacis-CIC: {cic}
 ```
 
 **成果物**:
-- snapshot送信・応答処理
+- `src/paraclate_client/types.rs`: EventPayload, EventResponse, SnapshotRef, EventSendResult ✅
+- `src/paraclate_client/client.rs`: send_event_with_snapshot() ✅
+- `src/detection_log_service/mod.rs`: update_cloud_path() ✅
 
 **検証方法**:
 - snapshot付きEvent送信テスト
@@ -121,7 +123,7 @@ X-Lacis-CIC: {cic}
 
 ### T4-4: enqueuer.rs 送信キュー管理
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -131,8 +133,8 @@ X-Lacis-CIC: {cic}
 - リトライ管理
 
 **成果物**:
-- `src/paraclate_client/send_queue.rs`
-- `migrations/020_paraclate_client.sql`
+- `src/paraclate_client/repository.rs` ✅
+- `migrations/023_paraclate_client.sql` ✅
 
 **マイグレーションSQL**:
 ```sql
@@ -160,7 +162,7 @@ CREATE TABLE IF NOT EXISTS paraclate_send_queue (
 
 ### T4-5: config_sync.rs 設定同期
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -184,7 +186,7 @@ CREATE TABLE IF NOT EXISTS paraclate_send_queue (
 
 ### T4-6: リトライ・offline対応
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-10)
 **優先度**: P0（ブロッカー）
 **見積もり規模**: M
 
@@ -208,7 +210,7 @@ CREATE TABLE IF NOT EXISTS paraclate_send_queue (
 
 ### T4-7: Pub/Sub受信フロー（設定変更通知）
 
-**状態**: ⬜ NOT_STARTED
+**状態**: ✅ COMPLETED (2026-01-11)
 **優先度**: P1（品質改善）
 **見積もり規模**: M
 
@@ -221,12 +223,22 @@ CREATE TABLE IF NOT EXISTS paraclate_send_queue (
 - Payload: `{type, tid, fids[], updatedAt, actor}`
 - config本体は配らない（通知のみ）
 
+**実装内容**:
+- `PubSubSubscriber` クラス実装
+- Push Subscriptionエンドポイント (`POST /api/paraclate/pubsub/push`)
+- 直接通知エンドポイント (`POST /api/paraclate/notify`)
+- 通知タイプ: `config_update`, `config_delete`, `disconnect`, `force_sync`
+- TID/FID検証によるセキュリティフィルタリング
+- ConfigSyncService連携による設定同期
+
 **成果物**:
-- Pub/Sub subscriber実装
-- ConfigSyncService連携
+- `src/paraclate_client/pubsub_subscriber.rs` ✅
+- `src/web_api/paraclate_routes.rs` (handle_pubsub_push, handle_direct_notification追加) ✅
 
 **検証方法**:
-- 設定変更通知→同期テスト
+- 設定変更通知→同期テスト ✅
+- Pub/Sub Push形式受信テスト ✅
+- 直接通知受信テスト ✅
 
 ---
 
@@ -240,9 +252,14 @@ CREATE TABLE IF NOT EXISTS paraclate_send_queue (
 | `/api/paraclate/connect` | POST | 接続テスト実行 |
 | `/api/paraclate/config` | GET | 現在の設定取得 |
 | `/api/paraclate/config` | PUT | 設定更新 |
+| `/api/paraclate/queue` | GET | 送信キュー一覧 |
+| `/api/paraclate/queue/process` | POST | キュー手動処理 |
+| `/api/paraclate/pubsub/push` | POST | Pub/Sub Push通知受信 (T4-7) |
+| `/api/paraclate/notify` | POST | 直接通知受信 (T4-7) |
 
 **成果物**:
 - `src/web_api/paraclate_routes.rs`
+- `src/paraclate_client/pubsub_subscriber.rs` (T4-7)
 
 ---
 
@@ -307,3 +324,7 @@ CREATE TABLE IF NOT EXISTS paraclate_send_queue (
 | 日付 | 更新内容 |
 |------|---------|
 | 2026-01-10 | 初版作成 |
+| 2026-01-10 | T4-1,T4-2,T4-4,T4-5,T4-6 COMPLETED |
+| 2026-01-11 | T4-3 COMPLETED（snapshot連携実装）、P0タスク全完了 |
+| 2026-01-11 | T4-7 COMPLETED（Pub/Sub受信フロー実装）、Phase 4全タスク完了 |
+| 2026-01-11 | **Issue #119対応**: FidValidator実装 - テナント-FID所属検証をparaclate_routes, PubSubSubscriberに追加 |

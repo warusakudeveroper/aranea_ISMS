@@ -1,0 +1,101 @@
+{
+  "type": "aranea_ar-is21",
+  "displayName": "Paraclate Inference Server",
+  "description": "AI推論サーバー。カメラスナップショットの物体検出・シーン分析・異常検知を行う",
+  "version": 1,
+  "productType": "021",
+  "productCodes": ["0001"],
+
+  "stateSchema": {
+    "type": "object",
+    "properties": {
+      "serverStatus": {
+        "type": "string",
+        "enum": ["running", "stopped", "error", "maintenance"],
+        "description": "サーバー稼働状態"
+      },
+      "inferenceEngine": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ready", "busy", "error", "initializing"],
+            "description": "推論エンジン状態"
+          },
+          "modelLoaded": { "type": "boolean", "description": "モデルロード状態" },
+          "gpuAvailable": { "type": "boolean", "description": "GPU利用可能" },
+          "gpuMemoryUsedMb": { "type": "integer", "description": "GPU使用メモリ(MB)" }
+        },
+        "required": ["status", "modelLoaded"]
+      },
+      "statistics": {
+        "type": "object",
+        "properties": {
+          "totalInferences": { "type": "integer", "description": "総推論回数" },
+          "successRate": { "type": "number", "minimum": 0, "maximum": 100, "description": "成功率(%)" },
+          "avgLatencyMs": { "type": "integer", "description": "平均推論時間(ms)" },
+          "queueSize": { "type": "integer", "description": "待機キューサイズ" }
+        }
+      },
+      "connectedClients": {
+        "type": "object",
+        "properties": {
+          "is22Count": { "type": "integer", "description": "接続中のIS22数" },
+          "lastRequestAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "required": ["serverStatus", "inferenceEngine"]
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "inference": {
+        "type": "object",
+        "properties": {
+          "maxConcurrent": { "type": "integer", "minimum": 1, "maximum": 8, "default": 2 },
+          "timeoutSec": { "type": "integer", "minimum": 5, "maximum": 120, "default": 30 },
+          "batchSize": { "type": "integer", "minimum": 1, "maximum": 16, "default": 1 },
+          "priorityMode": {
+            "type": "string",
+            "enum": ["fifo", "round_robin", "priority"],
+            "default": "fifo"
+          }
+        }
+      },
+      "model": {
+        "type": "object",
+        "properties": {
+          "detectionThreshold": { "type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.5 },
+          "nmsThreshold": { "type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.4 },
+          "maxDetections": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+        }
+      },
+      "paraclate": {
+        "type": "object",
+        "properties": {
+          "endpoint": { "type": "string", "format": "uri" },
+          "reportIntervalMinutes": { "type": "integer", "minimum": 5, "maximum": 60, "default": 15 }
+        }
+      }
+    }
+  },
+
+  "capabilities": [
+    "object_detection",
+    "scene_analysis",
+    "anomaly_detection",
+    "batch_inference",
+    "gpu_acceleration",
+    "paraclate_reporting"
+  ],
+
+  "semanticTags": [
+    "AI推論",
+    "物体検出",
+    "シーン分析",
+    "異常検知",
+    "画像処理"
+  ]
+}

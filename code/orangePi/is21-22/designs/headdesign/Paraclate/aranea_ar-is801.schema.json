@@ -1,0 +1,108 @@
+{
+  "type": "aranea_ar-is801",
+  "displayName": "Paraclate Camera",
+  "description": "is22 CamServerに接続されるRTSPカメラの仮想araneaDevice表現",
+  "version": 1,
+  "productType": "801",
+  "productCodes": ["0000"],
+
+  "stateSchema": {
+    "type": "object",
+    "properties": {
+      "connectionStatus": {
+        "type": "string",
+        "enum": ["online", "offline", "error", "unknown"],
+        "description": "接続状態"
+      },
+      "lastCapturedAt": {
+        "type": "string",
+        "format": "date-time",
+        "description": "最終キャプチャ時刻"
+      },
+      "lastDetection": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      },
+      "streamHealth": {
+        "type": "object",
+        "properties": {
+          "fps": { "type": "number" },
+          "bitrate": { "type": "integer" },
+          "resolution": { "type": "string", "pattern": "^[0-9]+x[0-9]+$" },
+          "codec": { "type": "string" }
+        }
+      },
+      "errorCount24h": {
+        "type": "integer",
+        "description": "24時間以内のエラー回数"
+      }
+    },
+    "required": ["connectionStatus"]
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "rtsp": {
+        "type": "object",
+        "properties": {
+          "mainStreamUrl": { "type": "string" },
+          "subStreamUrl": { "type": "string" },
+          "username": { "type": "string" },
+          "password": { "type": "string" }
+        },
+        "required": ["mainStreamUrl"]
+      },
+      "inference": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "preset": {
+            "type": "string",
+            "enum": ["detection_general", "detection_person", "detection_vehicle", "motion_only", "disabled"],
+            "default": "detection_general"
+          },
+          "confidenceThreshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 },
+          "customThresholds": {
+            "type": "object",
+            "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      },
+      "context": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "location": { "type": "string" },
+          "purpose": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      },
+      "fitMode": {
+        "type": "string",
+        "enum": ["contain", "cover", "fill"],
+        "default": "contain"
+      }
+    },
+    "required": ["rtsp"]
+  },
+
+  "capabilities": [
+    "rtsp_streaming",
+    "snapshot_capture",
+    "ai_inference",
+    "motion_detection",
+    "onvif_control"
+  ],
+
+  "semanticTags": [
+    "カメラ",
+    "RTSP",
+    "映像監視",
+    "AI検出"
+  ]
+}

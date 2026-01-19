@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/ar-is801ParaclateCamera.json",
+  "title": "ar-is801ParaclateCamera Virtual RTSP Camera",
+  "description": "IS22 ParaclateServer管理下の仮想RTSPカメラデバイス",
+  "type": "object",
+
+  "metadata": {
+    "productType": "801",
+    "productCodes": ["0000", "0001", "0002", "0003", "0004", "0005"],
+    "displayName": "Paraclate Camera",
+    "capabilities": ["camera", "rtsp", "detection", "paraclate"],
+    "semanticTags": ["カメラ", "RTSP", "監視", "AI検出", "Paraclate"],
+    "features": [
+      "RTSP映像ストリーム",
+      "AI物体検出連携",
+      "is22サーバー連携",
+      "検出履歴記録",
+      "サマリーレポート"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["camera"],
+    "properties": {
+      "camera": {
+        "type": "object",
+        "properties": {
+          "connected": {
+            "type": "boolean",
+            "description": "RTSP接続状態"
+          },
+          "streamActive": {
+            "type": "boolean",
+            "description": "ストリームアクティブ状態"
+          },
+          "lastFrame": {
+            "type": "string",
+            "format": "date-time",
+            "description": "最終フレーム取得時刻"
+          },
+          "resolution": {
+            "type": "string",
+            "description": "解像度 (例: 1920x1080)"
+          },
+          "fps": {
+            "type": "number",
+            "description": "フレームレート"
+          }
+        }
+      },
+      "detection": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "検出有効"
+          },
+          "lastDetection": {
+            "type": "string",
+            "format": "date-time",
+            "description": "最終検出時刻"
+          },
+          "detectionCount": {
+            "type": "integer",
+            "description": "本日の検出数"
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "rtsp": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "RTSPストリームURL"
+          },
+          "username": {
+            "type": "string",
+            "description": "RTSP認証ユーザー"
+          },
+          "password": {
+            "type": "string",
+            "description": "RTSP認証パスワード"
+          }
+        }
+      },
+      "detection": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5,
+            "description": "検出閾値"
+          }
+        }
+      },
+      "polling": {
+        "type": "object",
+        "properties": {
+          "intervalMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000,
+            "default": 5000,
+            "description": "ポーリング間隔 (ms)"
+          }
+        }
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "reconnect": {
+        "type": "object",
+        "properties": {},
+        "description": "RTSP再接続"
+      },
+      "snapshot": {
+        "type": "object",
+        "properties": {},
+        "description": "スナップショット取得"
+      }
+    }
+  },
+
+  "defaultCathedralOrder": 4,
+  "defaultPermissions": {
+    "readState": true,
+    "writeConfig": false,
+    "executeCommand": false
+  }
+}

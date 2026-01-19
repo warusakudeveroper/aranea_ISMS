@@ -1,0 +1,109 @@
+{
+  "type": "aranea_ar-is22",
+  "displayName": "Paraclate CamServer",
+  "description": "RTSPカメラ総合管理サーバー。最大30台のカメラを監視・インデックス化・AI推論・通知を行う",
+  "version": 1,
+  "productType": "022",
+  "productCodes": ["0000"],
+
+  "stateSchema": {
+    "type": "object",
+    "properties": {
+      "serverStatus": {
+        "type": "string",
+        "enum": ["running", "stopped", "error", "maintenance"],
+        "description": "サーバー稼働状態"
+      },
+      "cameraStats": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer", "description": "登録カメラ総数" },
+          "online": { "type": "integer", "description": "オンラインカメラ数" },
+          "offline": { "type": "integer", "description": "オフラインカメラ数" },
+          "error": { "type": "integer", "description": "エラー状態カメラ数" }
+        },
+        "required": ["total", "online", "offline"]
+      },
+      "inference": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["idle", "processing", "error", "disabled"]
+          },
+          "queueSize": { "type": "integer" },
+          "lastProcessedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "storage": {
+        "type": "object",
+        "properties": {
+          "usagePercent": { "type": "number", "minimum": 0, "maximum": 100 },
+          "snapshotCount": { "type": "integer" }
+        }
+      },
+      "pollingCycle": {
+        "type": "object",
+        "properties": {
+          "currentCycle": { "type": "integer" },
+          "lastCycleAt": { "type": "string", "format": "date-time" },
+          "avgCycleDurationMs": { "type": "integer" }
+        }
+      }
+    },
+    "required": ["serverStatus", "cameraStats"]
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "polling": {
+        "type": "object",
+        "properties": {
+          "intervalSec": { "type": "integer", "minimum": 5, "maximum": 300, "default": 60 },
+          "timeoutMainSec": { "type": "integer", "minimum": 5, "maximum": 30, "default": 10 },
+          "timeoutSubSec": { "type": "integer", "minimum": 10, "maximum": 60, "default": 20 }
+        }
+      },
+      "inference": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "mode": { "type": "string", "enum": ["all", "differential", "motion_only"], "default": "differential" },
+          "maxConcurrent": { "type": "integer", "minimum": 1, "maximum": 10, "default": 4 }
+        }
+      },
+      "paraclate": {
+        "type": "object",
+        "properties": {
+          "endpoint": { "type": "string", "format": "uri" },
+          "summaryIntervalMinutes": { "type": "integer", "minimum": 15, "maximum": 1440, "default": 60 },
+          "grandSummaryTimes": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
+            "default": ["09:00", "17:00", "21:00"]
+          },
+          "reportDetailLevel": { "type": "string", "enum": ["concise", "standard", "detailed"], "default": "standard" }
+        }
+      }
+    }
+  },
+
+  "capabilities": [
+    "camera_management",
+    "rtsp_capture",
+    "ai_inference",
+    "event_detection",
+    "paraclate_reporting",
+    "go2rtc_streaming",
+    "web_dashboard"
+  ],
+
+  "semanticTags": [
+    "カメラ監視",
+    "AI推論",
+    "イベント検出",
+    "サマリーレポート",
+    "RTSPストリーミング"
+  ]
+}

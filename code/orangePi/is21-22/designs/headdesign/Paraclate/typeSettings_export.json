@@ -4,7 +4,7 @@
   "_created": "2026-01-10",
   "_author": "IS21/22開発ライン",
 
-  "ar-is22CamServer": {
+  "aranea_ar-is22": {
     "displayName": "Paraclate CamServer",
     "description": "RTSPカメラ総合管理サーバー。最大30台のカメラを監視・インデックス化・AI推論・通知を行う",
     "version": 1,
@@ -121,29 +121,12 @@
     ]
   },
 
-  "ar-is801ParaclateCamera": {
+  "aranea_ar-is801": {
     "displayName": "Paraclate Camera",
     "description": "is22 CamServerに接続されるRTSPカメラの仮想araneaDevice表現",
     "version": 1,
     "productType": "801",
-    "productCodes": ["0001", "0010", "0011", "0012", "0020", "0021", "0022", "0030", "0031", "0032", "0040", "0041", "0050", "0096"],
-
-    "productCodeMapping": {
-      "0001": "Generic/Unknown",
-      "0010": "Hikvision",
-      "0011": "Dahua",
-      "0012": "Uniview",
-      "0020": "Axis",
-      "0021": "Hanwha (Samsung)",
-      "0022": "Bosch",
-      "0030": "TP-Link (Tapo)",
-      "0031": "Reolink",
-      "0032": "Amcrest",
-      "0040": "Panasonic",
-      "0041": "Sony",
-      "0050": "EZVIZ",
-      "0096": "ISMS Custom"
-    },
+    "productCodes": ["0000"],
 
     "stateSchema": {
       "type": "object",
