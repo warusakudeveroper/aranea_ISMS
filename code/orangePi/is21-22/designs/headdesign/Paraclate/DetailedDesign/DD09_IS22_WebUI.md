@@ -114,12 +114,14 @@ export interface ParaclateConnectRequest {
 
 /**
  * 接続レスポンス
+ *
+ * バックエンド ConnectResponse (types.rs:372) 準拠
  */
 export interface ParaclateConnectResponse {
-  success: boolean;
   connected: boolean;
-  message: string;
-  latencyMs?: number;
+  endpoint: string;
+  configId: number;
+  error?: string;
 }
 
 /**

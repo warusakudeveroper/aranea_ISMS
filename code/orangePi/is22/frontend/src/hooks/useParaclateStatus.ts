@@ -121,6 +121,9 @@ export function useParaclateStatus(
 
   /**
    * Paraclate APPに接続
+   *
+   * バックエンド ConnectResponse (types.rs:372) 準拠:
+   * { connected: boolean, endpoint: string, configId: number, error?: string }
    */
   const connect = useCallback(async (
     endpoint: string,
@@ -135,12 +138,12 @@ export function useParaclateStatus(
           body: JSON.stringify({ endpoint, fid: targetFid }),
         }
       );
-      const data = await response.json();
+      const data: ParaclateConnectResponse = await response.json();
 
-      if (data.success) {
+      if (data.connected && !data.error) {
         await refetch();
       } else {
-        setError(data.error || data.message || 'Connection failed');
+        setError(data.error ?? 'Connection failed');
       }
 
       return data;
@@ -148,9 +151,10 @@ export function useParaclateStatus(
       const errorMessage = err instanceof Error ? err.message : 'Connection error';
       setError(errorMessage);
       return {
-        success: false,
         connected: false,
-        message: errorMessage,
+        endpoint: endpoint,
+        configId: 0,
+        error: errorMessage,
       };
     }
   }, [tid, refetch]);
@@ -205,13 +209,16 @@ export function useParaclateStatus(
 
   /**
    * 接続テスト（接続せずにエンドポイント疎通確認のみ）
+   *
+   * バックエンド ConnectResponse 準拠
    */
   const testConnection = useCallback(async (): Promise<ParaclateConnectResponse> => {
     if (!status?.endpoint) {
       return {
-        success: false,
         connected: false,
-        message: 'Endpoint not configured',
+        endpoint: '',
+        configId: 0,
+        error: 'Endpoint not configured',
       };
     }
 
