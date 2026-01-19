@@ -1,0 +1,376 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/aranea_ar-is22.json",
+  "title": "aranea_ar-is22 RTSP Camera Management Server",
+  "description": "RTSPカメラ総合管理サーバー - AI推論・Paraclate連携対応",
+  "type": "object",
+
+  "metadata": {
+    "productType": "022",
+    "productCodes": ["0001"],
+    "displayName": "Paraclate Camera Server",
+    "capabilities": ["camera_manager", "rtsp", "onvif", "ptz", "paraclate", "ai_inference"],
+    "semanticTags": ["カメラ管理", "RTSP", "ONVIF", "PTZ", "AI検出", "Paraclate", "サーバー"],
+    "features": [
+      "IPカメラ自動検出・登録",
+      "RTSP/ONVIFストリーム管理",
+      "AI推論サーバー(IS21)連携",
+      "mobes2.0 Paraclate APP連携",
+      "検知ログ・サマリー管理",
+      "PTZ遠隔操作",
+      "WebUI管理画面",
+      "リアルタイムWebSocket通知"
+    ]
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["registration", "cameras"],
+    "properties": {
+      "registration": {
+        "type": "object",
+        "description": "araneaDeviceGate登録状態",
+        "properties": {
+          "registered": {
+            "type": "boolean",
+            "description": "登録済みフラグ"
+          },
+          "lacisId": {
+            "type": ["string", "null"],
+            "description": "デバイスLacisID"
+          },
+          "tid": {
+            "type": ["string", "null"],
+            "description": "テナントID"
+          },
+          "fid": {
+            "type": ["string", "null"],
+            "description": "施設ID"
+          },
+          "cic": {
+            "type": ["string", "null"],
+            "description": "Client Identification Code"
+          },
+          "registeredAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "登録日時"
+          }
+        }
+      },
+      "cameras": {
+        "type": "object",
+        "description": "カメラ管理状態",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "登録カメラ総数"
+          },
+          "online": {
+            "type": "integer",
+            "description": "オンラインカメラ数"
+          },
+          "offline": {
+            "type": "integer",
+            "description": "オフラインカメラ数"
+          },
+          "polling": {
+            "type": "integer",
+            "description": "ポーリング中カメラ数"
+          }
+        }
+      },
+      "scan": {
+        "type": "object",
+        "description": "ネットワークスキャン状態",
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "description": "スキャン実行中"
+          },
+          "lastScanAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "最終スキャン日時"
+          },
+          "devicesFound": {
+            "type": "integer",
+            "description": "検出デバイス数"
+          }
+        }
+      },
+      "paraclate": {
+        "type": "object",
+        "description": "Paraclate連携状態",
+        "properties": {
+          "connectionStatus": {
+            "type": "string",
+            "enum": ["connected", "disconnected", "error"],
+            "description": "接続状態"
+          },
+          "endpoint": {
+            "type": ["string", "null"],
+            "description": "接続先エンドポイント"
+          },
+          "lastSyncAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "最終同期日時"
+          },
+          "queueSize": {
+            "type": "integer",
+            "description": "送信キューサイズ"
+          }
+        }
+      },
+      "inference": {
+        "type": "object",
+        "description": "AI推論連携状態",
+        "properties": {
+          "connected": {
+            "type": "boolean",
+            "description": "IS21接続状態"
+          },
+          "endpoint": {
+            "type": ["string", "null"],
+            "description": "IS21エンドポイント"
+          },
+          "lastInferenceAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "最終推論日時"
+          },
+          "todayDetections": {
+            "type": "integer",
+            "description": "本日の検出数"
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "registration": {
+        "type": "object",
+        "description": "登録設定",
+        "properties": {
+          "gateUrl": {
+            "type": "string",
+            "description": "araneaDeviceGate URL",
+            "default": "https://us-central1-mobesorder.cloudfunctions.net/araneaDeviceGate"
+          }
+        }
+      },
+      "subnets": {
+        "type": "array",
+        "description": "スキャン対象サブネット",
+        "items": {
+          "type": "object",
+          "properties": {
+            "fid": {
+              "type": "string",
+              "description": "施設ID"
+            },
+            "subnet": {
+              "type": "string",
+              "description": "サブネット (CIDR形式)"
+            },
+            "facilityName": {
+              "type": "string",
+              "description": "施設名"
+            }
+          }
+        }
+      },
+      "polling": {
+        "type": "object",
+        "description": "ポーリング設定",
+        "properties": {
+          "intervalSec": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 300,
+            "default": 30,
+            "description": "ポーリング間隔 (秒)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "ポーリング有効"
+          }
+        }
+      },
+      "paraclate": {
+        "type": "object",
+        "description": "Paraclate設定",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "description": "Paraclate APPエンドポイント"
+          },
+          "summaryIntervalMin": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 60,
+            "default": 15,
+            "description": "サマリー送信間隔 (分)"
+          },
+          "retryMaxCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5,
+            "description": "最大リトライ回数"
+          }
+        }
+      },
+      "inference": {
+        "type": "object",
+        "description": "AI推論設定",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "description": "IS21エンドポイント",
+            "default": "http://192.168.3.240:8080"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "推論連携有効"
+          }
+        }
+      },
+      "webui": {
+        "type": "object",
+        "description": "WebUI設定",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 3000,
+            "description": "WebUIポート"
+          }
+        }
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "register": {
+        "type": "object",
+        "description": "araneaDeviceGate登録",
+        "properties": {
+          "tenantPrimaryAuth": {
+            "type": "object",
+            "properties": {
+              "lacisId": { "type": "string" },
+              "userId": { "type": "string" },
+              "cic": { "type": "string" }
+            },
+            "required": ["lacisId", "userId", "cic"]
+          },
+          "tid": { "type": "string" },
+          "fid": { "type": "string" }
+        },
+        "required": ["tenantPrimaryAuth", "tid"]
+      },
+      "clearRegistration": {
+        "type": "object",
+        "description": "登録クリア",
+        "properties": {}
+      },
+      "startScan": {
+        "type": "object",
+        "description": "ネットワークスキャン開始",
+        "properties": {
+          "fid": {
+            "type": "string",
+            "description": "対象施設ID"
+          }
+        }
+      },
+      "approveCamera": {
+        "type": "object",
+        "description": "カメラ登録承認",
+        "properties": {
+          "deviceIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "承認するデバイスID配列"
+          },
+          "forceRegister": {
+            "type": "boolean",
+            "default": false,
+            "description": "強制登録フラグ"
+          }
+        },
+        "required": ["deviceIds"]
+      },
+      "connectParaclate": {
+        "type": "object",
+        "description": "Paraclate接続",
+        "properties": {
+          "endpoint": { "type": "string" },
+          "fid": { "type": "string" }
+        },
+        "required": ["endpoint", "fid"]
+      },
+      "disconnectParaclate": {
+        "type": "object",
+        "description": "Paraclate切断",
+        "properties": {}
+      },
+      "ptzMove": {
+        "type": "object",
+        "description": "PTZ移動",
+        "properties": {
+          "cameraId": { "type": "string" },
+          "direction": {
+            "type": "string",
+            "enum": ["up", "down", "left", "right", "zoom_in", "zoom_out"]
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["continuous", "nudge"],
+            "default": "continuous"
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 5000,
+            "default": 500
+          }
+        },
+        "required": ["cameraId", "direction"]
+      },
+      "ptzStop": {
+        "type": "object",
+        "description": "PTZ停止",
+        "properties": {
+          "cameraId": { "type": "string" }
+        },
+        "required": ["cameraId"]
+      },
+      "ptzHome": {
+        "type": "object",
+        "description": "PTZホームポジション",
+        "properties": {
+          "cameraId": { "type": "string" }
+        },
+        "required": ["cameraId"]
+      }
+    }
+  },
+
+  "defaultCathedralOrder": 2,
+  "defaultPermissions": {
+    "readState": true,
+    "writeConfig": true,
+    "executeCommand": true
+  }
+}
