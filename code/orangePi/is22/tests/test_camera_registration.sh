@@ -35,9 +35,9 @@ else
 fi
 
 SERVER_URL="http://${SERVER_HOST}:${SERVER_PORT}"
-DB_USER="root"
-DB_PASS="mijeos12345@"
-DB_NAME="camserver"
+DB_USER="${CAMSERVER_DB_USER:-root}"
+DB_PASS="${CAMSERVER_DB_PASS:?Error: CAMSERVER_DB_PASS environment variable not set}"
+DB_NAME="${CAMSERVER_DB_NAME:-camserver}"
 
 # Test data configuration - use reserved IP range that won't conflict
 TEST_PREFIX="TEST_"
@@ -372,6 +372,32 @@ verify_camera_fields() {
         log_pass "  ptz_supported: $db_ptz"
     else
         log_fail "  ptz_supported: unexpected value '$db_ptz'"
+    fi
+
+    # Check rtsp_main (CRITICAL: required for streaming)
+    local db_rtsp_main=$(mysql_cmd "SELECT IFNULL(rtsp_main, '') FROM cameras WHERE ip_address='${ip}';")
+    if [ -n "$db_rtsp_main" ]; then
+        log_pass "  rtsp_main: $db_rtsp_main"
+    else
+        # Category B (tapo/vigi with credentials) should have rtsp_main set
+        if [ "$expected_family" = "tapo" ] || [ "$expected_family" = "vigi" ]; then
+            log_fail "  rtsp_main: NOT SET (required for $expected_family)"
+        else
+            log_info "  rtsp_main: (not set - OK for unknown family)"
+        fi
+    fi
+
+    # Check rtsp_sub (CRITICAL: required for preview streaming on Tapo/Vigi)
+    local db_rtsp_sub=$(mysql_cmd "SELECT IFNULL(rtsp_sub, '') FROM cameras WHERE ip_address='${ip}';")
+    if [ -n "$db_rtsp_sub" ]; then
+        log_pass "  rtsp_sub: $db_rtsp_sub"
+    else
+        # Category B (tapo/vigi with credentials) should have rtsp_sub set
+        if [ "$expected_family" = "tapo" ] || [ "$expected_family" = "vigi" ]; then
+            log_fail "  rtsp_sub: NOT SET (required for $expected_family)"
+        else
+            log_info "  rtsp_sub: (not set - OK for unknown family)"
+        fi
     fi
 }
 

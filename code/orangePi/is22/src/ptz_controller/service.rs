@@ -80,11 +80,21 @@ impl PtzService {
                 if request.mode == PtzMode::Nudge {
                     let camera_id_clone = camera_id.to_string();
                     let duration = request.duration_ms;
+                    let config_store = Arc::clone(&self.config_store);
 
                     tokio::spawn(async move {
                         sleep(Duration::from_millis(duration as u64)).await;
-                        // 停止処理（エラーは無視）
-                        let _ = Self::execute_ptz_stop_static(&camera_id_clone).await;
+                        // 停止処理（config_storeを使用して実際のPTZ停止を実行）
+                        if let Err(e) = Self::execute_ptz_stop_with_config(
+                            &camera_id_clone,
+                            &config_store,
+                        ).await {
+                            tracing::warn!(
+                                camera_id = %camera_id_clone,
+                                error = %e,
+                                "Failed to auto-stop PTZ after nudge"
+                            );
+                        }
                     });
                 }
 
@@ -257,13 +267,40 @@ impl PtzService {
         Ok(())
     }
 
-    /// ONVIF PTZ停止実行（静的メソッド - Nudge自動停止用）
-    /// Note: カメラ情報が必要なため、config_storeを渡す必要がある
-    async fn execute_ptz_stop_static(camera_id: &str) -> Result<()> {
-        // 静的メソッドからはカメラ情報を取得できないため、ログのみ
-        // 実際の停止はNudgeモードのduration_ms後に自動的に行われる
-        // （連続移動は指定時間後にカメラ側で停止する）
-        tracing::debug!(camera_id = %camera_id, "PTZ stop (static) - relying on camera timeout");
+    /// ONVIF PTZ停止実行（Nudge自動停止用）
+    ///
+    /// config_storeを受け取り、実際のPTZ停止処理を実行する
+    async fn execute_ptz_stop_with_config(
+        camera_id: &str,
+        config_store: &Arc<ConfigStore>,
+    ) -> Result<()> {
+        // カメラ情報取得
+        let camera = config_store.service().get_camera(camera_id).await?
+            .ok_or_else(|| Error::NotFound(format!("Camera {} not found", camera_id)))?;
+
+        let onvif_endpoint = camera.onvif_endpoint.as_ref()
+            .ok_or_else(|| Error::Validation("ONVIFエンドポイント未設定".to_string()))?;
+        let username = camera.rtsp_username.as_ref()
+            .ok_or_else(|| Error::Validation("RTSPユーザー名未設定".to_string()))?;
+        let password = camera.rtsp_password.as_ref()
+            .ok_or_else(|| Error::Validation("RTSPパスワード未設定".to_string()))?;
+
+        tracing::info!(camera_id = %camera_id, "Executing PTZ auto-stop after nudge");
+
+        match camera.family.to_lowercase().as_str() {
+            "tapo" | "vigi" => {
+                let client = TapoPtzClient::new(onvif_endpoint, username, password);
+                client.stop().await?;
+            }
+            _ => {
+                tracing::debug!(
+                    camera_id = %camera_id,
+                    family = %camera.family,
+                    "PTZ stop not implemented for family, relying on camera timeout"
+                );
+            }
+        }
+
         Ok(())
     }
 

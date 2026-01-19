@@ -23,11 +23,11 @@ set -e
 SERVER_HOST="192.168.125.246"
 SERVER_PORT="3000"
 SERVER_URL="http://${SERVER_HOST}:${SERVER_PORT}"
-SSH_USER="mijeosadmin"
-SSH_PASS="mijeos12345@"
-DB_USER="root"
-DB_PASS="mijeos12345@"
-DB_NAME="camserver"
+SSH_USER="${CAMSERVER_SSH_USER:-mijeosadmin}"
+SSH_PASS="${CAMSERVER_SSH_PASS:?Error: CAMSERVER_SSH_PASS environment variable not set}"
+DB_USER="${CAMSERVER_DB_USER:-root}"
+DB_PASS="${CAMSERVER_DB_PASS:?Error: CAMSERVER_DB_PASS environment variable not set}"
+DB_NAME="${CAMSERVER_DB_NAME:-camserver}"
 
 # Test data configuration - use reserved IP range that won't conflict
 TEST_PREFIX="TEST_"

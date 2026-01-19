@@ -12,12 +12,34 @@ IS22カメラサーバーの統合テストスイート。
 └── test_camera_registration_full.sh  # カメラ登録フルテスト(SSH経由)
 ```
 
+## 事前準備（環境変数設定）
+
+テスト実行前に認証情報を環境変数で設定してください。
+
+```bash
+# .env.exampleをコピーして編集
+cp .env.example .env
+vi .env  # 実際の値を設定
+
+# 環境変数を読み込み
+source .env
+```
+
+**必須環境変数:**
+- `CAMSERVER_DB_PASS` - データベースパスワード
+- `CAMSERVER_SSH_PASS` - SSH接続パスワード（リモート実行時）
+
+**Note:** `.env` ファイルは機密情報を含むため、gitにコミットしないでください。
+
 ## テスト実行方法
 
 ### サーバー上での実行（推奨）
 
 ```bash
 cd /opt/is22/tests
+
+# 環境変数設定
+export CAMSERVER_DB_PASS="your_password_here"
 
 # 全テスト実行
 ./run_all_tests.sh
@@ -32,8 +54,8 @@ cd /opt/is22/tests
 ### リモートからの実行
 
 ```bash
-# SSH経由での実行
-ssh mijeosadmin@192.168.125.246 "cd /opt/is22/tests && ./run_all_tests.sh"
+# SSH経由での実行（環境変数を渡す）
+ssh mijeosadmin@192.168.125.246 "cd /opt/is22/tests && CAMSERVER_DB_PASS='your_password' ./run_all_tests.sh"
 ```
 
 ## テストスイート一覧
@@ -63,6 +85,8 @@ ssh mijeosadmin@192.168.125.246 "cd /opt/is22/tests && ./run_all_tests.sh"
 - `lacis_id` - MACベースのLacisID
 - `onvif_endpoint` - ONVIFエンドポイント
 - `ptz_supported` - PTZサポート（自動検出）
+- `rtsp_main` - メインストリームURL（**重要**: tapo/vigiでは必須）
+- `rtsp_sub` - サブストリームURL（**重要**: tapo/vigiではプレビュー用に必須）
 
 **テストデータ:**
 - IPレンジ: `192.168.99.x`（本番と競合しない）
@@ -110,8 +134,11 @@ fi
 ### MySQL接続エラー
 
 ```bash
-# パスワード確認
-mysql -u root -p'mijeos12345@' camserver -e "SELECT 1"
+# 環境変数確認
+echo $CAMSERVER_DB_PASS
+
+# 接続テスト
+mysql -u root -p"$CAMSERVER_DB_PASS" camserver -e "SELECT 1"
 ```
 
 ### APIサーバー接続エラー
@@ -128,7 +155,7 @@ sudo journalctl -u is22 -f
 
 ```bash
 # 手動クリーンアップ
-mysql -u root -p'mijeos12345@' camserver -e "
+mysql -u root -p"$CAMSERVER_DB_PASS" camserver -e "
 DELETE FROM cameras WHERE ip_address LIKE '192.168.99.%';
 DELETE FROM ipcamscan_devices WHERE ip LIKE '192.168.99.%';
 "

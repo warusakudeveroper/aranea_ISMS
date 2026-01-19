@@ -7,10 +7,12 @@
 
 /**
  * Paraclate接続状態（/api/paraclate/status レスポンス）
+ *
+ * バックエンド StatusResponse (types.rs:383) 準拠
  */
 export interface ParaclateStatus {
   connected: boolean;
-  connectionStatus: 'connected' | 'disconnected' | 'connecting' | 'error';
+  connectionStatus: 'connected' | 'disconnected' | 'error';  // バックエンドConnectionStatus準拠（'connecting'は存在しない）
   endpoint: string | null;
   lastSyncAt: string | null;       // ISO8601
   lastError: string | null;
@@ -55,12 +57,14 @@ export interface ParaclateConnectRequest {
 
 /**
  * 接続レスポンス
+ *
+ * バックエンド ConnectResponse (types.rs:372) 準拠
  */
 export interface ParaclateConnectResponse {
-  success: boolean;
   connected: boolean;
-  message: string;
-  latencyMs?: number;
+  endpoint: string;
+  configId: number;
+  error?: string;
 }
 
 /**
@@ -76,25 +80,40 @@ export interface ParaclateConfigUpdateRequest {
 
 /**
  * 送信キューアイテム
+ *
+ * バックエンド QueueItemResponse (types.rs:465) 準拠
  */
 export interface ParaclateSendQueueItem {
   queueId: number;
-  tid: string;
-  fid: string;
   payloadType: 'summary' | 'grand_summary' | 'event' | 'emergency';
-  status: 'pending' | 'sending' | 'sent' | 'failed';
+  referenceId: number | null;
+  status: 'pending' | 'sending' | 'sent' | 'failed' | 'skipped';  // バックエンドQueueStatus準拠（'skipped'追加）
   retryCount: number;
+  nextRetryAt: string | null;
+  lastError: string | null;
   createdAt: string;
   sentAt: string | null;
-  lastError: string | null;
+}
+
+/**
+ * キュー統計
+ *
+ * バックエンド QueueStats (types.rs:398) 準拠
+ */
+export interface ParaclateQueueStats {
+  pending: number;
+  sending: number;
+  failed: number;
+  sentToday: number;
 }
 
 /**
  * キュー一覧レスポンス
+ *
+ * バックエンド QueueListResponse (types.rs:456) 準拠
  */
 export interface ParaclateQueueListResponse {
   items: ParaclateSendQueueItem[];
   total: number;
-  pendingCount: number;
-  failedCount: number;
+  stats: ParaclateQueueStats;
 }
