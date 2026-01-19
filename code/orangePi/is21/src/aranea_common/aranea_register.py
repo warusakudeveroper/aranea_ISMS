@@ -48,7 +48,8 @@ class AraneaRegister:
     """
 
     # デフォルトのGate URL（本番環境）
-    DEFAULT_GATE_URL = "https://us-central1-metatron-one.cloudfunctions.net/araneaDeviceGate"
+    # 注意: araneaDeviceGateはus-central1のみ (ESP32_BEST_PRACTICES.md参照)
+    DEFAULT_GATE_URL = "https://us-central1-mobesorder.cloudfunctions.net/araneaDeviceGate"
 
     # 設定ファイルのキー
     KEY_CIC = "cic_code"

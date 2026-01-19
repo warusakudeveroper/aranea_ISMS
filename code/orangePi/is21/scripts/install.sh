@@ -48,7 +48,7 @@ mkdir -p /opt/is21/logs
 # Pythonパッケージインストール
 log_info "Pythonパッケージインストール..."
 pip3 install --upgrade pip
-pip3 install fastapi uvicorn[standard] pydantic numpy opencv-python-headless python-multipart
+pip3 install fastapi uvicorn[standard] pydantic numpy opencv-python-headless python-multipart aiomqtt httpx
 
 # ソースコードコピー
 log_info "ソースコードコピー..."

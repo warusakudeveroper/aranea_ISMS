@@ -14,7 +14,8 @@ v1.6.0: 設計図書準拠 全属性対応版
 """
 import logging
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any, Tuple
 import numpy as np
@@ -77,15 +78,13 @@ STRIDES = [8, 16, 32]
 # is21 デバイス設定
 PRODUCT_TYPE = "021"
 PRODUCT_CODE = "0001"
-DEVICE_TYPE = "ar-is21"
+DEVICE_TYPE = "aranea_ar-is21"
 DEVICE_NAME = "camimageEdge AI"
 FIRMWARE_VERSION = "1.8.0"  # camera_context対応 (excluded_objects, location_type, busy/quiet_hours)
 
-# テナント設定（市山水産株式会社）
-DEFAULT_TID = "T2025120608261484221"
-TENANT_LACIS_ID = "12767487939173857894"
-TENANT_EMAIL = "info+ichiyama@neki.tech"
-TENANT_CIC = "263238"
+# システムテナント設定（ParaclateEdge用デフォルト）
+# 実際の登録時はAPI経由で指定する
+DEFAULT_TID = "T9999999999999999999"
 
 # COCO クラス名（YOLOv5）
 COCO_CLASSES = [
@@ -152,6 +151,20 @@ COLOR_RANGES = {
 
 # ===== グローバル変数 =====
 app = FastAPI(title="is21 Inference Server", version="1.6.1")
+
+# === AraneaWebUI 静的ファイル配信 ===
+FRONTEND_DIR = "/opt/is21/frontend/dist"
+if os.path.exists(FRONTEND_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="static")
+
+@app.get("/")
+async def serve_root():
+    """AraneaWebUI SPA root"""
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return JSONResponse({"error": "Frontend not deployed", "hint": "Deploy frontend to /opt/is21/frontend/dist"})
+
 rknn_yolo: Optional[RKNNLite] = None
 par_inference: Optional[PARInference] = None
 start_time = time.time()
@@ -1067,22 +1080,21 @@ def init_par():
 
 
 def init_aranea_device():
+    """
+    デバイス初期化
+    テナントプライマリ認証はCloud tabからのアクティベート時に動的に設定される
+    """
     config_manager.begin("is21")
     lacis_id = lacis_generator.generate()
     logger.info(f"Device lacisId: {lacis_id}")
     logger.info(f"Device MAC: {lacis_generator.get_mac_formatted()}")
 
-    tenant_auth = TenantPrimaryAuth(
-        lacis_id=TENANT_LACIS_ID,
-        user_id=TENANT_EMAIL,
-        cic=TENANT_CIC
-    )
-    aranea_register.set_tenant_primary(tenant_auth)
-
+    # 登録状態を確認（テナント認証は/api/cloud/activateで動的に設定）
     if aranea_register.is_registered():
         logger.info(f"Device registered: CIC={aranea_register.get_saved_cic()}")
+        logger.info(f"TID: {aranea_register.get_saved_tid()}")
     else:
-        logger.info("Device not registered yet")
+        logger.info("Device not registered - use WebUI Cloud tab to activate")
 
 
 # ===== YOLO後処理 =====
@@ -1507,12 +1519,12 @@ def aggregate_tags(
     bboxes: List[Dict],
     par_results: List[Dict],
     image: np.ndarray
-) -> Tuple[List[str], List[Dict]]:
+) -> Tuple[List[str], List[Dict], List[Dict]]:
     """
-    全検出結果からschema.jsonタグを集約 (v1.7.0 人物特徴強化版)
+    全検出結果からschema.jsonタグを集約 (v1.7.0 人物特徴強化版, DD19車両詳細追加)
 
     Returns:
-        (tags, person_details) - タグリストと人物詳細情報
+        (tags, person_details, vehicle_details) - タグリストと人物詳細情報と車両詳細情報
     """
     tags = set()
     person_details = []
@@ -1612,12 +1624,53 @@ def aggregate_tags(
         person_info["meta"] = par_result.get('meta', {})
         person_details.append(person_info)
 
-    # 車両の色分析
+    # 車両の詳細分析 (DD19対応: vehicle_details追加)
     vehicle_bboxes = [b for b in bboxes if b["label"] in ["car", "truck", "bus", "motorcycle"]]
-    for vbbox in vehicle_bboxes[:3]:  # 最大3台
+    vehicle_details = []
+    for i, vbbox in enumerate(vehicle_bboxes[:5]):  # 最大5台
+        vehicle_info = {"index": i}
+
+        # 車両タイプ
+        vehicle_type = vbbox["label"]
+        vehicle_info["vehicle_type"] = vehicle_type
+        tags.add(f"vehicle_type.{vehicle_type}")
+
+        # 車両の色分析
         v_color, v_conf = analyze_vehicle_color(image, vbbox)
         if v_color:
             tags.add(f"vehicle_color.{v_color}")
+            vehicle_info["color"] = {"color": v_color, "confidence": v_conf}
+
+        # 車両サイズ推定（bbox面積から）
+        h, w = image.shape[:2]
+        bbox_w = (vbbox["x2"] - vbbox["x1"]) * w
+        bbox_h = (vbbox["y2"] - vbbox["y1"]) * h
+        bbox_area = bbox_w * bbox_h
+        image_area = h * w
+        size_ratio = bbox_area / image_area if image_area > 0 else 0
+
+        if size_ratio > 0.3:
+            vehicle_info["size_category"] = "large"
+            tags.add("vehicle_size.large")
+        elif size_ratio > 0.1:
+            vehicle_info["size_category"] = "medium"
+            tags.add("vehicle_size.medium")
+        else:
+            vehicle_info["size_category"] = "small"
+            tags.add("vehicle_size.small")
+
+        # confidence
+        vehicle_info["confidence"] = vbbox.get("conf", 0.0)
+
+        # 位置情報（正規化座標）
+        vehicle_info["position"] = {
+            "x1": vbbox["x1"],
+            "y1": vbbox["y1"],
+            "x2": vbbox["x2"],
+            "y2": vbbox["y2"]
+        }
+
+        vehicle_details.append(vehicle_info)
 
     # 画像品質タグ
     quality_tags = analyze_image_quality(image)
@@ -1629,7 +1682,7 @@ def aggregate_tags(
     inference_stats["color"]["total_count"] += 1
     inference_stats["color"]["total_ms"] += color_ms
 
-    return list(tags), person_details
+    return list(tags), person_details, vehicle_details
 
 
 # ===== エンドポイント =====
@@ -1707,12 +1760,64 @@ async def api_hardware_summary():
     return hardware_info.get_summary()
 
 
+class TenantPrimaryRequest(BaseModel):
+    lacis_id: str
+    user_id: str
+    cic: str
+
+
+class CloudActivateRequest(BaseModel):
+    tid: str
+    tenant_primary: TenantPrimaryRequest
+
+
 class RegisterRequest(BaseModel):
     tid: Optional[str] = None
 
 
+@app.post("/api/cloud/activate")
+async def api_cloud_activate(req: CloudActivateRequest):
+    """
+    AraneaWebUI互換: Cloud tabからのアクティベーション
+    テナントプライマリ認証を動的に受け付ける
+    """
+    # テナントプライマリ認証を設定
+    tenant_auth = TenantPrimaryAuth(
+        lacis_id=req.tenant_primary.lacis_id,
+        user_id=req.tenant_primary.user_id,
+        cic=req.tenant_primary.cic
+    )
+    aranea_register.set_tenant_primary(tenant_auth)
+
+    lacis_id = lacis_generator.generate()
+    mac = lacis_generator.get_primary_mac_hex()
+
+    result = aranea_register.register_device(
+        tid=req.tid,
+        device_type=DEVICE_TYPE,
+        lacis_id=lacis_id,
+        mac_address=mac,
+        product_type=PRODUCT_TYPE,
+        product_code=PRODUCT_CODE
+    )
+
+    if result.ok:
+        # TIDを設定に保存
+        config_manager.set_string("tid", req.tid)
+        return {
+            "ok": True,
+            "cic_code": result.cic_code,
+            "lacis_id": lacis_id,
+            "state_endpoint": result.state_endpoint,
+            "mqtt_endpoint": result.mqtt_endpoint
+        }
+    else:
+        return {"ok": False, "error": result.error}
+
+
 @app.post("/api/register")
 async def api_register(req: RegisterRequest = None):
+    """レガシー互換: 既存のテナント認証で登録"""
     tid = DEFAULT_TID
     if req and req.tid:
         tid = req.tid
@@ -1771,6 +1876,91 @@ async def api_set_config(data: ConfigUpdate):
         config_manager.set_string(data.key, str(data.value))
 
     return {"ok": True, "key": data.key}
+
+
+# ===== AraneaWebUI互換API =====
+
+class NetworkSaveRequest(BaseModel):
+    hostname: Optional[str] = None
+    ntp_server: Optional[str] = None
+
+
+@app.post("/api/network/save")
+async def api_network_save(data: NetworkSaveRequest):
+    """AraneaWebUI互換: Network設定保存"""
+    if data.hostname:
+        config_manager.set_string("hostname", data.hostname)
+    if data.ntp_server:
+        config_manager.set_string("ntp_server", data.ntp_server)
+    return {"ok": True}
+
+
+class TenantSaveRequest(BaseModel):
+    fid: Optional[str] = None
+    device_name: Optional[str] = None
+
+
+@app.post("/api/tenant/save")
+async def api_tenant_save(data: TenantSaveRequest):
+    """AraneaWebUI互換: Tenant設定保存"""
+    if data.fid:
+        config_manager.set_string("fid", data.fid)
+    if data.device_name:
+        config_manager.set_string("device_name", data.device_name)
+    return {"ok": True}
+
+
+@app.post("/api/system/reboot")
+async def api_system_reboot():
+    """AraneaWebUI互換: システム再起動"""
+    import subprocess
+    import asyncio
+
+    async def do_reboot():
+        await asyncio.sleep(2)
+        subprocess.run(["sudo", "reboot"], check=False)
+
+    asyncio.create_task(do_reboot())
+    return {"ok": True, "message": "Rebooting in 2 seconds"}
+
+
+@app.post("/api/system/restart-service")
+async def api_system_restart_service():
+    """IS21サービス再起動"""
+    import subprocess
+    import asyncio
+
+    async def do_restart():
+        await asyncio.sleep(1)
+        subprocess.run(["sudo", "systemctl", "restart", "is21-infer"], check=False)
+
+    asyncio.create_task(do_restart())
+    return {"ok": True, "message": "Service restarting"}
+
+
+class InferenceConfigRequest(BaseModel):
+    conf_threshold: Optional[float] = None
+    nms_threshold: Optional[float] = None
+    par_enabled: Optional[bool] = None
+
+
+@app.post("/api/inference/config")
+async def api_inference_config(data: InferenceConfigRequest):
+    """推論設定変更"""
+    global CONF_THRESHOLD, NMS_THRESHOLD
+
+    if data.conf_threshold is not None:
+        CONF_THRESHOLD = data.conf_threshold
+        config_manager.set_string("conf_threshold", str(data.conf_threshold))
+
+    if data.nms_threshold is not None:
+        NMS_THRESHOLD = data.nms_threshold
+        config_manager.set_string("nms_threshold", str(data.nms_threshold))
+
+    if data.par_enabled is not None:
+        config_manager.set_bool("par_enabled", data.par_enabled)
+
+    return {"ok": True}
 
 
 @app.get("/healthz")
@@ -1935,8 +2125,8 @@ async def analyze(
     person_bboxes = [b for b in bboxes if b["label"] == "person"]
     par_results, par_ms = run_par_inference(image, person_bboxes, effective_par)
 
-    # Stage 3: タグ集約 (v1.7.0 人物特徴強化版)
-    tags, person_details = aggregate_tags(bboxes, par_results, image)
+    # Stage 3: タグ集約 (v1.7.0 人物特徴強化版, DD19車両詳細追加)
+    tags, person_details, vehicle_details = aggregate_tags(bboxes, par_results, image)
 
     total_ms = int((time.time() - total_start) * 1000)
 
@@ -2043,6 +2233,7 @@ async def analyze(
         "count_hint": person_count,
         "bboxes": bboxes if return_bboxes else [],
         "person_details": person_details,
+        "vehicle_details": vehicle_details,  # DD19対応: 車両詳細追加
         "suspicious": suspicious_result,
         # === v1.9 frame_diff結果 (Issue #62) ===
         "frame_diff": frame_diff_result,

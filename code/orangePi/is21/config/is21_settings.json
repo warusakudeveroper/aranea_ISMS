@@ -1,0 +1,75 @@
+{
+  "device": {
+    "name": "IS21-Inference-001",
+    "location": "",
+    "description": "Paraclate Inference Server"
+  },
+  "network": {
+    "wifi": {
+      "enabled": false,
+      "ssid": "",
+      "password": ""
+    },
+    "ntp": {
+      "enabled": true,
+      "servers": ["ntp.nict.jp", "time.google.com"]
+    }
+  },
+  "inference": {
+    "max_concurrent": 2,
+    "timeout_sec": 30,
+    "batch_size": 1,
+    "priority_mode": "fifo",
+    "model": {
+      "default": "yolov8n.rknn",
+      "detection_threshold": 0.5,
+      "nms_threshold": 0.4,
+      "max_detections": 20
+    },
+    "par": {
+      "enabled": true,
+      "model": "par_model.rknn",
+      "min_person_height": 50
+    }
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 9000,
+    "cors_origins": ["*"],
+    "docs_enabled": true
+  },
+  "mqtt": {
+    "enabled": false,
+    "broker_url": "",
+    "base_topic": "aranea",
+    "username": "",
+    "password": "",
+    "use_tls": true,
+    "keepalive_sec": 60,
+    "reconnect_interval_sec": 30
+  },
+  "state_report": {
+    "enabled": true,
+    "interval_sec": 300,
+    "retry_count": 3
+  },
+  "paraclate": {
+    "enabled": true,
+    "endpoint": "",
+    "report_interval_minutes": 15,
+    "grand_summary_times": ["09:00", "17:00", "21:00"]
+  },
+  "tenant": {
+    "tid": "",
+    "primary_lacis_id": "",
+    "primary_user_id": "",
+    "primary_cic": ""
+  },
+  "logging": {
+    "level": "INFO",
+    "file_enabled": true,
+    "file_path": "/opt/is21/logs/is21.log",
+    "max_size_mb": 100,
+    "backup_count": 5
+  }
+}
