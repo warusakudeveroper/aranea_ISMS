@@ -39,7 +39,7 @@ for d, cnt in Counter(none_domains).most_common(50):
 # tam (192.168.125.248)
 # 同様のコマンドでIPを変更
 
-# to (192.168.126.248)
+# to (192.168.126.249)
 # 同様のコマンドでIPを変更
 ```
 
@@ -209,7 +209,7 @@ Password: mijeos12345@
 |----------|------------|
 | akb | 192.168.3.250 |
 | tam | 192.168.125.248 |
-| to | 192.168.126.248 |
+| to | 192.168.126.249 |
 
 ### 5.3 デプロイコマンド
 
@@ -224,7 +224,7 @@ SSHPASS='mijeos12345@' sshpass -e scp -o StrictHostKeyChecking=no -o ConnectTime
 SSHPASS='mijeos12345@' sshpass -e scp -o StrictHostKeyChecking=no -o ConnectTimeout=15 "$DICT_PATH" mijeosadmin@192.168.125.248:/opt/is20s/data/
 
 # to
-SSHPASS='mijeos12345@' sshpass -e scp -o StrictHostKeyChecking=no -o ConnectTimeout=20 "$DICT_PATH" mijeosadmin@192.168.126.248:/opt/is20s/data/
+SSHPASS='mijeos12345@' sshpass -e scp -o StrictHostKeyChecking=no -o ConnectTimeout=20 "$DICT_PATH" mijeosadmin@192.168.126.249:/opt/is20s/data/
 ```
 
 ### 5.4 サービス再起動（ランタイム辞書リセット付き）
@@ -237,7 +237,7 @@ SSHPASS='mijeos12345@' sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTime
 SSHPASS='mijeos12345@' sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 mijeosadmin@192.168.125.248 "echo 'mijeos12345@' | sudo -S rm -f /var/lib/is20s/domain_services.json && echo 'mijeos12345@' | sudo -S systemctl restart is20s && echo 'tam: restarted'"
 
 # to
-SSHPASS='mijeos12345@' sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 mijeosadmin@192.168.126.248 "echo 'mijeos12345@' | sudo -S rm -f /var/lib/is20s/domain_services.json && echo 'mijeos12345@' | sudo -S systemctl restart is20s && echo 'to: restarted'"
+SSHPASS='mijeos12345@' sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 mijeosadmin@192.168.126.249 "echo 'mijeos12345@' | sudo -S rm -f /var/lib/is20s/domain_services.json && echo 'mijeos12345@' | sudo -S systemctl restart is20s && echo 'to: restarted'"
 ```
 
 **重要**: `/var/lib/is20s/domain_services.json`（ランタイム辞書）を削除しないと、新しいパターンが反映されない。

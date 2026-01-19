@@ -21,7 +21,7 @@ RUNTIME_PATH="/var/lib/is20s/domain_services.json"
 # デバイス情報
 AKB="192.168.3.250"
 TAM="192.168.125.248"
-TO="192.168.126.248"
+TO="192.168.126.249"
 PASS="mijeos12345@"
 
 # オプション解析
