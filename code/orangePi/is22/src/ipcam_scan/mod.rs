@@ -17,6 +17,8 @@ mod utils;
 pub use job::*;
 pub use types::*;
 
+use crate::access_absorber::AccessFamily;
+use crate::config_store::ConfigStore;
 use crate::error::{Error, Result};
 use scanner::{
     arp_scan_subnet, calculate_score, discover_host, get_local_ip, is_local_subnet, lookup_oui,
@@ -45,16 +47,19 @@ pub struct IpcamScan {
     running_job_id: Arc<RwLock<Option<Uuid>>>,
     /// Abort flags for jobs
     abort_flags: Arc<RwLock<HashMap<Uuid, bool>>>,
+    /// ConfigStore for cache refresh after IP updates
+    config_store: Arc<ConfigStore>,
 }
 
 impl IpcamScan {
-    /// Create new IpcamScan with DB pool
-    pub fn new(pool: MySqlPool) -> Self {
+    /// Create new IpcamScan with DB pool and ConfigStore
+    pub fn new(pool: MySqlPool, config_store: Arc<ConfigStore>) -> Self {
         Self {
             pool,
             jobs: Arc::new(RwLock::new(HashMap::new())),
             running_job_id: Arc::new(RwLock::new(None)),
             abort_flags: Arc::new(RwLock::new(HashMap::new())),
+            config_store,
         }
     }
 
@@ -154,6 +159,7 @@ impl IpcamScan {
             ports: request.ports.unwrap_or_else(default_ports),
             timeout_ms: request.timeout_ms.unwrap_or(3000),
             concurrency: request.concurrency.unwrap_or(10),
+            brute_force: request.brute_force,
             status: JobStatus::Queued,
             started_at: None,
             ended_at: None,
@@ -336,7 +342,7 @@ impl IpcamScan {
         }
 
         // Get job configuration
-        let (targets, ports, timeout_ms, concurrency) = {
+        let (targets, ports, timeout_ms, concurrency, brute_force) = {
             let mut jobs = self.jobs.write().await;
             let job = match jobs.get_mut(&job_id) {
                 Some(j) => j,
@@ -350,12 +356,13 @@ impl IpcamScan {
             job.started_at = Some(chrono::Utc::now());
             job.current_phase = Some("Stage 0: 準備".to_string());
             job.progress_percent = Some(0);
-            job.logs.push(ScanLogEntry::new("*", ScanLogEventType::Info, &format!("スキャン開始: targets={:?}", job.targets)));
+            job.logs.push(ScanLogEntry::new("*", ScanLogEventType::Info, &format!("スキャン開始: targets={:?}, brute_force={}", job.targets, job.brute_force)));
             (
                 job.targets.clone(),
                 job.ports.clone(),
                 job.timeout_ms,
                 job.concurrency,
+                job.brute_force,
             )
         };
 
@@ -1045,9 +1052,16 @@ impl IpcamScan {
 
             for device in devices {
                 // Only try credentials on devices that look like cameras
-                let should_try = match device.detection.device_type {
-                    DeviceType::CameraConfirmed | DeviceType::CameraLikely | DeviceType::CameraPossible => true,
-                    _ => false,
+                // If brute_force mode is ON, try on all devices regardless of device type
+                let should_try = if brute_force {
+                    // Brute Force Mode: 全デバイスに認証試行
+                    true
+                } else {
+                    // 通常モード: カメラの可能性が高いデバイスのみ
+                    match device.detection.device_type {
+                        DeviceType::CameraConfirmed | DeviceType::CameraLikely | DeviceType::CameraPossible => true,
+                        _ => false,
+                    }
                 };
 
                 if !should_try {
@@ -1343,6 +1357,16 @@ impl IpcamScan {
             "Scan job completed"
         );
 
+        // AUTO-UPDATE: スキャン完了後にMAC照合でカメラIPを自動更新
+        // VPN越しデバイスも含めてONVIF/ARPで取得したMACと照合
+        let updated_count = self.sync_camera_ips_by_mac().await;
+        if updated_count > 0 {
+            tracing::info!(
+                updated_count = updated_count,
+                "Camera IPs auto-updated by MAC matching after scan"
+            );
+        }
+
         // Cleanup job state on successful completion
         self.cleanup_job_state(&job_id).await;
 
@@ -1434,8 +1458,33 @@ impl IpcamScan {
                         None
                     };
 
-                    let (detail, new_ip) = if let Some(ref ip) = stray_child {
-                        (DeviceCategoryDetail::StrayChild, Some(ip.clone()))
+                    let (detail, new_ip) = if let Some(ref new_ip_str) = stray_child {
+                        // AUTO-UPDATE: MAC照合でIP変更を検出 → カメラのIPを自動更新
+                        tracing::info!(
+                            camera_id = %camera_id,
+                            camera_name = %name,
+                            old_ip = %ip_address,
+                            new_ip = %new_ip_str,
+                            mac = ?mac_address,
+                            "StrayChild detected - auto-updating camera IP"
+                        );
+
+                        // カメラのIPアドレスとRTSP URLを更新
+                        if let Err(e) = self.update_camera_ip(&camera_id, new_ip_str, mac_address.as_deref()).await {
+                            tracing::error!(
+                                camera_id = %camera_id,
+                                error = %e,
+                                "Failed to auto-update camera IP"
+                            );
+                        } else {
+                            tracing::info!(
+                                camera_id = %camera_id,
+                                new_ip = %new_ip_str,
+                                "Camera IP auto-updated successfully"
+                            );
+                        }
+
+                        (DeviceCategoryDetail::StrayChild, Some(new_ip_str.clone()))
                     } else {
                         (DeviceCategoryDetail::LostConnection, None)
                     };
@@ -1459,7 +1508,7 @@ impl IpcamScan {
     /// Get devices with category enrichment (#82 T2-8)
     ///
     /// Returns scanned devices with:
-    /// - Category A: Matched to registered camera (IP match)
+    /// - Category A: Matched to registered camera (IP match or MAC match)
     /// - Category F: Added for lost cameras (not found in scan)
     pub async fn list_devices_with_categories(
         &self,
@@ -1469,53 +1518,101 @@ impl IpcamScan {
         let mut devices = self.list_devices(filter.clone()).await;
 
         // Get registered cameras for Category A matching
-        let registered: Vec<(String, String, String)> = sqlx::query_as(
-            "SELECT camera_id, name, ip_address FROM cameras WHERE enabled = 1"
+        // 登録済みカメラ定義: lacis_idがaraneaDeviceGateに登録済み（CIC受領済み）
+        // SSoT: lacis_id (MACは lacis_id の位置4-15から抽出)
+        let registered: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT camera_id, name, ip_address, lacis_id FROM cameras \
+             WHERE enabled = 1 AND lacis_id IS NOT NULL AND lacis_id != ''"
         )
         .fetch_all(&self.pool)
         .await
         .unwrap_or_default();
 
+        // Build IP-to-camera mapping (登録済みカメラのみ)
         let registered_ips: HashMap<String, (String, String)> = registered
-            .into_iter()
-            .map(|(id, name, ip)| (ip, (id, name)))
+            .iter()
+            .map(|(id, name, ip, _)| (ip.clone(), (id.clone(), name.clone())))
+            .collect();
+
+        // Build MAC-to-camera mapping from lacis_id (位置4-15がMAC)
+        // lacis_id形式: [Prefix=1][ProductType=3][MAC=12][ProductCode=4] = 20文字
+        // 例: 3801D807B653473F0001 → MAC = D807B653473F
+        let registered_macs: HashMap<String, (String, String)> = registered
+            .iter()
+            .filter_map(|(id, name, _, lacis_id)| {
+                lacis_id.as_ref().and_then(|lid| {
+                    if lid.len() >= 16 {
+                        // Extract MAC from lacis_id positions 4-15 (0-indexed)
+                        let mac_from_lacis = &lid[4..16];
+                        Some((mac_from_lacis.to_uppercase(), (id.clone(), name.clone())))
+                    } else {
+                        None
+                    }
+                })
+            })
             .collect();
 
         // Enrich devices with registered camera info (Category A)
+        // Match by IP first, then by MAC
         for device in &mut devices {
+            // Try IP match first
             if let Some((camera_id, camera_name)) = registered_ips.get(&device.ip) {
                 device.category = DeviceCategory::A;
                 device.category_detail = DeviceCategoryDetail::Registered;
                 device.registered_camera_id = Some(camera_id.clone());
                 device.registered_camera_name = Some(camera_name.clone());
             }
+            // If no IP match, try MAC match (for StrayChild detection)
+            else if let Some(ref mac) = device.mac {
+                let normalized_mac = mac.to_uppercase().replace(":", "").replace("-", "");
+                if let Some((camera_id, camera_name)) = registered_macs.get(&normalized_mac) {
+                    device.category = DeviceCategory::A;
+                    device.category_detail = DeviceCategoryDetail::StrayChild;
+                    device.registered_camera_id = Some(camera_id.clone());
+                    device.registered_camera_name = Some(camera_name.clone());
+                    tracing::debug!(
+                        device_ip = %device.ip,
+                        mac = %mac,
+                        camera_id = %camera_id,
+                        "MAC match found - marking as StrayChild (IP may have changed)"
+                    );
+                }
+            }
         }
 
         // Add lost cameras as Category F if requested
+        // 登録済みカメラ（lacis_id持ち）のみ対象
         if include_lost {
             // Find cameras in filter subnet that are not in devices
             if let Some(ref subnet_filter) = filter.subnet {
                 let device_ips: std::collections::HashSet<String> =
                     devices.iter().map(|d| d.ip.clone()).collect();
 
-                // Get registered cameras in this subnet
-                let subnet_cameras: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
-                    "SELECT camera_id, name, ip_address, mac_address FROM cameras \
-                     WHERE enabled = 1 AND ip_address LIKE ?"
+                // Get registered cameras in this subnet (lacis_id必須)
+                let subnet_cameras: Vec<(String, String, String, String)> = sqlx::query_as(
+                    "SELECT camera_id, name, ip_address, lacis_id FROM cameras \
+                     WHERE enabled = 1 AND lacis_id IS NOT NULL AND lacis_id != '' \
+                     AND ip_address LIKE ?"
                 )
                 .bind(format!("{}%", subnet_filter))
                 .fetch_all(&self.pool)
                 .await
                 .unwrap_or_default();
 
-                for (camera_id, camera_name, ip_address, mac_address) in subnet_cameras {
+                for (camera_id, camera_name, ip_address, lacis_id) in subnet_cameras {
                     if !device_ips.contains(&ip_address) {
+                        // lacis_idからMAC抽出（位置4-15）
+                        let mac_from_lacis = if lacis_id.len() >= 16 {
+                            Some(lacis_id[4..16].to_uppercase())
+                        } else {
+                            None
+                        };
                         // This camera is not in the scan results - Category F
                         devices.push(ScannedDevice {
                             device_id: Uuid::nil(),
                             ip: ip_address.clone(),
                             subnet: subnet_filter.clone(),
-                            mac: mac_address,
+                            mac: mac_from_lacis,
                             oui_vendor: None,
                             hostnames: vec![],
                             open_ports: vec![],
@@ -1648,6 +1745,12 @@ impl IpcamScan {
                 Ok(_) => {
                     // Also update the cameras table with extended ONVIF data
                     if scopes_json.is_some() || network_json.is_some() || caps_json.is_some() {
+                        // Extract PTZ support from capabilities JSON
+                        let ptz_supported = caps_json.as_ref()
+                            .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+                            .and_then(|v| v.get("ptz_support").and_then(|p| p.as_bool()))
+                            .unwrap_or(false);
+
                         let _ = sqlx::query(
                             "UPDATE cameras SET \
                              onvif_scopes = COALESCE(?, onvif_scopes), \
@@ -1655,7 +1758,8 @@ impl IpcamScan {
                              onvif_capabilities = COALESCE(?, onvif_capabilities), \
                              manufacturer = COALESCE(?, manufacturer), \
                              model = COALESCE(?, model), \
-                             firmware_version = COALESCE(?, firmware_version) \
+                             firmware_version = COALESCE(?, firmware_version), \
+                             ptz_supported = ? \
                              WHERE ip_address = ?"
                         )
                         .bind(&scopes_json)
@@ -1664,9 +1768,14 @@ impl IpcamScan {
                         .bind(&manufacturer)
                         .bind(&model)
                         .bind(&firmware)
+                        .bind(ptz_supported)
                         .bind(device_ip)
                         .execute(&self.pool)
                         .await;
+
+                        if ptz_supported {
+                            tracing::info!(ip = %device_ip, "PTZ support detected and enabled");
+                        }
                     }
                     return Ok(true);
                 }
@@ -1853,18 +1962,21 @@ impl IpcamScan {
         }
 
         // Check for duplicate by MAC address (if available)
+        // MAC正規化: 大文字化 + セパレータ(:, -)除去 で比較
         if let Some(ref mac) = device.mac {
+            let normalized_mac = mac.to_uppercase().replace(":", "").replace("-", "");
             let existing_by_mac: Option<(String, String)> = sqlx::query_as(
-                "SELECT camera_id, ip_address FROM cameras WHERE mac_address = ?"
+                "SELECT camera_id, ip_address FROM cameras \
+                 WHERE UPPER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = ?"
             )
-            .bind(mac)
+            .bind(&normalized_mac)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| Error::Internal(format!("Database error: {}", e)))?;
 
             if let Some((existing_id, existing_ip)) = existing_by_mac {
                 return Err(Error::Validation(format!(
-                    "Camera with MAC {} already exists: {} (IP: {})",
+                    "Camera with MAC {} already exists: {} (IP: {}). Use 'カメラをスキャン' to auto-update IP.",
                     mac, existing_id, existing_ip
                 )));
             }
@@ -1915,12 +2027,38 @@ impl IpcamScan {
             (device.rtsp_uri.clone(), None)
         };
 
+        // Generate ONVIF endpoint from family (auto-detection for PTZ support)
+        let onvif_endpoint = device.family.generate_onvif_endpoint(device_ip);
+
+        // PTZ auto-detection: Probe ONVIF if credentials available
+        let ptz_supported = if let (Some(ref user), Some(ref pass)) = (&use_username, &use_password) {
+            if let Ok(ip) = device_ip.parse::<std::net::IpAddr>() {
+                let extended_info = scanner::probe_onvif_extended(ip, user, pass, 5000).await;
+                let ptz = extended_info
+                    .as_ref()
+                    .and_then(|info| info.capabilities.as_ref())
+                    .map(|caps| caps.ptz_support)
+                    .unwrap_or(false);
+                if ptz {
+                    tracing::info!(ip = %device_ip, "PTZ support detected during registration");
+                }
+                ptz
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         // Insert into cameras table with credentials (FIX-004: added rtsp_sub)
+        // Access Absorber: access_family自動設定
+        // PTZ: ptz_supported自動検出
+        // FIX: manufacturer/model も継承（force_register_cameraと統一）
         let result = sqlx::query(
             "INSERT INTO cameras \
              (camera_id, name, location, ip_address, mac_address, rtsp_main, rtsp_sub, rtsp_username, rtsp_password, family, \
-              source_device_id, fid, lacis_id, enabled, polling_enabled) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)"
+              access_family, manufacturer, model, source_device_id, fid, lacis_id, onvif_endpoint, ptz_supported, enabled, polling_enabled) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)"
         )
         .bind(&camera_id)
         .bind(&request.display_name)
@@ -1941,9 +2079,18 @@ impl IpcamScan {
             CameraFamily::Other => "other",
             CameraFamily::Unknown => "unknown",
         })
+        // Access Absorber: ONVIF manufacturer/model基準でaccess_family判別（OUI依存廃止）
+        .bind(AccessFamily::from_onvif_info(
+            device.manufacturer.as_deref(),
+            device.model.as_deref()
+        ).as_str())
+        .bind(&device.manufacturer)
+        .bind(&device.model)
         .bind(device.device_id.to_string())
         .bind(&request.fid)
         .bind(&lacis_id)
+        .bind(&onvif_endpoint)
+        .bind(ptz_supported)
         .execute(&self.pool)
         .await;
 
@@ -2066,6 +2213,9 @@ impl IpcamScan {
         let template = RtspTemplate::for_family(&family);
         let rtsp_main = format!("rtsp://{}:{}{}", device_ip, template.default_port, template.main_path);
 
+        // Generate ONVIF endpoint from family (auto-detection for PTZ support)
+        let onvif_endpoint = family.generate_onvif_endpoint(device_ip);
+
         // Camera name from request or auto-generate
         let camera_name = if request.name.is_empty() {
             format!("Camera_{}", device_ip)
@@ -2081,11 +2231,13 @@ impl IpcamScan {
         );
 
         // Insert with status = 'pending_auth' and polling_enabled = false
+        // Access Absorber: access_family自動設定
+        // PTZ: onvif_endpoint自動設定
         let result = sqlx::query(
             "INSERT INTO cameras \
-             (camera_id, name, location, ip_address, mac_address, rtsp_main, family, \
-              manufacturer, model, fid, lacis_id, status, polling_enabled, enabled) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_auth', false, true)"
+             (camera_id, name, location, ip_address, mac_address, rtsp_main, family, access_family, \
+              manufacturer, model, fid, lacis_id, onvif_endpoint, status, polling_enabled, enabled) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_auth', false, true)"
         )
         .bind(&camera_id)
         .bind(&camera_name)
@@ -2103,10 +2255,16 @@ impl IpcamScan {
             CameraFamily::Other => "other",
             CameraFamily::Unknown => "unknown",
         })
+        // Access Absorber: ONVIF manufacturer/model基準でaccess_family判別（OUI依存廃止）
+        .bind(AccessFamily::from_onvif_info(
+            device.as_ref().and_then(|d| d.manufacturer.as_deref()),
+            device.as_ref().and_then(|d| d.model.as_deref())
+        ).as_str())
         .bind(device.as_ref().and_then(|d| d.manufacturer.clone()))
         .bind(device.as_ref().and_then(|d| d.model.clone()))
         .bind(&request.fid)
         .bind(&lacis_id)
+        .bind(&onvif_endpoint)
         .execute(&self.pool)
         .await;
 
@@ -2250,6 +2408,284 @@ impl IpcamScan {
             }
             Err(e) => Err(Error::Internal(format!("Database error: {}", e))),
         }
+    }
+
+    /// Auto-update camera IP address when StrayChild is detected
+    ///
+    /// MACアドレスで照合したカメラのIPアドレスとRTSP URLを新しいIPに更新する。
+    /// DHCPでIPが変更された場合の自動追随機能。
+    async fn update_camera_ip(
+        &self,
+        camera_id: &str,
+        new_ip: &str,
+        mac_address: Option<&str>,
+    ) -> Result<()> {
+        // Get current camera info for RTSP URL regeneration
+        let camera: Option<(String, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT family, rtsp_username, rtsp_password, ip_address FROM cameras WHERE camera_id = ?"
+        )
+        .bind(camera_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("Database error: {}", e)))?;
+
+        let (family_str, username, password, old_ip) = camera.ok_or_else(|| {
+            Error::NotFound(format!("Camera {} not found", camera_id))
+        })?;
+
+        tracing::info!(
+            camera_id = %camera_id,
+            old_ip = ?old_ip,
+            new_ip = %new_ip,
+            mac = ?mac_address,
+            "Updating camera IP (StrayChild auto-update)"
+        );
+
+        // Determine family for RTSP URL generation
+        let family = match family_str.as_str() {
+            "tapo" => CameraFamily::Tapo,
+            "vigi" => CameraFamily::Vigi,
+            "nest" => CameraFamily::Nest,
+            "axis" => CameraFamily::Axis,
+            "hikvision" => CameraFamily::Hikvision,
+            "dahua" => CameraFamily::Dahua,
+            "other" => CameraFamily::Other,
+            _ => CameraFamily::Unknown,
+        };
+
+        // Generate new RTSP URLs with updated IP
+        let (rtsp_main, rtsp_sub) = if let (Some(ref user), Some(ref pass)) = (&username, &password) {
+            let template = RtspTemplate::for_family(&family);
+            let (main, sub) = template.generate_urls(new_ip, None, user, pass);
+            (Some(main), Some(sub))
+        } else {
+            // No credentials - use basic RTSP URL format
+            (
+                Some(format!("rtsp://{}:554/stream1", new_ip)),
+                Some(format!("rtsp://{}:554/stream2", new_ip)),
+            )
+        };
+
+        // Update camera record with new IP and RTSP URLs
+        let result = sqlx::query(
+            "UPDATE cameras SET \
+             ip_address = ?, \
+             rtsp_main = ?, \
+             rtsp_sub = ?, \
+             updated_at = NOW(3) \
+             WHERE camera_id = ?"
+        )
+        .bind(new_ip)
+        .bind(&rtsp_main)
+        .bind(&rtsp_sub)
+        .bind(camera_id)
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Ok(r) if r.rows_affected() > 0 => {
+                tracing::info!(
+                    camera_id = %camera_id,
+                    new_ip = %new_ip,
+                    rtsp_main = ?rtsp_main,
+                    "Camera IP updated successfully via StrayChild detection"
+                );
+
+                // Also update ipcamscan_devices to mark the new IP as registered
+                if let Some(mac) = mac_address {
+                    let _ = sqlx::query(
+                        "UPDATE ipcamscan_devices SET \
+                         status = 'approved', \
+                         last_seen = NOW(3) \
+                         WHERE mac = ? AND ip = ?"
+                    )
+                    .bind(mac)
+                    .bind(new_ip)
+                    .execute(&self.pool)
+                    .await;
+                }
+
+                Ok(())
+            }
+            Ok(_) => Err(Error::NotFound(format!(
+                "Camera {} not found or update failed",
+                camera_id
+            ))),
+            Err(e) => Err(Error::Internal(format!("Database error: {}", e))),
+        }
+    }
+
+    /// Sync camera IPs by MAC address matching
+    ///
+    /// スキャン完了後にすべての登録済みカメラのIPアドレスを検証。
+    /// ipcamscan_devicesテーブルに同一MACで異なるIPのデバイスがあれば自動更新。
+    ///
+    /// 登録済みカメラ定義: lacis_idがaraneaDeviceGateに登録済み（CIC受領済み）
+    /// SSoT: lacis_id (MACは lacis_id の位置4-15から抽出)
+    ///
+    /// Returns: 更新されたカメラ数
+    async fn sync_camera_ips_by_mac(&self) -> usize {
+        // 1. 登録済みカメラを取得（lacis_id必須）
+        #[derive(Debug, sqlx::FromRow)]
+        struct RegisteredCamera {
+            camera_id: String,
+            name: String,
+            ip_address: String,
+            lacis_id: String,
+            onvif_network_interfaces: Option<String>, // JSON配列（VPN越しデバイス用）
+        }
+
+        let cameras: Vec<RegisteredCamera> = match sqlx::query_as(
+            "SELECT camera_id, name, ip_address, lacis_id, onvif_network_interfaces \
+             FROM cameras WHERE enabled = 1 AND lacis_id IS NOT NULL AND lacis_id != ''"
+        )
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to fetch registered cameras for MAC sync");
+                return 0;
+            }
+        };
+
+        if cameras.is_empty() {
+            tracing::debug!("No registered cameras found for MAC sync");
+            return 0;
+        }
+
+        // 2. スキャンされたデバイスを取得（MAC付き）
+        #[derive(Debug, sqlx::FromRow)]
+        struct ScannedDeviceMac {
+            ip: String,
+            mac: Option<String>,
+        }
+
+        let scanned_devices: Vec<ScannedDeviceMac> = match sqlx::query_as(
+            "SELECT ip, mac FROM ipcamscan_devices WHERE mac IS NOT NULL"
+        )
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to fetch scanned devices for MAC sync");
+                return 0;
+            }
+        };
+
+        if scanned_devices.is_empty() {
+            return 0;
+        }
+
+        // 3. スキャンデバイスのMAC→IP マッピングを構築（正規化: 大文字、セパレータ除去）
+        let mut mac_to_ip: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for dev in &scanned_devices {
+            if let Some(ref mac) = dev.mac {
+                let normalized = mac.to_uppercase().replace(":", "").replace("-", "");
+                mac_to_ip.insert(normalized, dev.ip.clone());
+            }
+        }
+
+        // 4. 各カメラについてMAC照合
+        let mut updated_count = 0;
+        for camera in cameras {
+            // カメラのMAC候補を収集
+            let mut camera_macs: Vec<String> = Vec::new();
+
+            // lacis_idからMAC抽出（位置4-15）
+            // lacis_id形式: [Prefix=1][ProductType=3][MAC=12][ProductCode=4] = 20文字
+            if camera.lacis_id.len() >= 16 {
+                let mac_from_lacis = &camera.lacis_id[4..16];
+                camera_macs.push(mac_from_lacis.to_uppercase());
+            }
+
+            // onvif_network_interfaces からhw_addressを抽出（VPNデバイス用フォールバック）
+            if let Some(ref onvif_json) = camera.onvif_network_interfaces {
+                if let Ok(interfaces) = serde_json::from_str::<Vec<serde_json::Value>>(onvif_json) {
+                    for iface in interfaces {
+                        if let Some(hw_addr) = iface.get("hw_address").and_then(|v| v.as_str()) {
+                            let normalized = hw_addr.to_uppercase().replace(":", "").replace("-", "");
+                            if !camera_macs.contains(&normalized) {
+                                camera_macs.push(normalized);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if camera_macs.is_empty() {
+                tracing::warn!(
+                    camera_id = %camera.camera_id,
+                    lacis_id = %camera.lacis_id,
+                    "Cannot extract MAC from lacis_id (invalid length)"
+                );
+                continue;
+            }
+
+            // 5. スキャン結果と照合
+            for camera_mac in &camera_macs {
+                if let Some(scanned_ip) = mac_to_ip.get(camera_mac) {
+                    // 同じIPなら更新不要
+                    if scanned_ip == &camera.ip_address {
+                        continue;
+                    }
+
+                    // IPが異なる → 自動更新
+                    tracing::info!(
+                        camera_id = %camera.camera_id,
+                        camera_name = %camera.name,
+                        old_ip = %camera.ip_address,
+                        new_ip = %scanned_ip,
+                        mac = %camera_mac,
+                        "MAC match found with different IP - auto-updating"
+                    );
+
+                    match self.update_camera_ip(
+                        &camera.camera_id,
+                        scanned_ip,
+                        Some(camera_mac.as_str()),
+                    ).await {
+                        Ok(()) => {
+                            updated_count += 1;
+                            tracing::info!(
+                                camera_id = %camera.camera_id,
+                                new_ip = %scanned_ip,
+                                "Camera IP auto-updated via MAC sync"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                camera_id = %camera.camera_id,
+                                error = %e,
+                                "Failed to auto-update camera IP via MAC sync"
+                            );
+                        }
+                    }
+
+                    // 1つ更新したら次のカメラへ
+                    break;
+                }
+            }
+        }
+
+        // カメラIPが更新された場合はConfigStoreのキャッシュをリフレッシュ
+        if updated_count > 0 {
+            if let Err(e) = self.config_store.refresh_cache().await {
+                tracing::warn!(
+                    error = %e,
+                    updated_count = updated_count,
+                    "Failed to refresh ConfigStore cache after MAC sync"
+                );
+            } else {
+                tracing::info!(
+                    updated_count = updated_count,
+                    "ConfigStore cache refreshed after MAC sync"
+                );
+            }
+        }
+
+        updated_count
     }
 }
 
