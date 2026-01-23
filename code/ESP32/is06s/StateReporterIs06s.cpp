@@ -123,11 +123,14 @@ bool StateReporterIs06s::sendStateReport(bool force) {
         yield();
     }
 
-    if (cloudUrl_.length() > 0 && tid_.length() > 0 && cic_.length() > 0) {
-        String cloudPayload = buildCloudPayload();
-        if (postToUrl(cloudUrl_, cloudPayload)) successCount++;
-        yield();
-    }
+    // クラウドURL（HTTPS）を一時無効化 - TLSクラッシュ問題未解決
+    // TODO: TLS安定化後に再有効化
+    // if (cloudUrl_.length() > 0 && tid_.length() > 0 && cic_.length() > 0) {
+    //     String cloudPayload = buildCloudPayload();
+    //     if (postToUrl(cloudUrl_, cloudPayload)) successCount++;
+    //     yield();
+    // }
+    Serial.println("[StateReporter] Cloud URL skipped (TLS stability issue)");
 
     if (successCount > 0) {
         sentCount_++;
@@ -290,32 +293,55 @@ String StateReporterIs06s::buildCloudPayload() {
 bool StateReporterIs06s::postToUrl(const String& url, const String& payload) {
     if (url.length() == 0) return false;
 
+    Serial.printf("[StateReporter] Heap before: %d\n", ESP.getFreeHeap());
+
     HTTPClient http;
+    bool success = false;
 
     // HTTPS URLの場合、WiFiClientSecureを使用してsetInsecure()を適用
-    // これによりTLS証明書検証をスキップし、メモリ使用量を削減
+    // 注意: 静的変数を使わず毎回新規インスタンスを作成（TLSセッション蓄積回避）
     if (url.startsWith("https://")) {
-        static WiFiClientSecure secureClient;
-        secureClient.setInsecure();  // 証明書検証スキップ（メモリ節約）
-        http.begin(secureClient, url);
+        WiFiClientSecure* secureClient = new WiFiClientSecure();
+        if (!secureClient) {
+            Serial.println("[StateReporter] Failed to allocate WiFiClientSecure");
+            return false;
+        }
+        secureClient->setInsecure();  // 証明書検証スキップ（メモリ節約）
+
+        http.begin(*secureClient, url);
+        http.addHeader("Content-Type", "application/json");
+        http.setTimeout(HTTP_TIMEOUT_MS);
+
+        int httpCode = http.POST(payload);
+        yield();
+
+        success = (httpCode >= 200 && httpCode < 300);
+        if (success) {
+            Serial.printf("[StateReporter] OK %d -> %s\n", httpCode, url.substring(0, 50).c_str());
+        } else {
+            Serial.printf("[StateReporter] NG %d -> %s\n", httpCode, url.substring(0, 50).c_str());
+        }
+
+        http.end();
+        delete secureClient;  // 明示的に解放
     } else {
         http.begin(url);
+        http.addHeader("Content-Type", "application/json");
+        http.setTimeout(HTTP_TIMEOUT_MS);
+
+        int httpCode = http.POST(payload);
+        yield();
+
+        success = (httpCode >= 200 && httpCode < 300);
+        if (success) {
+            Serial.printf("[StateReporter] OK %d -> %s\n", httpCode, url.substring(0, 50).c_str());
+        } else {
+            Serial.printf("[StateReporter] NG %d -> %s\n", httpCode, url.substring(0, 50).c_str());
+        }
+
+        http.end();
     }
 
-    http.addHeader("Content-Type", "application/json");
-    http.setTimeout(HTTP_TIMEOUT_MS);
-
-    int httpCode = http.POST(payload);
-    yield();
-
-    bool success = (httpCode >= 200 && httpCode < 300);
-
-    if (success) {
-        Serial.printf("[StateReporter] OK %d -> %s\n", httpCode, url.substring(0, 50).c_str());
-    } else {
-        Serial.printf("[StateReporter] NG %d -> %s\n", httpCode, url.substring(0, 50).c_str());
-    }
-
-    http.end();
+    Serial.printf("[StateReporter] Heap after: %d\n", ESP.getFreeHeap());
     return success;
 }

@@ -1,4 +1,5 @@
 #include "NtpManager.h"
+#include <esp_sntp.h>
 
 const char* NtpManager::NTP_SERVER1 = "ntp.nict.jp";
 const char* NtpManager::NTP_SERVER2 = "pool.ntp.org";
@@ -6,8 +7,9 @@ const long NtpManager::GMT_OFFSET_SEC = 0;  // UTC
 const int NtpManager::DAYLIGHT_OFFSET_SEC = 0;
 
 bool NtpManager::sync() {
-  Serial.println("[NTP] Syncing...");
+  Serial.println("[NTP] Syncing (one-shot mode)...");
 
+  // configTimeで同期を実行
   configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER1, NTP_SERVER2);
 
   // 同期完了を待つ（最大10秒）
@@ -16,6 +18,13 @@ bool NtpManager::sync() {
   while (!getLocalTime(&timeinfo) && retries > 0) {
     delay(500);
     retries--;
+  }
+
+  // SNTPデーモンを即座に停止（バックグラウンド同期を防ぐ）
+  // TLS通信との競合によるクラッシュを回避
+  if (esp_sntp_enabled()) {
+    esp_sntp_stop();
+    Serial.println("[NTP] SNTP daemon stopped");
   }
 
   if (retries == 0) {
