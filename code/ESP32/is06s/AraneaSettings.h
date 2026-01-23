@@ -49,6 +49,10 @@ class SettingManager;
 
 // ========================================
 // Relayエンドポイント（Orange Pi Zero3）
+// 注意: テスト環境（192.168.77.x）からは到達不能のため空設定
+// 本番環境（192.168.96.x）では以下を設定:
+// #define ARANEA_DEFAULT_RELAY_PRIMARY "http://192.168.96.201:8080/api/events"
+// #define ARANEA_DEFAULT_RELAY_SECONDARY "http://192.168.96.202:8080/api/events"
 // ========================================
 #define ARANEA_DEFAULT_RELAY_PRIMARY ""
 #define ARANEA_DEFAULT_RELAY_SECONDARY ""

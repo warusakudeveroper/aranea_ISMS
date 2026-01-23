@@ -7,11 +7,12 @@
 #include "NtpManager.h"
 #include "Is06PinManager.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
 static const unsigned long MIN_SEND_INTERVAL_MS = 1000;
-static const unsigned long HTTP_TIMEOUT_MS = 1500;
+static const unsigned long HTTP_TIMEOUT_MS = 3000;  // 1500→3000ms (TLSハンドシェイク対応)
 static const int MAX_CONSECUTIVE_FAILURES = 3;
 static const unsigned long BACKOFF_DURATION_MS = 30000;
 static const int DEFAULT_HEARTBEAT_INTERVAL_SEC = 60;
@@ -164,7 +165,8 @@ String StateReporterIs06s::buildLocalPayload() {
     int rssi = WiFi.RSSI();
     String ssid = WiFi.SSID();
 
-    StaticJsonDocument<2048> doc;
+    // メモリ最適化: 2048→1024 (is05a同等)
+    StaticJsonDocument<1024> doc;
     doc["observedAt"] = observedAt;
 
     // sensor
@@ -226,8 +228,9 @@ String StateReporterIs06s::buildLocalPayload() {
     gateway["ip"] = ip;
     gateway["rssi"] = rssi;
 
+    // メモリ最適化: reserve量を削減
     String json;
-    json.reserve(1536);
+    json.reserve(768);
     serializeJson(doc, json);
     return json;
 }
@@ -237,7 +240,8 @@ String StateReporterIs06s::buildCloudPayload() {
         ? ntp_->getIso8601()
         : "1970-01-01T00:00:00Z";
 
-    StaticJsonDocument<1536> doc;
+    // メモリ最適化: 1536→768 (is04a/is05a同等)
+    StaticJsonDocument<768> doc;
 
     // auth
     JsonObject auth = doc.createNestedObject("auth");
@@ -276,8 +280,9 @@ String StateReporterIs06s::buildCloudPayload() {
     globalState["rssi"] = WiFi.RSSI();
     globalState["heapFree"] = ESP.getFreeHeap();
 
+    // メモリ最適化: reserve量を削減
     String json;
-    json.reserve(1024);
+    json.reserve(512);
     serializeJson(doc, json);
     return json;
 }
@@ -286,7 +291,17 @@ bool StateReporterIs06s::postToUrl(const String& url, const String& payload) {
     if (url.length() == 0) return false;
 
     HTTPClient http;
-    http.begin(url);
+
+    // HTTPS URLの場合、WiFiClientSecureを使用してsetInsecure()を適用
+    // これによりTLS証明書検証をスキップし、メモリ使用量を削減
+    if (url.startsWith("https://")) {
+        static WiFiClientSecure secureClient;
+        secureClient.setInsecure();  // 証明書検証スキップ（メモリ節約）
+        http.begin(secureClient, url);
+    } else {
+        http.begin(url);
+    }
+
     http.addHeader("Content-Type", "application/json");
     http.setTimeout(HTTP_TIMEOUT_MS);
 

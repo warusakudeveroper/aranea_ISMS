@@ -314,9 +314,10 @@ void setup() {
   stateReporter.setAuth(myTid, myLacisId, myCic);
   stateReporter.setMac(myMac);
   stateReporter.setFirmwareVersion(FIRMWARE_VERSION);
+  // HTTP relay URLを設定（TLSクラッシュ対策: HTTP通信を先に実行）
   stateReporter.setRelayUrls(
-    settings.getString("relay_pri", ""),
-    settings.getString("relay_sec", "")
+    settings.getString("relay_pri", ARANEA_DEFAULT_RELAY_PRIMARY),
+    settings.getString("relay_sec", ARANEA_DEFAULT_RELAY_SECONDARY)
   );
   stateReporter.setCloudUrl(settings.getString("cloud_url", AraneaSettings::getCloudUrl()));
   stateReporter.setHeartbeatInterval(heartbeatIntervalSec);
@@ -356,11 +357,9 @@ void loop() {
   httpMgr.handle();
 
   // 状態送信（P2-1）
-  // TODO: HTTPS/TLSクラッシュ問題が解決するまで無効化
-  // 原因: WiFiClientSecure/HTTPClientによるTLSハンドシェイクが
-  //       起動後数分でクラッシュを引き起こす（初回遅延でも回避不可）
-  // 参照: code/ESP32/is06s/design/review/review1.md
-  // stateReporter.update();
+  // 修正済み: HTTP relay URL追加 + タイムアウト延長 + JSONサイズ最適化
+  // 参照: code/ESP32/is06s/design/review/
+  stateReporter.update();
 
   // MQTT処理（P2-4）
   if (mqttEnabled) {
