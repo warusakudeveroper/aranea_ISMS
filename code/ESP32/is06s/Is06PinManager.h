@@ -20,7 +20,9 @@
 #define IS06_PIN_MANAGER_H
 
 #include <Arduino.h>
+#include <time.h>
 #include "SettingManager.h"
+#include "NtpManager.h"
 #include "AraneaSettingsDefaults.h"
 
 // ============================================================
@@ -109,8 +111,9 @@ public:
   /**
    * 初期化
    * @param settings SettingManager参照
+   * @param ntp NtpManager参照（expiryDate判定用、nullptr可）
    */
-  void begin(SettingManager* settings);
+  void begin(SettingManager* settings, NtpManager* ntp = nullptr);
 
   /**
    * 毎ループ更新（パルス終了、PWM遷移、入力検知）
@@ -207,6 +210,35 @@ public:
    */
   int getEffectiveRateOfChange(int channel);
 
+  // --- ExpiryDate判定 (P3-5) ---
+  /**
+   * 有効期限切れか確認
+   * @param channel チャンネル番号 (1-6)
+   * @return 期限切れならtrue（expiryEnabled=falseの場合は常にfalse）
+   */
+  bool isExpired(int channel);
+
+  /**
+   * 有効期限を設定
+   * @param channel チャンネル番号 (1-6)
+   * @param expiryDate 有効期限 (YYYYMMDDHHMM形式)
+   */
+  void setExpiryDate(int channel, const String& expiryDate);
+
+  /**
+   * 有効期限を取得
+   * @param channel チャンネル番号 (1-6)
+   * @return 有効期限文字列
+   */
+  String getExpiryDate(int channel);
+
+  /**
+   * 有効期限機能の有効/無効を設定
+   * @param channel チャンネル番号 (1-6)
+   * @param enabled 有効/無効
+   */
+  void setExpiryEnabled(int channel, bool enabled);
+
   // --- コールバック ---
   /**
    * 状態変化コールバックを設定
@@ -236,6 +268,7 @@ public:
 
 private:
   SettingManager* settings_ = nullptr;
+  NtpManager* ntp_ = nullptr;
   PinSetting pinSettings_[IS06_CHANNEL_COUNT];
   PinState pinStates_[IS06_CHANNEL_COUNT];
 
@@ -264,6 +297,9 @@ private:
   bool isValidChannel(int channel);
   bool isValidDpChannel(int channel);
   bool isValidIoChannel(int channel);
+
+  // ExpiryDate helper (P3-5)
+  time_t parseExpiryDate(const String& expiryDate);
 };
 
 #endif // IS06_PIN_MANAGER_H

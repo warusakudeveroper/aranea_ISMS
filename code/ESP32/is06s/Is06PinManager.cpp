@@ -5,12 +5,14 @@
  */
 
 #include "Is06PinManager.h"
+#include <time.h>
 
 // ============================================================
 // 初期化
 // ============================================================
-void Is06PinManager::begin(SettingManager* settings) {
+void Is06PinManager::begin(SettingManager* settings, NtpManager* ntp) {
   settings_ = settings;
+  ntp_ = ntp;
 
   Serial.println("Is06PinManager: Initializing...");
 
@@ -200,6 +202,12 @@ bool Is06PinManager::setPinState(int channel, int state) {
     return false;
   }
 
+  // expiryDate チェック (P3-5)
+  if (isExpired(channel)) {
+    Serial.printf("Is06PinManager: CH%d has expired. Command rejected.\n", channel);
+    return false;
+  }
+
   const PinSetting& setting = pinSettings_[idx];
   unsigned long now = millis();
 
@@ -263,6 +271,12 @@ bool Is06PinManager::setPwmValue(int channel, int value) {
 
   if (pinSettings_[idx].type != PinType::PWM_OUTPUT) {
     Serial.printf("Is06PinManager: CH%d is not PWM type.\n", channel);
+    return false;
+  }
+
+  // expiryDate チェック (P3-5)
+  if (isExpired(channel)) {
+    Serial.printf("Is06PinManager: CH%d has expired. PWM command rejected.\n", channel);
     return false;
   }
 
@@ -447,6 +461,118 @@ void Is06PinManager::setInputCallback(PinInputCallback callback) {
 }
 
 // ============================================================
+// ExpiryDate判定 (P3-5)
+// ============================================================
+bool Is06PinManager::isExpired(int channel) {
+  if (!isValidChannel(channel)) return false;
+
+  int idx = channel - 1;
+
+  // expiryEnabled がfalseなら常に有効
+  if (!pinSettings_[idx].expiryEnabled) {
+    return false;
+  }
+
+  // expiryDate が空なら有効
+  if (pinSettings_[idx].expiryDate.isEmpty()) {
+    return false;
+  }
+
+  // NtpManager未設定または未同期なら有効扱い（安全側）
+  if (!ntp_ || !ntp_->isSynced()) {
+    Serial.println("Is06PinManager: NTP not synced, skipping expiry check.");
+    return false;
+  }
+
+  // 現在時刻取得
+  time_t now = ntp_->getEpoch();
+  if (now == 0) {
+    return false;  // 時刻取得失敗
+  }
+
+  // expiryDate パース
+  time_t expiry = parseExpiryDate(pinSettings_[idx].expiryDate);
+  if (expiry == 0) {
+    return false;  // パース失敗
+  }
+
+  // 比較
+  bool expired = (now >= expiry);
+  if (expired) {
+    Serial.printf("Is06PinManager: CH%d expired (now=%ld, expiry=%ld)\n",
+      channel, (long)now, (long)expiry);
+  }
+
+  return expired;
+}
+
+void Is06PinManager::setExpiryDate(int channel, const String& expiryDate) {
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].expiryDate = expiryDate;
+
+  // NVSに保存
+  String key = getNvsKey(channel, "_expDt");
+  settings_->setString(key.c_str(), expiryDate.c_str());
+
+  Serial.printf("Is06PinManager: CH%d expiryDate set to %s\n",
+    channel, expiryDate.c_str());
+}
+
+String Is06PinManager::getExpiryDate(int channel) {
+  if (!isValidChannel(channel)) return "";
+  return pinSettings_[channel - 1].expiryDate;
+}
+
+void Is06PinManager::setExpiryEnabled(int channel, bool enabled) {
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].expiryEnabled = enabled;
+
+  // NVSに保存
+  String key = getNvsKey(channel, "_expEn");
+  settings_->setString(key.c_str(), enabled ? "true" : "false");
+
+  Serial.printf("Is06PinManager: CH%d expiryEnabled=%s\n",
+    channel, enabled ? "true" : "false");
+}
+
+time_t Is06PinManager::parseExpiryDate(const String& expiryDate) {
+  // フォーマット: YYYYMMDDHHMM (12桁)
+  if (expiryDate.length() != 12) {
+    Serial.printf("Is06PinManager: Invalid expiryDate format: %s\n",
+      expiryDate.c_str());
+    return 0;
+  }
+
+  struct tm timeinfo = {0};
+
+  // 各フィールドを抽出
+  timeinfo.tm_year = expiryDate.substring(0, 4).toInt() - 1900;
+  timeinfo.tm_mon = expiryDate.substring(4, 6).toInt() - 1;
+  timeinfo.tm_mday = expiryDate.substring(6, 8).toInt();
+  timeinfo.tm_hour = expiryDate.substring(8, 10).toInt();
+  timeinfo.tm_min = expiryDate.substring(10, 12).toInt();
+  timeinfo.tm_sec = 0;
+
+  // バリデーション
+  if (timeinfo.tm_year < 0 || timeinfo.tm_mon < 0 || timeinfo.tm_mon > 11 ||
+      timeinfo.tm_mday < 1 || timeinfo.tm_mday > 31 ||
+      timeinfo.tm_hour < 0 || timeinfo.tm_hour > 23 ||
+      timeinfo.tm_min < 0 || timeinfo.tm_min > 59) {
+    Serial.printf("Is06PinManager: Invalid expiryDate values: %s\n",
+      expiryDate.c_str());
+    return 0;
+  }
+
+  // epoch秒に変換
+  time_t epoch = mktime(&timeinfo);
+  return epoch;
+}
+
+// ============================================================
 // ユーティリティ
 // ============================================================
 void Is06PinManager::printStatus() {
@@ -511,6 +637,14 @@ void Is06PinManager::loadFromNvs() {
     } else if (pinSettings_[idx].type == ::PinType::PWM_OUTPUT) {
       pinSettings_[idx].actionMode = ::ActionMode::SLOW;
     }
+
+    // expiryDate settings (P3-5)
+    String expEnKey = getNvsKey(ch, "_expEn");
+    String expEnValue = settings_->getString(expEnKey.c_str(), "false");
+    pinSettings_[idx].expiryEnabled = (expEnValue == "true");
+
+    String expDtKey = getNvsKey(ch, "_expDt");
+    pinSettings_[idx].expiryDate = settings_->getString(expDtKey.c_str(), "");
   }
 
   Serial.println("Is06PinManager: Settings loaded.");

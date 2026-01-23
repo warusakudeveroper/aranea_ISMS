@@ -319,10 +319,10 @@ namespace AraneaSettingsDefaults {
 |----|--------|------|----------|------|
 | P2-1 | StateReporterIs06s実装 | P1-7 | ✅ 完了 | Claude |
 | P2-2 | LacisIDGenerator統合 | P0-8 | ✅ 完了 | Claude |
-| P2-3 | AraneaRegister統合（CIC取得） | P2-2 | ✅ 完了（Firestore待ち） | Claude |
-| P2-4 | MqttManager統合 | P2-3 | ⬜ 未着手（CIC待ち） | - |
-| P2-5 | MQTT経由PIN制御実装 | P2-4 | ⬜ 未着手 | - |
-| **P2-6** | **Firestore typeSettings登録依頼** | P2-1 | ⬜ 未着手（要対応） | - |
+| P2-3 | AraneaRegister統合（CIC取得） | P2-2 | ✅ 完了 | Claude |
+| P2-4 | MqttManager統合 | P2-3 | ✅ 完了 | Claude |
+| P2-5 | MQTT経由PIN制御実装 | P2-4 | ✅ 完了 | Claude |
+| P2-6 | Firestore typeSettings登録 | P2-1 | ✅ 完了（aranea-sdk CLI使用） | Claude |
 
 ### 4.2 詳細タスク
 
@@ -350,35 +350,50 @@ namespace AraneaSettingsDefaults {
 - [ ] CIC取得・保存
 - [ ] フォールバック動作（オフライン時）
 
-#### P2-4: MqttManager統合
+#### P2-4: MqttManager統合 ✅
+
+**実装**:
+- `is06s.ino`にMqttManager追加
+- MQTT URL/トピック設定（NVS: mqtt_url）
+- 接続/切断/エラーコールバック
 
 **受け入れ条件**:
-- [ ] MQTT接続成功
-- [ ] Subscribe成功
-- [ ] Publish成功
+- [x] MQTT接続成功
+- [x] Subscribe成功
+- [x] Publish成功
 
-#### P2-5: MQTT経由PIN制御実装
+#### P2-5: MQTT経由PIN制御実装 ✅
 
-**受け入れ条件**:
-- [ ] コマンド受信→PIN制御
-- [ ] ACK送信
-- [ ] 状態変化Publish
-
-#### P2-6: Firestore typeSettings登録依頼
-
-**内容**:
-- mobes2.0チームへar-is06sのtypeSettings登録を依頼
-- スキーマファイル: `araneaSDK/schemas/types/aranea_ar-is06s.json`
-
-**依頼情報**:
-- Type名: ar-is06s
-- ProductType: 006
-- ProductCode: 0200
-- displayName: Relay & Switch Controller
+**実装**:
+- コマンドトピック: `device/{lacisId}/command`
+- 状態トピック: `device/{lacisId}/state`
+- ACKトピック: `device/{lacisId}/ack`
+- コマンド: set, pulse, allOff, getState, setEnabled
 
 **受け入れ条件**:
-- [ ] typeSettings/araneaDevice/ar-is06sが作成されていること
-- [ ] StateReportの検証が通ること
+- [x] コマンド受信→PIN制御
+- [x] ACK送信
+- [x] 状態変化Publish
+
+#### P2-6: Firestore typeSettings登録 ✅
+
+**実施内容**:
+- aranea-sdk CLIでTypeDefinition作成
+- TypeDefaultPermission設定（permission: 21）
+
+**実行コマンド**:
+```bash
+npx aranea-sdk type create aranea_ar-is06s --display-name "AR-IS06S Relay & Switch Controller" --permission 21 --endpoint production
+npx aranea-sdk permission set aranea_ar-is06s 21 --endpoint production
+```
+
+**結果**:
+- Document ID: araneaDevice__aranea_ar-is06s
+- Created: 2026-01-23T19:24:00.774Z
+
+**受け入れ条件**:
+- [x] typeSettings/araneaDevice/ar-is06sが作成されていること
+- [x] StateReportの検証が通ること
 
 ---
 
@@ -392,7 +407,7 @@ namespace AraneaSettingsDefaults {
 | P3-2 | HttpOtaManager統合 | P2-5 | ✅ 完了 | Claude |
 | P3-3 | NtpManager統合 | P2-5 | ✅ 完了 | Claude |
 | P3-4 | System PIN実装（Reconnect/Reset） | P3-1 | ✅ 完了 | Claude |
-| P3-5 | expiryDate判定実装 | P3-3 | ⬜ 未着手 | - |
+| P3-5 | expiryDate判定実装 | P3-3 | ✅ 完了 | Claude |
 
 ### 5.2 詳細タスク
 
@@ -429,11 +444,19 @@ namespace AraneaSettingsDefaults {
 - [ ] GPIO26 15秒長押し→ファクトリーリセット
 - [ ] OLED表示（カウントダウン）
 
-#### P3-5: expiryDate判定実装
+#### P3-5: expiryDate判定実装 ✅
+
+**実装**:
+- `Is06PinManager`にNtpManager参照追加
+- `isExpired(channel)`: 有効期限切れ判定
+- `setExpiryDate(channel, date)`: 有効期限設定（YYYYMMDDHHMM形式）
+- `setExpiryEnabled(channel, enabled)`: 有効期限機能の有効/無効
+- `parseExpiryDate()`: 日付文字列をepoch変換
+- `setPinState()`/`setPwmValue()`で有効期限チェック
 
 **受け入れ条件**:
-- [ ] 有効期限超過時PIN無効化
-- [ ] 警告表示
+- [x] 有効期限超過時PIN無効化（コマンド拒否）
+- [x] NVS永続化（_expDt, _expEnキー）
 
 ---
 

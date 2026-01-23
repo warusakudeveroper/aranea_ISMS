@@ -30,6 +30,7 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <esp_mac.h>
 
 // ============================================================
@@ -92,6 +93,7 @@ Operator op;
 Is06PinManager pinManager;
 HttpManagerIs06s httpMgr;
 StateReporterIs06s stateReporter;
+MqttManager mqtt;
 
 // 自機情報
 String myLacisId;
@@ -111,6 +113,13 @@ unsigned long lastHeartbeatTime = 0;
 unsigned long bootTime = 0;
 int heartbeatIntervalSec = 60;
 
+// MQTT (P2-4, P2-5)
+bool mqttEnabled = false;
+String mqttUrl;
+String mqttCommandTopic;
+String mqttStateTopic;
+String mqttAckTopic;
+
 // ========================================
 // 関数プロトタイプ
 // ========================================
@@ -118,6 +127,10 @@ void initGpio();
 void initPinGlobalNvs();
 void handleSystemButtons();
 void updateDisplay();
+void initMqtt();
+void onMqttMessage(const String& topic, const char* data, int len);
+void publishPinState(int channel);
+void publishAllPinStates();
 
 // ========================================
 // setup()
@@ -240,8 +253,8 @@ void setup() {
     }
   }
 
-  // PinManager初期化（P1-1）
-  pinManager.begin(&settings);
+  // PinManager初期化（P1-1, P3-5: NtpManager渡してexpiryDate判定可能に）
+  pinManager.begin(&settings, &ntp);
 
   // デバイス情報設定
   AraneaDeviceInfo devInfo;
@@ -290,6 +303,11 @@ void setup() {
   stateReporter.setHeartbeatInterval(heartbeatIntervalSec);
   Serial.println("StateReporter: Initialized");
 
+  // MQTT初期化（P2-4, P2-5）
+  if (wifiConnected) {
+    initMqtt();
+  }
+
   Serial.println("Setup complete.");
   display.showBoot("IS06S Ready");
 }
@@ -317,6 +335,11 @@ void loop() {
 
   // 状態送信（P2-1）
   stateReporter.update();
+
+  // MQTT処理（P2-4）
+  if (mqttEnabled) {
+    mqtt.handle();
+  }
 
   delay(1);  // 省電力
 }
@@ -507,4 +530,237 @@ void updateDisplay() {
   }
 
   display.show4Lines(line1, line2, line3, line4);
+}
+
+// ========================================
+// MQTT初期化 (P2-4)
+// ========================================
+void initMqtt() {
+  // NVSからMQTT設定取得
+  mqttUrl = settings.getString("mqtt_url", "");
+
+  if (mqttUrl.isEmpty()) {
+    Serial.println("MQTT: URL not configured, skipping.");
+    mqttEnabled = false;
+    return;
+  }
+
+  // トピック設定
+  mqttCommandTopic = "device/" + myLacisId + "/command";
+  mqttStateTopic = "device/" + myLacisId + "/state";
+  mqttAckTopic = "device/" + myLacisId + "/ack";
+
+  Serial.printf("MQTT: URL=%s\n", mqttUrl.c_str());
+  Serial.printf("MQTT: CommandTopic=%s\n", mqttCommandTopic.c_str());
+
+  // コールバック設定
+  mqtt.onConnected([]() {
+    Serial.println("MQTT: Connected!");
+    // コマンドトピック購読
+    mqtt.subscribe(mqttCommandTopic, 1);
+    Serial.printf("MQTT: Subscribed to %s\n", mqttCommandTopic.c_str());
+    // 初期状態送信
+    publishAllPinStates();
+  });
+
+  mqtt.onDisconnected([]() {
+    Serial.println("MQTT: Disconnected.");
+  });
+
+  mqtt.onMessage(onMqttMessage);
+
+  mqtt.onError([](const String& error) {
+    Serial.printf("MQTT: Error - %s\n", error.c_str());
+  });
+
+  // 接続開始（認証: lacisId + cic）
+  if (mqtt.begin(mqttUrl, myLacisId, myCic)) {
+    Serial.println("MQTT: Connection started.");
+    mqttEnabled = true;
+  } else {
+    Serial.println("MQTT: Failed to start connection.");
+    mqttEnabled = false;
+  }
+}
+
+// ========================================
+// MQTTメッセージ受信処理 (P2-5)
+// ========================================
+void onMqttMessage(const String& topic, const char* data, int len) {
+  Serial.printf("MQTT: Received [%s] len=%d\n", topic.c_str(), len);
+
+  if (topic != mqttCommandTopic) {
+    return;
+  }
+
+  // JSONパース
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, data, len);
+  if (err) {
+    Serial.printf("MQTT: JSON parse error - %s\n", err.c_str());
+    return;
+  }
+
+  // コマンド解析
+  const char* cmd = doc["cmd"] | "";
+  int ch = doc["ch"] | 0;
+  int state = doc["state"] | -1;
+  const char* expiryDate = doc["expiryDate"] | "";
+  const char* requestId = doc["requestId"] | "";
+
+  String ackStatus = "ok";
+  String ackError = "";
+
+  Serial.printf("MQTT: cmd=%s, ch=%d, state=%d\n", cmd, ch, state);
+
+  if (strcmp(cmd, "set") == 0) {
+    // PIN状態設定
+    if (ch >= 1 && ch <= 6 && state >= 0) {
+      // expiryDate設定（オプション）
+      if (strlen(expiryDate) == 12) {
+        pinManager.setExpiryDate(ch, expiryDate);
+        pinManager.setExpiryEnabled(ch, true);
+      }
+
+      bool ok = pinManager.setPinState(ch, state);
+      if (ok) {
+        Serial.printf("MQTT: CH%d set to %d\n", ch, state);
+        publishPinState(ch);
+      } else {
+        ackStatus = "error";
+        if (!pinManager.isPinEnabled(ch)) {
+          ackError = "PIN disabled";
+        } else if (pinManager.isExpired(ch)) {
+          ackError = "PIN expired";
+        } else {
+          ackError = "Command rejected";
+        }
+      }
+    } else {
+      ackStatus = "error";
+      ackError = "Invalid channel or state";
+    }
+  } else if (strcmp(cmd, "pulse") == 0) {
+    // パルス出力
+    if (ch >= 1 && ch <= 6) {
+      bool ok = pinManager.setPinState(ch, 1);
+      if (ok) {
+        Serial.printf("MQTT: CH%d pulse\n", ch);
+        publishPinState(ch);
+      } else {
+        ackStatus = "error";
+        ackError = "Pulse rejected";
+      }
+    } else {
+      ackStatus = "error";
+      ackError = "Invalid channel";
+    }
+  } else if (strcmp(cmd, "allOff") == 0) {
+    // 全チャンネルOFF
+    for (int i = 1; i <= 6; i++) {
+      if (pinManager.isPinEnabled(i)) {
+        pinManager.setPinState(i, 0);
+      }
+    }
+    Serial.println("MQTT: All channels OFF");
+    publishAllPinStates();
+  } else if (strcmp(cmd, "getState") == 0) {
+    // 状態取得
+    if (ch >= 1 && ch <= 6) {
+      publishPinState(ch);
+    } else {
+      publishAllPinStates();
+    }
+  } else if (strcmp(cmd, "setEnabled") == 0) {
+    // PIN有効/無効設定
+    if (ch >= 1 && ch <= 6) {
+      bool enabled = doc["enabled"] | true;
+      pinManager.setPinEnabled(ch, enabled);
+      Serial.printf("MQTT: CH%d enabled=%s\n", ch, enabled ? "true" : "false");
+    } else {
+      ackStatus = "error";
+      ackError = "Invalid channel";
+    }
+  } else {
+    ackStatus = "error";
+    ackError = "Unknown command";
+  }
+
+  // ACK送信
+  StaticJsonDocument<256> ackDoc;
+  ackDoc["requestId"] = requestId;
+  ackDoc["status"] = ackStatus;
+  if (ackError.length() > 0) {
+    ackDoc["error"] = ackError;
+  }
+  ackDoc["timestamp"] = ntp.isSynced() ? ntp.getIso8601() : "unknown";
+
+  String ackJson;
+  serializeJson(ackDoc, ackJson);
+  mqtt.publish(mqttAckTopic, ackJson, 1);
+  Serial.printf("MQTT: ACK sent [%s]\n", ackStatus.c_str());
+}
+
+// ========================================
+// PIN状態パブリッシュ (P2-5)
+// ========================================
+void publishPinState(int channel) {
+  if (!mqttEnabled || !mqtt.isConnected()) return;
+  if (channel < 1 || channel > 6) return;
+
+  const PinSetting& setting = pinManager.getPinSetting(channel);
+
+  StaticJsonDocument<256> doc;
+  doc["ch"] = channel;
+  doc["enabled"] = pinManager.isPinEnabled(channel);
+
+  if (setting.type == PinType::PWM_OUTPUT) {
+    doc["state"] = String(pinManager.getPwmValue(channel));
+  } else {
+    doc["state"] = pinManager.getPinState(channel) ? "on" : "off";
+  }
+
+  doc["type"] = (setting.type == PinType::PWM_OUTPUT) ? "pwm" : "digital";
+  doc["timestamp"] = ntp.isSynced() ? ntp.getIso8601() : "unknown";
+
+  String json;
+  serializeJson(doc, json);
+  mqtt.publish(mqttStateTopic, json, 1);
+}
+
+void publishAllPinStates() {
+  if (!mqttEnabled || !mqtt.isConnected()) return;
+
+  StaticJsonDocument<1024> doc;
+  JsonObject pinState = doc.createNestedObject("PINState");
+
+  for (int ch = 1; ch <= 6; ch++) {
+    const PinSetting& setting = pinManager.getPinSetting(ch);
+    JsonObject chObj = pinState.createNestedObject("CH" + String(ch));
+
+    chObj["enabled"] = pinManager.isPinEnabled(ch);
+
+    if (setting.type == PinType::PWM_OUTPUT) {
+      chObj["state"] = String(pinManager.getPwmValue(ch));
+    } else {
+      chObj["state"] = pinManager.getPinState(ch) ? "on" : "off";
+    }
+
+    const char* typeStr = "digitalOutput";
+    switch (setting.type) {
+      case PinType::DIGITAL_OUTPUT: typeStr = "digitalOutput"; break;
+      case PinType::PWM_OUTPUT: typeStr = "pwmOutput"; break;
+      case PinType::DIGITAL_INPUT: typeStr = "digitalInput"; break;
+      case PinType::PIN_DISABLED: typeStr = "disabled"; break;
+    }
+    chObj["type"] = typeStr;
+  }
+
+  doc["timestamp"] = ntp.isSynced() ? ntp.getIso8601() : "unknown";
+  doc["lacisId"] = myLacisId;
+
+  String json;
+  serializeJson(doc, json);
+  mqtt.publish(mqttStateTopic, json, 1);
+  Serial.println("MQTT: All states published.");
 }
