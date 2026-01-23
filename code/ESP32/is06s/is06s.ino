@@ -127,6 +127,7 @@ void initGpio();
 void initPinGlobalNvs();
 void handleSystemButtons();
 void updateDisplay();
+String buildStatusLine();
 void initMqtt();
 void onMqttMessage(const String& topic, const char* data, int len);
 void publishPinState(int channel);
@@ -511,25 +512,70 @@ void handleSystemButtons() {
 // ディスプレイ更新
 // ========================================
 void updateDisplay() {
-  // 簡易表示（P3-1で拡張）
-  String line1 = "IS06S " + String(FIRMWARE_VERSION);
-  String line2 = "MAC:" + myMac.substring(6);
-  String line3;
-  String line4;
+  // 共通仕様: showIs02Main(line1, cic, statusLine, showLink)
+  // line1: IP + RSSI (小フォント)
+  // cic: CICコード (大フォント、中央)
+  // statusLine: 状態表示 (中フォント)
 
   if (apModeActive) {
-    line3 = "AP Mode";
-    unsigned long elapsed = (millis() - apModeStartTime) / 1000;
-    line4 = "T:" + String(elapsed) + "s";
-  } else if (wifi.isConnected()) {
-    line3 = wifi.getIP();
-    line4 = "RSSI:" + String(wifi.getRSSI());
-  } else {
-    line3 = "Connecting...";
-    line4 = "";
+    String apSSID = "AP:" + myHostname;
+    String apIP = "192.168.250.1";
+    display.showIs02Main(apSSID, "AP MODE", apIP, false);
+    return;
   }
 
-  display.show4Lines(line1, line2, line3, line4);
+  // Line 1: IP + RSSI
+  String line1 = wifi.isConnected()
+    ? wifi.getIP() + " " + String(wifi.getRSSI()) + "dBm"
+    : "Connecting...";
+
+  // CIC表示（取得済みなら表示、未取得なら"------"）
+  String cicStr = myCic.length() > 0 ? myCic : "------";
+
+  // ステータス行: アクティブなPIN状態を表示
+  String statusLine = buildStatusLine();
+
+  display.showIs02Main(line1, cicStr, statusLine, false);
+}
+
+// ========================================
+// ステータス行構築（PIN状態サマリ）
+// ========================================
+String buildStatusLine() {
+  // アクティブなPIN数をカウント
+  int activeCount = 0;
+  int pwmCount = 0;
+  int inputCount = 0;
+
+  for (int ch = 1; ch <= 6; ch++) {
+    if (!pinManager.isPinEnabled(ch)) continue;
+
+    const PinSetting& setting = pinManager.getPinSetting(ch);
+
+    if (setting.type == PinType::DIGITAL_OUTPUT) {
+      if (pinManager.getPinState(ch) == 1) activeCount++;
+    } else if (setting.type == PinType::PWM_OUTPUT) {
+      if (pinManager.getPwmValue(ch) > 0) pwmCount++;
+    } else if (setting.type == PinType::DIGITAL_INPUT) {
+      inputCount++;
+    }
+  }
+
+  // 状態サマリ構築
+  if (activeCount == 0 && pwmCount == 0) {
+    return "Ready";
+  }
+
+  String status = "";
+  if (activeCount > 0) {
+    status += "ON:" + String(activeCount);
+  }
+  if (pwmCount > 0) {
+    if (status.length() > 0) status += " ";
+    status += "PWM:" + String(pwmCount);
+  }
+
+  return status;
 }
 
 // ========================================

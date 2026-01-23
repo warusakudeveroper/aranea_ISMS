@@ -60,7 +60,7 @@ void DisplayManager::showBoot(const String& msg) {
   oled_->clearDisplay();
   oled_->setTextSize(1);
   oled_->setCursor(0, 24);
-  oled_->println("ISMS is02");
+  oled_->println("Aranea Device");
   oled_->setCursor(0, 40);
   oled_->println(msg);
   oled_->display();
