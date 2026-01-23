@@ -1,0 +1,566 @@
+/**
+ * Is06PinManager.cpp
+ *
+ * IS06S PIN制御マネージャー実装
+ */
+
+#include "Is06PinManager.h"
+
+// ============================================================
+// 初期化
+// ============================================================
+void Is06PinManager::begin(SettingManager* settings) {
+  settings_ = settings;
+
+  Serial.println("Is06PinManager: Initializing...");
+
+  // GPIO初期化
+  initGpio();
+
+  // LEDC初期化（PWM用）
+  initLedc();
+
+  // NVSから設定読み込み
+  loadFromNvs();
+
+  Serial.println("Is06PinManager: Initialization complete.");
+  printStatus();
+}
+
+void Is06PinManager::initGpio() {
+  using namespace AraneaSettingsDefaults;
+
+  // CH1-4 (D/P Type): 初期状態OUTPUT
+  for (int i = 0; i < IS06_DP_CHANNELS; i++) {
+    pinMode(IS06_PIN_MAP[i], OUTPUT);
+    digitalWrite(IS06_PIN_MAP[i], LOW);
+  }
+
+  // CH5-6 (I/O Type): 初期状態はINPUT_PULLDOWN
+  for (int i = IS06_DP_CHANNELS; i < IS06_CHANNEL_COUNT; i++) {
+    pinMode(IS06_PIN_MAP[i], INPUT_PULLDOWN);
+  }
+
+  Serial.println("Is06PinManager: GPIO initialized.");
+}
+
+void Is06PinManager::initLedc() {
+  using namespace AraneaSettingsDefaults;
+
+  // LEDC設定（CH1-4用）
+  for (int i = 0; i < IS06_DP_CHANNELS; i++) {
+    ledcAttach(IS06_PIN_MAP[i], PWM_FREQUENCY, PWM_RESOLUTION);
+    ledcWrite(IS06_PIN_MAP[i], 0);
+  }
+
+  Serial.println("Is06PinManager: LEDC initialized.");
+}
+
+// ============================================================
+// 毎ループ更新
+// ============================================================
+void Is06PinManager::update() {
+  handleMomentaryPulse();
+  handlePwmTransition();
+  handleDigitalInput();
+}
+
+void Is06PinManager::handleMomentaryPulse() {
+  unsigned long now = millis();
+
+  for (int ch = 0; ch < IS06_CHANNEL_COUNT; ch++) {
+    // モーメンタリパルス終了チェック
+    if (pinStates_[ch].pulseEndTime > 0 && now >= pinStates_[ch].pulseEndTime) {
+      // パルス終了 → OFF
+      pinStates_[ch].pulseEndTime = 0;
+      pinStates_[ch].digitalState = 0;
+      applyDigitalOutput(ch + 1, 0);
+
+      Serial.printf("Is06PinManager: CH%d momentary pulse ended.\n", ch + 1);
+
+      if (stateCallback_) {
+        stateCallback_(ch + 1, 0, 0);
+      }
+    }
+  }
+}
+
+void Is06PinManager::handlePwmTransition() {
+  unsigned long now = millis();
+
+  for (int ch = 0; ch < IS06_DP_CHANNELS; ch++) {
+    if (pinSettings_[ch].type != PinType::PWM_OUTPUT) continue;
+    if (pinStates_[ch].pwmValue == pwmTargetValue_[ch]) continue;
+    if (pwmTransitionStart_[ch] == 0) continue;
+
+    // 遷移計算
+    int rateOfChange = getEffectiveRateOfChange(ch + 1);
+    unsigned long elapsed = now - pwmTransitionStart_[ch];
+
+    if (pinSettings_[ch].actionMode == ActionMode::RAPID || rateOfChange == 0) {
+      // Rapid: 即座に適用
+      pinStates_[ch].pwmValue = pwmTargetValue_[ch];
+      pwmTransitionStart_[ch] = 0;
+    } else {
+      // Slow: なだらか遷移
+      float progress = (float)elapsed / (float)rateOfChange;
+      if (progress >= 1.0f) {
+        pinStates_[ch].pwmValue = pwmTargetValue_[ch];
+        pwmTransitionStart_[ch] = 0;
+      } else {
+        int delta = pwmTargetValue_[ch] - pwmStartValue_[ch];
+        pinStates_[ch].pwmValue = pwmStartValue_[ch] + (int)(delta * progress);
+      }
+    }
+
+    applyPwmOutput(ch + 1, pinStates_[ch].pwmValue);
+  }
+}
+
+void Is06PinManager::handleDigitalInput() {
+  unsigned long now = millis();
+
+  for (int ch = IS06_DP_CHANNELS; ch < IS06_CHANNEL_COUNT; ch++) {
+    if (pinSettings_[ch].type != PinType::DIGITAL_INPUT) continue;
+    if (!pinStates_[ch].enabled) continue;
+
+    // デバウンス中はスキップ
+    if (now < pinStates_[ch].debounceEnd) continue;
+
+    bool currentInput = digitalRead(IS06_PIN_MAP[ch]) == HIGH;
+
+    // 状態変化検知
+    if (currentInput != pinStates_[ch].lastInputState) {
+      pinStates_[ch].lastInputState = currentInput;
+      pinStates_[ch].inputState = currentInput;
+      pinStates_[ch].debounceEnd = now + (unsigned long)getEffectiveDebounce(ch + 1);
+
+      Serial.printf("Is06PinManager: CH%d input changed to %d\n", ch + 1, currentInput ? 1 : 0);
+
+      if (inputCallback_) {
+        inputCallback_(ch + 1, currentInput);
+      }
+
+      // 立ち上がりエッジで連動トリガー
+      if (currentInput) {
+        triggerAllocations(ch);
+      }
+    }
+  }
+}
+
+void Is06PinManager::triggerAllocations(int inputChannel) {
+  const PinSetting& inputSetting = pinSettings_[inputChannel];
+
+  for (int i = 0; i < inputSetting.allocationCount; i++) {
+    String target = inputSetting.allocation[i];
+    if (target.isEmpty()) continue;
+
+    // "CH1" → 1
+    if (target.startsWith("CH") || target.startsWith("ch")) {
+      int targetCh = target.substring(2).toInt();
+      if (!isValidChannel(targetCh)) continue;
+
+      int idx = targetCh - 1;
+      const PinSetting& targetSetting = pinSettings_[idx];
+
+      if (targetSetting.type == PinType::DIGITAL_OUTPUT) {
+        // Digital Output: トグルまたはモーメンタリ
+        if (targetSetting.actionMode == ActionMode::ALTERNATE) {
+          int newState = pinStates_[idx].digitalState == 0 ? 1 : 0;
+          setPinState(targetCh, newState);
+        } else {
+          // モーメンタリ
+          setPinState(targetCh, 1);
+        }
+      } else if (targetSetting.type == PinType::PWM_OUTPUT) {
+        // PWM Output: ローテート
+        int nextIndex = (pinStates_[idx].currentPresetIndex + 1) % targetSetting.presetCount;
+        pinStates_[idx].currentPresetIndex = nextIndex;
+        int nextValue = targetSetting.pwmPresets[nextIndex];
+        setPwmValue(targetCh, nextValue);
+      }
+
+      Serial.printf("Is06PinManager: Trigger CH%d → CH%d\n", inputChannel + 1, targetCh);
+    }
+  }
+}
+
+// ============================================================
+// PIN制御
+// ============================================================
+bool Is06PinManager::setPinState(int channel, int state) {
+  if (!isValidChannel(channel)) return false;
+
+  int idx = channel - 1;
+
+  // enabled チェック (P1-1a)
+  if (!pinStates_[idx].enabled) {
+    Serial.printf("Is06PinManager: CH%d is disabled. Command rejected.\n", channel);
+    return false;
+  }
+
+  const PinSetting& setting = pinSettings_[idx];
+  unsigned long now = millis();
+
+  // デバウンスチェック
+  if (now < pinStates_[idx].debounceEnd) {
+    Serial.printf("Is06PinManager: CH%d debounce active. Command rejected.\n", channel);
+    return false;
+  }
+
+  if (setting.type == PinType::PWM_OUTPUT) {
+    // PWM: state = 0-100%
+    return setPwmValue(channel, state);
+  }
+
+  if (setting.type == PinType::DIGITAL_OUTPUT) {
+    // Digital Output
+    int newState = (state != 0) ? 1 : 0;
+
+    if (setting.actionMode == ActionMode::MOMENTARY) {
+      // モーメンタリ: パルス開始
+      if (newState == 1) {
+        pinStates_[idx].digitalState = 1;
+        pinStates_[idx].pulseEndTime = now + (unsigned long)getEffectiveValidity(channel);
+        pinStates_[idx].debounceEnd = now + (unsigned long)getEffectiveDebounce(channel);
+        applyDigitalOutput(channel, 1);
+        Serial.printf("Is06PinManager: CH%d momentary ON for %dms\n", channel, getEffectiveValidity(channel));
+      }
+    } else {
+      // オルタネート: トグル
+      pinStates_[idx].digitalState = newState;
+      applyDigitalOutput(channel, newState);
+      Serial.printf("Is06PinManager: CH%d alternate set to %d\n", channel, newState);
+    }
+
+    pinStates_[idx].lastAction = now;
+
+    if (stateCallback_) {
+      stateCallback_(channel, pinStates_[idx].digitalState, 0);
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
+int Is06PinManager::getPinState(int channel) {
+  if (!isValidChannel(channel)) return -1;
+  return pinStates_[channel - 1].digitalState;
+}
+
+bool Is06PinManager::setPwmValue(int channel, int value) {
+  if (!isValidDpChannel(channel)) return false;
+
+  int idx = channel - 1;
+
+  if (!pinStates_[idx].enabled) {
+    Serial.printf("Is06PinManager: CH%d is disabled. PWM command rejected.\n", channel);
+    return false;
+  }
+
+  if (pinSettings_[idx].type != PinType::PWM_OUTPUT) {
+    Serial.printf("Is06PinManager: CH%d is not PWM type.\n", channel);
+    return false;
+  }
+
+  // 値を0-100にクランプ
+  value = constrain(value, 0, 100);
+
+  // 遷移開始
+  pwmStartValue_[idx] = pinStates_[idx].pwmValue;
+  pwmTargetValue_[idx] = value;
+  pwmTransitionStart_[idx] = millis();
+
+  Serial.printf("Is06PinManager: CH%d PWM %d → %d\n", channel, pwmStartValue_[idx], value);
+
+  if (stateCallback_) {
+    stateCallback_(channel, 0, value);
+  }
+
+  return true;
+}
+
+int Is06PinManager::getPwmValue(int channel) {
+  if (!isValidDpChannel(channel)) return -1;
+  return pinStates_[channel - 1].pwmValue;
+}
+
+// ============================================================
+// PIN有効/無効制御 (P1-1a)
+// ============================================================
+bool Is06PinManager::isPinEnabled(int channel) {
+  if (!isValidChannel(channel)) return false;
+  return pinStates_[channel - 1].enabled;
+}
+
+void Is06PinManager::setPinEnabled(int channel, bool enabled) {
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinStates_[idx].enabled = enabled;
+
+  // NVSに保存
+  String key = getNvsKey(channel, "_en");
+  settings_->setString(key.c_str(), enabled ? "true" : "false");
+
+  Serial.printf("Is06PinManager: CH%d enabled=%s\n", channel, enabled ? "true" : "false");
+
+  // 無効化時はOFF
+  if (!enabled) {
+    pinStates_[idx].digitalState = 0;
+    pinStates_[idx].pwmValue = 0;
+    applyDigitalOutput(channel, 0);
+  }
+}
+
+// ============================================================
+// 設定管理
+// ============================================================
+const PinSetting& Is06PinManager::getPinSetting(int channel) {
+  static PinSetting dummy;
+  if (!isValidChannel(channel)) return dummy;
+  return pinSettings_[channel - 1];
+}
+
+void Is06PinManager::setPinSetting(int channel, const PinSetting& setting) {
+  if (!isValidChannel(channel)) return;
+  pinSettings_[channel - 1] = setting;
+  saveToNvs();
+}
+
+void Is06PinManager::setPinType(int channel, ::PinType type) {
+  namespace ASD = AraneaSettingsDefaults;
+
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].type = type;
+
+  // GPIOモード再設定
+  if (type == ::PinType::DIGITAL_INPUT) {
+    pinMode(IS06_PIN_MAP[idx], INPUT_PULLDOWN);
+  } else if (type == ::PinType::DIGITAL_OUTPUT || type == ::PinType::PWM_OUTPUT) {
+    pinMode(IS06_PIN_MAP[idx], OUTPUT);
+    if (type == ::PinType::PWM_OUTPUT && isValidDpChannel(channel)) {
+      ledcAttach(IS06_PIN_MAP[idx], ASD::PWM_FREQUENCY, ASD::PWM_RESOLUTION);
+    }
+  }
+
+  // NVSに保存
+  String key = getNvsKey(channel, "_type");
+  const char* typeStr = "";
+  switch (type) {
+    case ::PinType::DIGITAL_OUTPUT: typeStr = ASD::PinType::DIGITAL_OUTPUT; break;
+    case ::PinType::PWM_OUTPUT: typeStr = ASD::PinType::PWM_OUTPUT; break;
+    case ::PinType::DIGITAL_INPUT: typeStr = ASD::PinType::DIGITAL_INPUT; break;
+    case ::PinType::PIN_DISABLED: typeStr = ASD::PinType::PIN_DISABLED; break;
+  }
+  settings_->setString(key.c_str(), typeStr);
+
+  Serial.printf("Is06PinManager: CH%d type set to %s\n", channel, typeStr);
+}
+
+// ============================================================
+// PINglobal参照チェーン (P1-1b)
+// ============================================================
+int Is06PinManager::getEffectiveValidity(int channel) {
+  using namespace AraneaSettingsDefaults;
+  using namespace AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return DIGITAL_VALIDITY_MS;
+
+  int idx = channel - 1;
+
+  // 1. PINSettings値
+  if (pinSettings_[idx].validity > 0) {
+    return pinSettings_[idx].validity;
+  }
+
+  // 2. PINglobal値
+  String globalValue = settings_->getString(PG_DIGITAL_VALIDITY, "");
+  if (!globalValue.isEmpty()) {
+    return globalValue.toInt();
+  }
+
+  // 3. デフォルト値
+  return DIGITAL_VALIDITY_MS;
+}
+
+int Is06PinManager::getEffectiveDebounce(int channel) {
+  using namespace AraneaSettingsDefaults;
+  using namespace AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return DIGITAL_DEBOUNCE_MS;
+
+  int idx = channel - 1;
+
+  // 1. PINSettings値
+  if (pinSettings_[idx].debounce > 0) {
+    return pinSettings_[idx].debounce;
+  }
+
+  // 2. PINglobal値
+  String globalValue = settings_->getString(PG_DIGITAL_DEBOUNCE, "");
+  if (!globalValue.isEmpty()) {
+    return globalValue.toInt();
+  }
+
+  // 3. デフォルト値
+  return DIGITAL_DEBOUNCE_MS;
+}
+
+int Is06PinManager::getEffectiveRateOfChange(int channel) {
+  using namespace AraneaSettingsDefaults;
+  using namespace AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidDpChannel(channel)) return PWM_RATE_OF_CHANGE_MS;
+
+  int idx = channel - 1;
+
+  // 1. PINSettings値
+  if (pinSettings_[idx].rateOfChange > 0) {
+    return pinSettings_[idx].rateOfChange;
+  }
+
+  // 2. PINglobal値
+  String globalValue = settings_->getString(PG_PWM_RATE_OF_CHANGE, "");
+  if (!globalValue.isEmpty()) {
+    return globalValue.toInt();
+  }
+
+  // 3. デフォルト値
+  return PWM_RATE_OF_CHANGE_MS;
+}
+
+// ============================================================
+// コールバック
+// ============================================================
+void Is06PinManager::setStateCallback(PinStateCallback callback) {
+  stateCallback_ = callback;
+}
+
+void Is06PinManager::setInputCallback(PinInputCallback callback) {
+  inputCallback_ = callback;
+}
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+void Is06PinManager::printStatus() {
+  Serial.println("=== Is06PinManager Status ===");
+  for (int ch = 1; ch <= IS06_CHANNEL_COUNT; ch++) {
+    int idx = ch - 1;
+    const char* typeStr = "?";
+    switch (pinSettings_[idx].type) {
+      case PinType::DIGITAL_OUTPUT: typeStr = "DO"; break;
+      case PinType::PWM_OUTPUT: typeStr = "PWM"; break;
+      case PinType::DIGITAL_INPUT: typeStr = "DI"; break;
+      case PinType::PIN_DISABLED: typeStr = "OFF"; break;
+    }
+    Serial.printf("CH%d: %s en=%d state=%d pwm=%d\n",
+      ch, typeStr,
+      pinStates_[idx].enabled ? 1 : 0,
+      pinStates_[idx].digitalState,
+      pinStates_[idx].pwmValue);
+  }
+  Serial.println("=============================");
+}
+
+void Is06PinManager::loadFromNvs() {
+  namespace ASD = AraneaSettingsDefaults;
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  Serial.println("Is06PinManager: Loading settings from NVS...");
+
+  for (int ch = 1; ch <= IS06_CHANNEL_COUNT; ch++) {
+    int idx = ch - 1;
+
+    // enabled
+    String enKey = getNvsKey(ch, "_en");
+    String enValue = settings_->getString(enKey.c_str(), ASD::PIN_ENABLED_DEFAULT);
+    pinStates_[idx].enabled = (enValue == "true");
+
+    // type
+    String typeKey = getNvsKey(ch, "_type");
+    String typeValue = settings_->getString(typeKey.c_str(), "");
+
+    // 文字列からenumへ変換
+    if (typeValue == ASD::PinType::DIGITAL_OUTPUT) {
+      pinSettings_[idx].type = ::PinType::DIGITAL_OUTPUT;
+    } else if (typeValue == ASD::PinType::PWM_OUTPUT) {
+      pinSettings_[idx].type = ::PinType::PWM_OUTPUT;
+    } else if (typeValue == ASD::PinType::DIGITAL_INPUT) {
+      pinSettings_[idx].type = ::PinType::DIGITAL_INPUT;
+    } else if (typeValue == ASD::PinType::PIN_DISABLED) {
+      pinSettings_[idx].type = ::PinType::PIN_DISABLED;
+    } else {
+      // デフォルト: CH1-4=DO, CH5-6=DI
+      if (ch <= 4) {
+        pinSettings_[idx].type = ::PinType::DIGITAL_OUTPUT;
+      } else {
+        pinSettings_[idx].type = ::PinType::DIGITAL_INPUT;
+      }
+    }
+
+    // actionMode デフォルト設定
+    if (pinSettings_[idx].type == ::PinType::DIGITAL_OUTPUT) {
+      pinSettings_[idx].actionMode = ::ActionMode::MOMENTARY;
+    } else if (pinSettings_[idx].type == ::PinType::PWM_OUTPUT) {
+      pinSettings_[idx].actionMode = ::ActionMode::SLOW;
+    }
+  }
+
+  Serial.println("Is06PinManager: Settings loaded.");
+}
+
+void Is06PinManager::saveToNvs() {
+  Serial.println("Is06PinManager: Saving settings to NVS...");
+  // 必要に応じて各設定を保存
+  // （現状はsetPinEnabled/setPinTypeで個別保存）
+  Serial.println("Is06PinManager: Settings saved.");
+}
+
+// ============================================================
+// 内部メソッド
+// ============================================================
+void Is06PinManager::applyDigitalOutput(int channel, int state) {
+  if (!isValidChannel(channel)) return;
+  int idx = channel - 1;
+
+  if (pinSettings_[idx].type == PinType::PWM_OUTPUT) {
+    // PWMモードの場合はledcWrite
+    int pwmValue = state ? 255 : 0;
+    ledcWrite(IS06_PIN_MAP[idx], pwmValue);
+  } else {
+    // Digitalモード
+    digitalWrite(IS06_PIN_MAP[idx], state ? HIGH : LOW);
+  }
+}
+
+void Is06PinManager::applyPwmOutput(int channel, int value) {
+  if (!isValidDpChannel(channel)) return;
+  int idx = channel - 1;
+
+  // 0-100% → 0-255
+  int pwm8bit = map(value, 0, 100, 0, 255);
+  ledcWrite(IS06_PIN_MAP[idx], pwm8bit);
+}
+
+String Is06PinManager::getNvsKey(int channel, const char* suffix) {
+  return String("ch") + String(channel) + String(suffix);
+}
+
+bool Is06PinManager::isValidChannel(int channel) {
+  return (channel >= 1 && channel <= IS06_CHANNEL_COUNT);
+}
+
+bool Is06PinManager::isValidDpChannel(int channel) {
+  return (channel >= 1 && channel <= IS06_DP_CHANNELS);
+}
+
+bool Is06PinManager::isValidIoChannel(int channel) {
+  return (channel > IS06_DP_CHANNELS && channel <= IS06_CHANNEL_COUNT);
+}

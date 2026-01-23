@@ -49,7 +49,7 @@
 // IS06S固有モジュール（is06s/ディレクトリ内）
 // ============================================================
 #include "AraneaSettingsDefaults.h"  // P0-7: デフォルト値定義
-// P1-1で追加: #include "Is06PinManager.h"
+#include "Is06PinManager.h"          // P1-1: PIN制御マネージャー
 // P1-6で追加: #include "HttpManagerIs06s.h"
 // P2-1で追加: #include "StateReporterIs06s.h"
 

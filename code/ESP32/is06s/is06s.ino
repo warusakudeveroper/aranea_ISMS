@@ -88,10 +88,10 @@ OtaManager ota;
 HttpOtaManager httpOta;
 Operator op;
 
-// is06s固有モジュール（P1で実装）
-// Is06PinManager pinManager;
-// HttpManagerIs06s httpMgr;
-// StateReporterIs06s stateReporter;
+// is06s固有モジュール
+Is06PinManager pinManager;
+// HttpManagerIs06s httpMgr;      // P1-6で実装
+// StateReporterIs06s stateReporter;  // P2-1で実装
 
 // 自機情報
 String myLacisId;
@@ -191,6 +191,9 @@ void setup() {
   // CIC取得（P2-3で実装）
   // araneaReg.begin();
 
+  // PinManager初期化（P1-1）
+  pinManager.begin(&settings);
+
   Serial.println("Setup complete.");
   display.showBoot("IS06S Ready");
 }
@@ -210,8 +213,8 @@ void loop() {
     updateDisplay();
   }
 
-  // PIN更新（P1で実装）
-  // pinManager.update();
+  // PIN更新
+  pinManager.update();
 
   // HTTP処理（P1-6で実装）
   // httpMgr.handleClient();

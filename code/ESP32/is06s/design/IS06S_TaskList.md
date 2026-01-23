@@ -23,11 +23,11 @@
 | フェーズ | タスク数 | 完了 | 進行中 | 未着手 |
 |---------|---------|------|--------|--------|
 | P0 | 8 | 7 | 0 | 1 |
-| P1 | 10 | 0 | 0 | 10 |
+| P1 | 10 | 7 | 0 | 3 |
 | P2 | 6 | 0 | 0 | 6 |
 | P3 | 5 | 0 | 0 | 5 |
 | P4 | 4 | 0 | 0 | 4 |
-| **合計** | **33** | **7** | **0** | **26** |
+| **合計** | **33** | **14** | **0** | **19** |
 
 ---
 
@@ -171,13 +171,13 @@ namespace AraneaSettingsDefaults {
 
 | ID | タスク | 依存 | ステータス | 担当 |
 |----|--------|------|----------|------|
-| P1-1 | Is06PinManager基本構造実装 | P0-8 | ⬜ 未着手 | - |
-| **P1-1a** | **PIN enabled制御実装** | P1-1 | ⬜ 未着手 | - |
-| **P1-1b** | **PINglobal参照チェーン実装** | P1-1 | ⬜ 未着手 | - |
-| P1-2 | Digital Output実装（Momentary） | P1-1a,1b | ⬜ 未着手 | - |
-| P1-3 | Digital Output実装（Alternate） | P1-2 | ⬜ 未着手 | - |
-| P1-4 | PWM Output実装（LEDC） | P1-1a,1b | ⬜ 未着手 | - |
-| P1-5 | Digital Input実装（連動） | P1-2,4 | ⬜ 未着手 | - |
+| P1-1 | Is06PinManager基本構造実装 | P0-8 | ✅ 完了 | Claude |
+| **P1-1a** | **PIN enabled制御実装** | P1-1 | ✅ 完了 | Claude |
+| **P1-1b** | **PINglobal参照チェーン実装** | P1-1 | ✅ 完了 | Claude |
+| P1-2 | Digital Output実装（Momentary） | P1-1a,1b | ✅ 完了 | Claude |
+| P1-3 | Digital Output実装（Alternate） | P1-2 | ✅ 完了 | Claude |
+| P1-4 | PWM Output実装（LEDC） | P1-1a,1b | ✅ 完了 | Claude |
+| P1-5 | Digital Input実装（連動） | P1-2,4 | ✅ 完了 | Claude |
 | P1-6 | HttpManagerIs06s基本構造実装 | P0-8 | ⬜ 未着手 | - |
 | P1-7 | PIN操作API実装 | P1-5,6 | ⬜ 未着手 | - |
 | P1-8 | PIN操作Web UI実装 | P1-7 | ⬜ 未着手 | - |
