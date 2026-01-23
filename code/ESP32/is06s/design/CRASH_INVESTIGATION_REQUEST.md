@@ -6,7 +6,61 @@ IS06Sファームウェアにおいて、MQTT無効化状態でもデバイス�
 
 - **発生日**: 2026-01-24
 - **緊急度**: High
-- **ステータス**: 調査待ち
+- **ステータス**: ✅ 原因特定済み・暫定修正適用中
+
+---
+
+## 🎯 調査結果サマリー（2026-01-24）
+
+### 原因特定
+**StateReporter HTTPS/TLS通信がクラッシュの原因**
+
+- `stateReporter.update()` 内の HTTPClient による HTTPS POST
+- WiFiClientSecure/TLSハンドシェイクがメモリ/スタック問題を引き起こす
+- 初回ハートビート遅延（60秒）を入れても、約2分後にクラッシュ
+
+### 検証マトリクス
+
+| 構成 | 結果 |
+|-----|------|
+| StateReporter OFF + MQTT OFF | ✅ 60秒以上安定 |
+| StateReporter OFF + MQTT ON | ✅ 60秒以上安定 |
+| StateReporter ON (遅延なし) + MQTT ON | ❌ 即時クラッシュ |
+| StateReporter ON (60秒遅延) + MQTT ON | ❌ 約2分後クラッシュ |
+| StateReporter OFF + MQTT ON | ✅ 3分以上安定 |
+
+### 暫定修正（コミット: efffebc）
+- `is06s.ino`: `stateReporter.update()` を無効化
+- `StateReporterIs06s.cpp`: 初回ハートビート遅延を追加
+
+### 恒久対策（要検討）
+1. **HTTP中継サーバー経由** - cloud_urlをHTTP化（推奨）
+2. **setInsecure()適用** - TLS証明書検証を無効化
+3. **異なるHTTPライブラリ** - ESP-IDF直接使用など
+4. **ハートビート間隔延長** - 5分以上に設定
+
+---
+
+## 検証依頼
+
+### 確認事項
+1. 暫定修正後のファームウェアで安定動作するか（3分以上）
+2. MQTT publish/subscribe が正常に機能するか
+3. Web UI (HTTP) が正常に機能するか
+
+### テスト手順
+```bash
+# 1. ビルド
+mcp__mcp-arduino-esp32__compile --sketch_path code/ESP32/is06s/is06s.ino
+
+# 2. アップロード（115200baud推奨）
+mcp__mcp-arduino-esp32__upload --sketch_path code/ESP32/is06s/is06s.ino --port /dev/cu.usbserial-0001
+
+# 3. モニタリング（3分以上）
+mcp__mcp-arduino-esp32__monitor_start --port /dev/cu.usbserial-0001 --max_seconds 180
+```
+
+---
 
 ---
 
@@ -180,3 +234,4 @@ code/ESP32/is06s/
 | 日付 | 更新者 | 内容 |
 |-----|-------|------|
 | 2026-01-24 | Claude Code | 初版作成 |
+| 2026-01-24 | Claude Code | 原因特定完了・暫定修正適用 (efffebc) |
