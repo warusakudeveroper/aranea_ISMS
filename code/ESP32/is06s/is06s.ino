@@ -115,6 +115,7 @@ int heartbeatIntervalSec = 60;
 
 // MQTT (P2-4, P2-5)
 bool mqttEnabled = false;
+bool mqttJustConnected = false;  // 接続直後フラグ（loop()で初期状態送信用）
 String mqttUrl;
 String mqttCommandTopic;
 String mqttStateTopic;
@@ -242,6 +243,18 @@ void setup() {
       myCic = regResult.cic_code;
       Serial.printf("AraneaRegister: CIC acquired = %s\n", myCic.c_str());
       display.showBoot("CIC: " + myCic);
+
+      // MQTT URLをAraneaRegisterから取得（is04同様）
+      if (regResult.mqttEndpoint.length() > 0) {
+        mqttUrl = regResult.mqttEndpoint;
+        Serial.printf("AraneaRegister: MQTT endpoint = %s\n", mqttUrl.c_str());
+      } else {
+        // 既登録時（APIリクエストなし）はNVSから取得を試みる
+        mqttUrl = araneaReg.getSavedMqttEndpoint();
+        if (mqttUrl.length() > 0) {
+          Serial.printf("AraneaRegister: Using saved MQTT endpoint = %s\n", mqttUrl.c_str());
+        }
+      }
     } else {
       // オフライン時はNVSから取得を試みる
       myCic = araneaReg.getSavedCic();
@@ -250,6 +263,11 @@ void setup() {
       } else {
         Serial.printf("AraneaRegister: Failed - %s\n", regResult.error.c_str());
         display.showBoot("CIC Error");
+      }
+      // フォールバック: NVSから保存済みMQTT URLを取得
+      mqttUrl = araneaReg.getSavedMqttEndpoint();
+      if (mqttUrl.length() > 0) {
+        Serial.printf("AraneaRegister: Using saved MQTT endpoint = %s\n", mqttUrl.c_str());
       }
     }
   }
@@ -305,7 +323,10 @@ void setup() {
   Serial.println("StateReporter: Initialized");
 
   // MQTT初期化（P2-4, P2-5）
+  // 注意: onConnectedコールバック内でpublish()を呼ぶとクラッシュする
+  // → publishAllPinStates()はloop()で実行する（mqttJustConnectedフラグ使用）
   if (wifiConnected) {
+    Serial.printf("MQTT: Free heap before init: %d bytes\n", ESP.getFreeHeap());
     initMqtt();
   }
 
@@ -340,6 +361,15 @@ void loop() {
   // MQTT処理（P2-4）
   if (mqttEnabled) {
     mqtt.handle();
+
+    // 接続直後の初期状態送信（コールバック外で実行）
+    // 重要: onConnectedコールバック内でpublishするとクラッシュするため
+    // フラグを使ってloop()で実行する（is05aと同じパターン）
+    if (mqttJustConnected && mqtt.isConnected()) {
+      mqttJustConnected = false;
+      Serial.println("MQTT: Publishing initial states...");
+      publishAllPinStates();
+    }
   }
 
   delay(1);  // 省電力
@@ -589,32 +619,41 @@ String buildStatusLine() {
 // ========================================
 // MQTT初期化 (P2-4)
 // ========================================
-void initMqtt() {
-  // NVSからMQTT設定取得
-  mqttUrl = settings.getString("mqtt_url", "");
+// デフォルトMQTT URL (araneaSDK Designより)
+const char* DEFAULT_MQTT_URL = "wss://aranea-mqtt-bridge-1010551946141.asia-northeast1.run.app";
 
+void initMqtt() {
+  // MQTT URLはAraneaRegisterから取得済み（setup()で設定）
+  // フォールバック1: settings.mqtt_urlを確認
   if (mqttUrl.isEmpty()) {
-    Serial.println("MQTT: URL not configured, skipping.");
-    mqttEnabled = false;
-    return;
+    mqttUrl = settings.getString("mqtt_url", "");
   }
 
-  // トピック設定
-  mqttCommandTopic = "device/" + myLacisId + "/command";
-  mqttStateTopic = "device/" + myLacisId + "/state";
-  mqttAckTopic = "device/" + myLacisId + "/ack";
+  // フォールバック2: デフォルトMQTT URLを使用
+  if (mqttUrl.isEmpty()) {
+    Serial.println("MQTT: Using default MQTT URL");
+    mqttUrl = DEFAULT_MQTT_URL;
+  }
+
+  // トピック設定 (aranea/{tid}/{lacisId}/... 形式)
+  mqttCommandTopic = "aranea/" + myTid + "/" + myLacisId + "/command";
+  mqttStateTopic = "aranea/" + myTid + "/" + myLacisId + "/state";
+  mqttAckTopic = "aranea/" + myTid + "/" + myLacisId + "/ack";
 
   Serial.printf("MQTT: URL=%s\n", mqttUrl.c_str());
   Serial.printf("MQTT: CommandTopic=%s\n", mqttCommandTopic.c_str());
 
   // コールバック設定
+  // 注意: onConnectedコールバック内でpublish()を呼ぶとクラッシュする
+  // （ESP-IDF MQTTイベントハンドラコンテキストの制約）
+  // → フラグを立ててloop()で処理する
   mqtt.onConnected([]() {
     Serial.println("MQTT: Connected!");
     // コマンドトピック購読
     mqtt.subscribe(mqttCommandTopic, 1);
     Serial.printf("MQTT: Subscribed to %s\n", mqttCommandTopic.c_str());
-    // 初期状態送信
-    publishAllPinStates();
+    // 初期状態送信はloop()で行う（コールバック内でのpublish禁止）
+    mqttJustConnected = true;
   });
 
   mqtt.onDisconnected([]() {
@@ -628,6 +667,10 @@ void initMqtt() {
   });
 
   // 接続開始（認証: lacisId + cic）
+  Serial.println("MQTT: Calling mqtt.begin()...");
+  Serial.printf("MQTT: Free heap: %d bytes\n", ESP.getFreeHeap());
+  Serial.flush();  // ログを確実に出力
+
   if (mqtt.begin(mqttUrl, myLacisId, myCic)) {
     Serial.println("MQTT: Connection started.");
     mqttEnabled = true;
