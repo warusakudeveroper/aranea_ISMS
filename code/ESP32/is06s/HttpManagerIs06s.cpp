@@ -216,6 +216,10 @@ void HttpManagerIs06s::registerTypeSpecificEndpoints() {
   // GET /api/pin/all
   server_->on("/api/pin/all", HTTP_GET, [this]() { handlePinAll(); });
 
+  // GET/POST /api/settings
+  server_->on("/api/settings", HTTP_GET, [this]() { handleSettingsGet(); });
+  server_->on("/api/settings", HTTP_POST, [this]() { handleSettingsPost(); });
+
   Serial.println("HttpManagerIs06s: PIN API endpoints registered.");
 }
 
@@ -478,5 +482,121 @@ void HttpManagerIs06s::buildAllPinsJson(JsonArray& arr) {
   for (int ch = 1; ch <= 6; ch++) {
     JsonObject p = arr.createNestedObject();
     buildPinStateJson(p, ch);
+  }
+}
+
+// ============================================================
+// Global Settings API
+// ============================================================
+void HttpManagerIs06s::handleSettingsGet() {
+  if (!settings_) {
+    sendJsonError(500, "SettingManager not initialized");
+    return;
+  }
+
+  JsonDocument doc;
+  doc["ok"] = true;
+
+  JsonObject settings = doc.createNestedObject("settings");
+
+  // Device settings
+  settings["device_name"] = settings_->getString("device_name", "");
+  settings["mqtt_url"] = settings_->getString("mqtt_url", "");
+
+  // WiFi settings (read-only for security)
+  JsonArray wifiList = settings.createNestedArray("wifi");
+  for (int i = 1; i <= 6; i++) {
+    String ssidKey = "ssid" + String(i);
+    String ssid = settings_->getString(ssidKey.c_str(), "");
+    if (ssid.length() > 0) {
+      JsonObject wifi = wifiList.createNestedObject();
+      wifi["index"] = i;
+      wifi["ssid"] = ssid;
+      wifi["hasPassword"] = settings_->getString(("pass" + String(i)).c_str(), "").length() > 0;
+    }
+  }
+
+  // PIN global settings
+  JsonObject pinGlobal = settings.createNestedObject("pinGlobal");
+  pinGlobal["validity"] = settings_->getInt("g_validity", 3000);
+  pinGlobal["debounce"] = settings_->getInt("g_debounce", 3000);
+  pinGlobal["rateOfChange"] = settings_->getInt("g_rateOfChg", 4000);
+
+  String response;
+  serializeJson(doc, response);
+  server_->send(200, "application/json", response);
+}
+
+void HttpManagerIs06s::handleSettingsPost() {
+  if (!settings_) {
+    sendJsonError(500, "SettingManager not initialized");
+    return;
+  }
+
+  String body = server_->arg("plain");
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+
+  if (err) {
+    sendJsonError(400, "Invalid JSON");
+    return;
+  }
+
+  bool changed = false;
+
+  // Device name
+  if (doc.containsKey("device_name")) {
+    settings_->setString("device_name", doc["device_name"].as<String>());
+    changed = true;
+  }
+
+  // MQTT URL
+  if (doc.containsKey("mqtt_url")) {
+    settings_->setString("mqtt_url", doc["mqtt_url"].as<String>());
+    changed = true;
+    Serial.printf("[Settings] mqtt_url set to: %s\n", doc["mqtt_url"].as<String>().c_str());
+  }
+
+  // WiFi credentials
+  if (doc.containsKey("wifi")) {
+    JsonArray wifiArr = doc["wifi"].as<JsonArray>();
+    for (JsonObject wifi : wifiArr) {
+      if (wifi.containsKey("index") && wifi.containsKey("ssid")) {
+        int idx = wifi["index"];
+        if (idx >= 1 && idx <= 6) {
+          String ssidKey = "ssid" + String(idx);
+          String passKey = "pass" + String(idx);
+          settings_->setString(ssidKey.c_str(), wifi["ssid"].as<String>());
+          if (wifi.containsKey("password")) {
+            settings_->setString(passKey.c_str(), wifi["password"].as<String>());
+          }
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // PIN global settings
+  if (doc.containsKey("pinGlobal")) {
+    JsonObject pg = doc["pinGlobal"];
+    if (pg.containsKey("validity")) {
+      settings_->setInt("g_validity", pg["validity"]);
+      changed = true;
+    }
+    if (pg.containsKey("debounce")) {
+      settings_->setInt("g_debounce", pg["debounce"]);
+      changed = true;
+    }
+    if (pg.containsKey("rateOfChange")) {
+      settings_->setInt("g_rateOfChg", pg["rateOfChange"]);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    // NVS auto-persists on each set operation
+    sendJsonSuccess("Settings saved");
+  } else {
+    sendJsonSuccess("No changes");
   }
 }

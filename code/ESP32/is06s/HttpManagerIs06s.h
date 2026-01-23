@@ -86,6 +86,8 @@ private:
   void handlePinSettingPost();
   void handlePinToggle();
   void handlePinAll();
+  void handleSettingsGet();
+  void handleSettingsPost();
 
   // ========================================
   // ヘルパー
