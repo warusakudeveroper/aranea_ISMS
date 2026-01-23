@@ -356,7 +356,11 @@ void loop() {
   httpMgr.handle();
 
   // 状態送信（P2-1）
-  stateReporter.update();
+  // TODO: HTTPS/TLSクラッシュ問題が解決するまで無効化
+  // 原因: WiFiClientSecure/HTTPClientによるTLSハンドシェイクが
+  //       起動後数分でクラッシュを引き起こす（初回遅延でも回避不可）
+  // 参照: code/ESP32/is06s/design/review/review1.md
+  // stateReporter.update();
 
   // MQTT処理（P2-4）
   if (mqttEnabled) {

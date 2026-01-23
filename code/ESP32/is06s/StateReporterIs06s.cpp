@@ -35,7 +35,10 @@ void StateReporterIs06s::begin(SettingManager* settings, NtpManager* ntp, Is06Pi
     settings_ = settings;
     ntp_ = ntp;
     pinMgr_ = pinMgr;
-    Serial.println("[StateReporterIs06s] Initialized");
+    // 初回ハートビート送信を遅延させる（起動直後のTLS負荷を回避）
+    // lastHeartbeatTime_ = 0 だと初回loop()で即時送信されてしまう
+    lastHeartbeatTime_ = millis();
+    Serial.println("[StateReporterIs06s] Initialized (first heartbeat delayed)");
 }
 
 void StateReporterIs06s::setAuth(const String& tid, const String& lacisId, const String& cic) {
