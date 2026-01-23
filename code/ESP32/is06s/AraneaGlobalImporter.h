@@ -50,7 +50,7 @@
 // ============================================================
 #include "AraneaSettingsDefaults.h"  // P0-7: デフォルト値定義
 #include "Is06PinManager.h"          // P1-1: PIN制御マネージャー
-// P1-6で追加: #include "HttpManagerIs06s.h"
+#include "HttpManagerIs06s.h"        // P1-6: HTTP API/Web UI
 // P2-1で追加: #include "StateReporterIs06s.h"
 
 // ============================================================

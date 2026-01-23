@@ -90,7 +90,7 @@ Operator op;
 
 // is06s固有モジュール
 Is06PinManager pinManager;
-// HttpManagerIs06s httpMgr;      // P1-6で実装
+HttpManagerIs06s httpMgr;
 // StateReporterIs06s stateReporter;  // P2-1で実装
 
 // 自機情報
@@ -194,6 +194,24 @@ void setup() {
   // PinManager初期化（P1-1）
   pinManager.begin(&settings);
 
+  // デバイス情報設定
+  AraneaDeviceInfo devInfo;
+  devInfo.deviceType = ARANEA_DEVICE_TYPE;
+  devInfo.modelName = "Relay & Switch Controller";
+  devInfo.contextDesc = "4ch D/P出力 + 2ch I/O コントローラー";
+  devInfo.lacisId = myLacisId;
+  devInfo.cic = myCic;
+  devInfo.mac = myMac;
+  devInfo.hostname = myHostname;
+  devInfo.firmwareVersion = FIRMWARE_VERSION;
+  devInfo.buildDate = __DATE__;
+  devInfo.modules = "WiFi,NTP,PIN,HTTP,OTA";
+
+  // HttpManager初期化（P1-6）
+  httpMgr.setDeviceInfo(devInfo);
+  httpMgr.begin(&settings, &pinManager);
+  Serial.printf("HTTP: Web UI available at http://%s/\n", wifi.getIP().c_str());
+
   Serial.println("Setup complete.");
   display.showBoot("IS06S Ready");
 }
@@ -216,8 +234,8 @@ void loop() {
   // PIN更新
   pinManager.update();
 
-  // HTTP処理（P1-6で実装）
-  // httpMgr.handleClient();
+  // HTTP処理
+  httpMgr.handle();
 
   // 状態送信（P2-1で実装）
   // stateReporter.update();
