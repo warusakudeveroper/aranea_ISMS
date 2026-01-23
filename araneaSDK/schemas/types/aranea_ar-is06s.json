@@ -1,0 +1,339 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aranea.sdk/schemas/types/aranea_ar-is06s.json",
+  "title": "aranea_ar-is06s Relay & Switch Controller",
+  "description": "4ch D/P出力 + 2ch I/O コントローラー（PWM対応）",
+  "type": "object",
+
+  "metadata": {
+    "productType": "006",
+    "productCodes": ["0200"],
+    "displayName": "Relay & Switch Controller",
+    "capabilities": ["output", "input", "pwm", "pulse", "trigger"],
+    "semanticTags": ["接点出力", "PWM", "リレー", "物理入力", "調光"],
+    "features": [
+      "4ch D/P出力 (Digital/PWM切替)",
+      "2ch I/O (Input/Output切替)",
+      "PWM調光制御",
+      "モーメンタリ/オルタネート切替",
+      "有効期限制御",
+      "物理スイッチ連動",
+      "PIN Enable/Disable制御",
+      "Web UI",
+      "OTA対応"
+    ],
+    "siblingRelation": {
+      "description": "ProductType=006の姉弟デバイス。ProductCodeで区別",
+      "siblings": [
+        { "typeName": "ar-is06a", "productCode": "0001", "description": "6ch出力コントローラー（基本型）" },
+        { "typeName": "ar-is06s", "productCode": "0200", "description": "4ch D/P + 2ch I/O（拡張型）" }
+      ]
+    }
+  },
+
+  "stateSchema": {
+    "type": "object",
+    "required": ["PINState"],
+    "properties": {
+      "PINState": {
+        "type": "object",
+        "properties": {
+          "CH1": { "$ref": "#/definitions/PinStateItem" },
+          "CH2": { "$ref": "#/definitions/PinStateItem" },
+          "CH3": { "$ref": "#/definitions/PinStateItem" },
+          "CH4": { "$ref": "#/definitions/PinStateItem" },
+          "CH5": { "$ref": "#/definitions/PinStateItem" },
+          "CH6": { "$ref": "#/definitions/PinStateItem" }
+        },
+        "required": ["CH1", "CH2", "CH3", "CH4"]
+      },
+      "globalState": {
+        "type": "object",
+        "properties": {
+          "ipAddress": { "type": "string", "format": "ipv4" },
+          "uptime": { "type": "integer", "minimum": 0 },
+          "rssi": { "type": "integer", "minimum": -100, "maximum": 0 },
+          "heapFree": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "definitions": {
+      "PinStateItem": {
+        "type": "object",
+        "required": ["state"],
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "on/off (Digital) または 0-100 (PWM)"
+          },
+          "Validity": {
+            "type": "string",
+            "description": "オーバーライド有効時間(ms)、0=無期限"
+          },
+          "Debounce": {
+            "type": "string",
+            "description": "オーバーライドデバウンス(ms)"
+          },
+          "expiryDate": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$",
+            "description": "有効期限 YYYYMMDDHHmm"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "PINSettings": {
+        "type": "object",
+        "description": "PIN個別設定",
+        "properties": {
+          "CH1": { "$ref": "#/definitions/DPPinSetting" },
+          "CH2": { "$ref": "#/definitions/DPPinSetting" },
+          "CH3": { "$ref": "#/definitions/DPPinSetting" },
+          "CH4": { "$ref": "#/definitions/DPPinSetting" },
+          "CH5": { "$ref": "#/definitions/IOPinSetting" },
+          "CH6": { "$ref": "#/definitions/IOPinSetting" }
+        }
+      },
+      "PINglobal": {
+        "type": "object",
+        "description": "PIN共通デフォルト設定",
+        "properties": {
+          "Digital": {
+            "type": "object",
+            "properties": {
+              "defaultValidity": { "type": "string", "default": "3000" },
+              "defaultDebounce": { "type": "string", "default": "3000" },
+              "defaultActionMode": { "type": "string", "enum": ["Mom", "Alt"], "default": "Mom" }
+            }
+          },
+          "PWM": {
+            "type": "object",
+            "properties": {
+              "defaultRateOfChange": { "type": "string", "default": "4000" },
+              "defaultActionMode": { "type": "string", "enum": ["Slow", "Rapid"], "default": "Slow" }
+            }
+          },
+          "common": {
+            "type": "object",
+            "properties": {
+              "defaultexpiry": { "type": "string", "default": "1" },
+              "defaultExpiryEnabled": { "type": "string", "enum": ["true", "false"], "default": "false" }
+            }
+          }
+        }
+      },
+      "globalSettings": {
+        "type": "object",
+        "description": "デバイス全体設定",
+        "properties": {
+          "wifiSetting": {
+            "type": "object",
+            "description": "最大6個のSSID/PASS登録",
+            "patternProperties": {
+              "^SSID[1-6]$": { "type": "string" },
+              "^PASS[1-6]$": { "type": "string" }
+            }
+          },
+          "APmode": {
+            "type": "object",
+            "properties": {
+              "APSSID": { "type": "string" },
+              "APPASS": { "type": "string" },
+              "APsubnet": { "type": "string", "default": "192.168.250.0/24" },
+              "APaddr": { "type": "string", "default": "192.168.250.1" },
+              "exclusiveConnection": { "type": "string", "enum": ["true", "false"], "default": "true" }
+            }
+          },
+          "network": {
+            "type": "object",
+            "properties": {
+              "DHCP": { "type": "string", "enum": ["true", "false"], "default": "true" },
+              "Static": {
+                "type": "object",
+                "properties": {
+                  "gateway": { "type": "string" },
+                  "subnet": { "type": "string" },
+                  "staticIP": { "type": "string" }
+                }
+              }
+            }
+          },
+          "WEBUI": {
+            "type": "object",
+            "properties": {
+              "localUID": { "type": "array", "items": { "type": "string" }, "maxItems": 2 },
+              "lacisOath": { "type": "string", "enum": ["true", "false"], "default": "false" }
+            }
+          }
+        }
+      },
+      "hardware components": {
+        "type": "object",
+        "description": "ハードウェア構成情報",
+        "properties": {
+          "SBC": { "type": "string", "default": "ESP32Wroom32(ESP32E,DevkitC)" },
+          "I2COLED": { "type": "string", "default": "0.96inch_128*64_3.3V" },
+          "baseboard": { "type": "string", "default": "aranea_04" }
+        }
+      }
+    },
+    "definitions": {
+      "DPPinSetting": {
+        "type": "object",
+        "description": "D/P (Digital/PWM) 出力PIN設定",
+        "required": ["type"],
+        "properties": {
+          "enabled": {
+            "type": "string",
+            "enum": ["true", "false"],
+            "default": "true",
+            "description": "PIN機能の有効/無効。falseの場合UIでの操作不可・コマンド拒否"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["digitalOutput", "pwmOutput"]
+          },
+          "name": { "type": "string", "maxLength": 32 },
+          "stateName": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "状態表示名 (Digital: [on:xxx, off:xxx], PWM: [0:0%, 30:30%, ...])"
+          },
+          "actionMode": {
+            "type": "string",
+            "enum": ["Mom", "Alt", "Slow", "Rapid"],
+            "description": "Digital: Mom/Alt, PWM: Slow/Rapid"
+          },
+          "defaultValidity": {
+            "type": "string",
+            "description": "Momの動作時間(ms)、空欄時PINglobal参照"
+          },
+          "defaultDebounce": {
+            "type": "string",
+            "description": "デバウンス時間(ms)、空欄時PINglobal参照"
+          },
+          "defaultexpiry": {
+            "type": "string",
+            "description": "有効期限(day)、空欄時PINglobal参照"
+          },
+          "RateOfChange": {
+            "type": "string",
+            "description": "PWM変化時間(ms)、空欄時PINglobal参照"
+          }
+        }
+      },
+      "IOPinSetting": {
+        "type": "object",
+        "description": "I/O (Input/Output) PIN設定",
+        "required": ["type"],
+        "properties": {
+          "enabled": {
+            "type": "string",
+            "enum": ["true", "false"],
+            "default": "true",
+            "description": "PIN機能の有効/無効。falseの場合UIでの操作不可・コマンド拒否"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["digitalOutput", "digitalInput"]
+          },
+          "name": { "type": "string", "maxLength": 32 },
+          "allocation": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["CH1", "CH2", "CH3", "CH4"] },
+            "description": "Input時の連動先CH (同一タイプのみ)"
+          },
+          "triggerType": {
+            "type": "string",
+            "enum": ["Digital", "PWM"],
+            "description": "連動先のタイプ (allocation先から継承)"
+          },
+          "actionMode": {
+            "type": "string",
+            "enum": ["Mom", "Alt", "rotate"],
+            "description": "Mom/Alt (Digital)、rotate (PWM連動時)"
+          },
+          "defaultValidity": { "type": "string" },
+          "defaultDebounce": { "type": "string" },
+          "defaultexpiry": { "type": "string" }
+        }
+      }
+    }
+  },
+
+  "commandSchema": {
+    "type": "object",
+    "properties": {
+      "set": {
+        "type": "object",
+        "description": "PIN状態設定",
+        "required": ["ch", "state"],
+        "properties": {
+          "ch": {
+            "type": "string",
+            "enum": ["CH1", "CH2", "CH3", "CH4", "CH5", "CH6"]
+          },
+          "state": {
+            "type": "string",
+            "description": "on/off (Digital) または 0-100 (PWM)"
+          },
+          "validity": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "オーバーライド有効時間(ms)"
+          },
+          "expiryDate": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$",
+            "description": "有効期限 YYYYMMDDHHmm"
+          }
+        }
+      },
+      "pulse": {
+        "type": "object",
+        "description": "パルス出力",
+        "required": ["ch"],
+        "properties": {
+          "ch": {
+            "type": "string",
+            "enum": ["CH1", "CH2", "CH3", "CH4", "CH5", "CH6"]
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 60000,
+            "description": "パルス持続時間(ms)、省略時はdefaultValidity"
+          }
+        }
+      },
+      "allOff": {
+        "type": "object",
+        "properties": {},
+        "description": "全チャンネルOFF"
+      },
+      "config": {
+        "type": "object",
+        "description": "設定変更",
+        "properties": {
+          "ch": {
+            "type": "string",
+            "enum": ["CH1", "CH2", "CH3", "CH4", "CH5", "CH6"]
+          },
+          "setting": {
+            "type": "object",
+            "description": "PINSettings更新内容"
+          }
+        }
+      }
+    }
+  }
+}
