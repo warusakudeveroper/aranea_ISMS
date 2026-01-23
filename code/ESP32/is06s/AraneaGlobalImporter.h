@@ -48,7 +48,9 @@
 // ============================================================
 // IS06S固有モジュール（is06s/ディレクトリ内）
 // ============================================================
+#include "AraneaSettings.h"          // 大量展開用初期設定（共通仕様）
 #include "AraneaSettingsDefaults.h"  // P0-7: デフォルト値定義
+#include "Is06sKeys.h"               // NVSキー定義（共通仕様）
 #include "Is06PinManager.h"          // P1-1: PIN制御マネージャー
 #include "HttpManagerIs06s.h"        // P1-6: HTTP API/Web UI
 // P2-1で追加: #include "StateReporterIs06s.h"

@@ -145,6 +145,9 @@ void setup() {
   // SettingManager初期化
   settings.begin();
 
+  // AraneaSettings初期化（大量展開用デフォルト値）
+  AraneaSettings::initDefaults(settings);
+
   // PINglobal NVS初期化（P0-8）
   initPinGlobalNvs();
 
