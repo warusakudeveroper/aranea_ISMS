@@ -91,7 +91,7 @@ Operator op;
 // is06s固有モジュール
 Is06PinManager pinManager;
 HttpManagerIs06s httpMgr;
-// StateReporterIs06s stateReporter;  // P2-1で実装
+StateReporterIs06s stateReporter;
 
 // 自機情報
 String myLacisId;
@@ -188,11 +188,57 @@ void setup() {
     // TODO: APモード実装（P3で拡張）
   }
 
-  // NTP同期（P3-3で実装）
-  // ntp.begin();
+  // NTP同期（P3-3）
+  if (wifiConnected) {
+    Serial.println("NTP: Syncing...");
+    display.showBoot("NTP Sync...");
+    if (ntp.sync()) {
+      Serial.printf("NTP: Synced - %s\n", ntp.getIso8601().c_str());
+    } else {
+      Serial.println("NTP: Sync failed (will retry later)");
+    }
+  }
 
-  // CIC取得（P2-3で実装）
-  // araneaReg.begin();
+  // CIC取得（P2-3）
+  if (wifiConnected) {
+    Serial.println("AraneaRegister: Initializing...");
+    araneaReg.begin(AraneaSettings::getGateUrl());
+
+    // テナントPrimary認証設定
+    TenantPrimaryAuth tenantAuth;
+    tenantAuth.lacisId = AraneaSettings::getTenantLacisId();
+    tenantAuth.userId = AraneaSettings::getTenantEmail();
+    tenantAuth.cic = AraneaSettings::getTenantCic();
+    araneaReg.setTenantPrimary(tenantAuth);
+
+    // デバイス登録
+    myTid = settings.getString("tid", AraneaSettings::getTid());
+    myFid = settings.getString("fid", AraneaSettings::getFid());
+
+    AraneaRegisterResult regResult = araneaReg.registerDevice(
+      myTid,
+      ARANEA_DEVICE_TYPE,
+      myLacisId,
+      myMac,
+      PRODUCT_TYPE,
+      PRODUCT_CODE
+    );
+
+    if (regResult.ok) {
+      myCic = regResult.cic_code;
+      Serial.printf("AraneaRegister: CIC acquired = %s\n", myCic.c_str());
+      display.showBoot("CIC: " + myCic);
+    } else {
+      // オフライン時はNVSから取得を試みる
+      myCic = araneaReg.getSavedCic();
+      if (myCic.length() > 0) {
+        Serial.printf("AraneaRegister: Using saved CIC = %s\n", myCic.c_str());
+      } else {
+        Serial.printf("AraneaRegister: Failed - %s\n", regResult.error.c_str());
+        display.showBoot("CIC Error");
+      }
+    }
+  }
 
   // PinManager初期化（P1-1）
   pinManager.begin(&settings);
@@ -214,6 +260,35 @@ void setup() {
   httpMgr.setDeviceInfo(devInfo);
   httpMgr.begin(&settings, &pinManager);
   Serial.printf("HTTP: Web UI available at http://%s/\n", wifi.getIP().c_str());
+
+  // HTTP OTA初期化（P3-2）
+  httpOta.begin(httpMgr.getServer());
+  httpOta.onStart([]() {
+    Serial.println("[OTA] Update started");
+  });
+  httpOta.onProgress([](int progress) {
+    Serial.printf("[OTA] Progress: %d%%\n", progress);
+  });
+  httpOta.onEnd([]() {
+    Serial.println("[OTA] Update complete, rebooting...");
+  });
+  httpOta.onError([](const String& error) {
+    Serial.printf("[OTA] Error: %s\n", error.c_str());
+  });
+  Serial.println("HTTP OTA: Initialized (/api/ota/*)");
+
+  // StateReporter初期化（P2-1）
+  stateReporter.begin(&settings, &ntp, &pinManager);
+  stateReporter.setAuth(myTid, myLacisId, myCic);
+  stateReporter.setMac(myMac);
+  stateReporter.setFirmwareVersion(FIRMWARE_VERSION);
+  stateReporter.setRelayUrls(
+    settings.getString("relay_pri", ""),
+    settings.getString("relay_sec", "")
+  );
+  stateReporter.setCloudUrl(settings.getString("cloud_url", AraneaSettings::getCloudUrl()));
+  stateReporter.setHeartbeatInterval(heartbeatIntervalSec);
+  Serial.println("StateReporter: Initialized");
 
   Serial.println("Setup complete.");
   display.showBoot("IS06S Ready");
@@ -240,8 +315,8 @@ void loop() {
   // HTTP処理
   httpMgr.handle();
 
-  // 状態送信（P2-1で実装）
-  // stateReporter.update();
+  // 状態送信（P2-1）
+  stateReporter.update();
 
   delay(1);  // 省電力
 }

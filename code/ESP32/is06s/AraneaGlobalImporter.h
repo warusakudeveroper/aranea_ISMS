@@ -53,7 +53,7 @@
 #include "Is06sKeys.h"               // NVSキー定義（共通仕様）
 #include "Is06PinManager.h"          // P1-1: PIN制御マネージャー
 #include "HttpManagerIs06s.h"        // P1-6: HTTP API/Web UI
-// P2-1で追加: #include "StateReporterIs06s.h"
+#include "StateReporterIs06s.h"      // P2-1: 状態レポート送信
 
 // ============================================================
 // インポート確認用マクロ

@@ -22,12 +22,12 @@
 
 | フェーズ | タスク数 | 完了 | 進行中 | 未着手 |
 |---------|---------|------|--------|--------|
-| P0 | 8 | 7 | 0 | 1 |
+| P0 | 8 | 8 | 0 | 0 |
 | P1 | 10 | 10 | 0 | 0 |
-| P2 | 6 | 0 | 0 | 6 |
-| P3 | 5 | 0 | 0 | 5 |
+| P2 | 6 | 3 | 0 | 3 |
+| P3 | 5 | 4 | 0 | 1 |
 | P4 | 4 | 0 | 0 | 4 |
-| **合計** | **33** | **17** | **0** | **16** |
+| **合計** | **33** | **25** | **0** | **8** |
 
 ---
 
@@ -42,7 +42,7 @@
 | P0-3 | GPIO初期化実装 | P0-2 | ✅ 完了 | Claude |
 | P0-4 | WiFiManager統合 | P0-2 | ✅ 完了 | Claude |
 | P0-5 | SettingManager統合（NVSキー定義） | P0-2 | ✅ 完了 | Claude |
-| P0-6 | 基盤動作確認（WiFi接続・NVS読み書き） | P0-3,4,5 | ⬜ 未着手 | - |
+| P0-6 | 基盤動作確認（WiFi接続・NVS読み書き） | P0-3,4,5 | ✅ 完了 | Claude |
 | **P0-7** | **AraneaSettingsDefaults実装** | P0-2 | ✅ 完了 | Claude |
 | **P0-8** | **PINglobal NVS初期化実装** | P0-5,7 | ✅ 完了 | Claude |
 
@@ -317,12 +317,12 @@ namespace AraneaSettingsDefaults {
 
 | ID | タスク | 依存 | ステータス | 担当 |
 |----|--------|------|----------|------|
-| P2-1 | StateReporterIs06s実装 | P1-7 | ⬜ 未着手 | - |
-| P2-2 | LacisIDGenerator統合 | P0-8 | ⬜ 未着手 | - |
-| P2-3 | AraneaRegister統合（CIC取得） | P2-2 | ⬜ 未着手 | - |
-| P2-4 | MqttManager統合 | P2-3 | ⬜ 未着手 | - |
+| P2-1 | StateReporterIs06s実装 | P1-7 | ✅ 完了 | Claude |
+| P2-2 | LacisIDGenerator統合 | P0-8 | ✅ 完了 | Claude |
+| P2-3 | AraneaRegister統合（CIC取得） | P2-2 | ✅ 完了（Firestore待ち） | Claude |
+| P2-4 | MqttManager統合 | P2-3 | ⬜ 未着手（CIC待ち） | - |
 | P2-5 | MQTT経由PIN制御実装 | P2-4 | ⬜ 未着手 | - |
-| **P2-6** | **Firestore typeSettings登録依頼** | P2-1 | ⬜ 未着手 | - |
+| **P2-6** | **Firestore typeSettings登録依頼** | P2-1 | ⬜ 未着手（要対応） | - |
 
 ### 4.2 詳細タスク
 
@@ -388,10 +388,10 @@ namespace AraneaSettingsDefaults {
 
 | ID | タスク | 依存 | ステータス | 担当 |
 |----|--------|------|----------|------|
-| P3-1 | DisplayManager統合（OLED表示） | P2-5 | ⬜ 未着手 | - |
-| P3-2 | HttpOtaManager統合 | P2-5 | ⬜ 未着手 | - |
-| P3-3 | NtpManager統合 | P2-5 | ⬜ 未着手 | - |
-| P3-4 | System PIN実装（Reconnect/Reset） | P3-1 | ⬜ 未着手 | - |
+| P3-1 | DisplayManager統合（OLED表示） | P2-5 | ✅ 完了 | Claude |
+| P3-2 | HttpOtaManager統合 | P2-5 | ✅ 完了 | Claude |
+| P3-3 | NtpManager統合 | P2-5 | ✅ 完了 | Claude |
+| P3-4 | System PIN実装（Reconnect/Reset） | P3-1 | ✅ 完了 | Claude |
 | P3-5 | expiryDate判定実装 | P3-3 | ⬜ 未着手 | - |
 
 ### 5.2 詳細タスク
