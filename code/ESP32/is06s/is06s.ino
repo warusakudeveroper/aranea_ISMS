@@ -542,10 +542,9 @@ void updateDisplay() {
 // ステータス行構築（PIN状態サマリ）
 // ========================================
 String buildStatusLine() {
-  // アクティブなPIN数をカウント
-  int activeCount = 0;
-  int pwmCount = 0;
-  int inputCount = 0;
+  // アクティブなPIN情報を収集
+  String digitalOns = "";   // ON中のデジタルCH
+  String pwmValues = "";    // PWM値
 
   for (int ch = 1; ch <= 6; ch++) {
     if (!pinManager.isPinEnabled(ch)) continue;
@@ -553,26 +552,35 @@ String buildStatusLine() {
     const PinSetting& setting = pinManager.getPinSetting(ch);
 
     if (setting.type == PinType::DIGITAL_OUTPUT) {
-      if (pinManager.getPinState(ch) == 1) activeCount++;
+      if (pinManager.getPinState(ch) == 1) {
+        if (digitalOns.length() > 0) digitalOns += ",";
+        digitalOns += String(ch);
+      }
     } else if (setting.type == PinType::PWM_OUTPUT) {
-      if (pinManager.getPwmValue(ch) > 0) pwmCount++;
-    } else if (setting.type == PinType::DIGITAL_INPUT) {
-      inputCount++;
+      int pwmVal = pinManager.getPwmValue(ch);
+      if (pwmVal > 0) {
+        if (pwmValues.length() > 0) pwmValues += " ";
+        pwmValues += String(ch) + ":" + String(pwmVal) + "%";
+      }
     }
   }
 
   // 状態サマリ構築
-  if (activeCount == 0 && pwmCount == 0) {
+  if (digitalOns.length() == 0 && pwmValues.length() == 0) {
     return "Ready";
   }
 
   String status = "";
-  if (activeCount > 0) {
-    status += "ON:" + String(activeCount);
+
+  // デジタル: "ON:1,2" 形式
+  if (digitalOns.length() > 0) {
+    status = "ON:" + digitalOns;
   }
-  if (pwmCount > 0) {
+
+  // PWM: "1:50% 2:80%" 形式
+  if (pwmValues.length() > 0) {
     if (status.length() > 0) status += " ";
-    status += "PWM:" + String(pwmCount);
+    status += pwmValues;
   }
 
   return status;
