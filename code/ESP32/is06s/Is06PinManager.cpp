@@ -605,12 +605,12 @@ void Is06PinManager::loadFromNvs() {
     int idx = ch - 1;
 
     // enabled
-    String enKey = getNvsKey(ch, "_en");
+    String enKey = getNvsKey(ch, NVS::CH_ENABLED_SUFFIX);
     String enValue = settings_->getString(enKey.c_str(), ASD::PIN_ENABLED_DEFAULT);
     pinStates_[idx].enabled = (enValue == "true");
 
     // type
-    String typeKey = getNvsKey(ch, "_type");
+    String typeKey = getNvsKey(ch, NVS::CH_TYPE_SUFFIX);
     String typeValue = settings_->getString(typeKey.c_str(), "");
 
     // 文字列からenumへ変換
@@ -631,19 +631,78 @@ void Is06PinManager::loadFromNvs() {
       }
     }
 
-    // actionMode デフォルト設定
-    if (pinSettings_[idx].type == ::PinType::DIGITAL_OUTPUT) {
+    // name (P1-2)
+    String nameKey = getNvsKey(ch, NVS::CH_NAME_SUFFIX);
+    pinSettings_[idx].name = settings_->getString(nameKey.c_str(), "");
+
+    // actionMode (P1-4): NVSから読み込み、なければタイプに応じたデフォルト
+    String modeKey = getNvsKey(ch, NVS::CH_ACTION_MODE_SUFFIX);
+    String modeValue = settings_->getString(modeKey.c_str(), "");
+
+    if (modeValue == ASD::ActionMode::MOMENTARY) {
       pinSettings_[idx].actionMode = ::ActionMode::MOMENTARY;
-    } else if (pinSettings_[idx].type == ::PinType::PWM_OUTPUT) {
+    } else if (modeValue == ASD::ActionMode::ALTERNATE) {
+      pinSettings_[idx].actionMode = ::ActionMode::ALTERNATE;
+    } else if (modeValue == ASD::ActionMode::SLOW) {
       pinSettings_[idx].actionMode = ::ActionMode::SLOW;
+    } else if (modeValue == ASD::ActionMode::RAPID) {
+      pinSettings_[idx].actionMode = ::ActionMode::RAPID;
+    } else if (modeValue == ASD::ActionMode::ROTATE) {
+      pinSettings_[idx].actionMode = ::ActionMode::ROTATE;
+    } else {
+      // デフォルト: タイプに応じた値
+      if (pinSettings_[idx].type == ::PinType::DIGITAL_OUTPUT) {
+        pinSettings_[idx].actionMode = ::ActionMode::MOMENTARY;
+      } else if (pinSettings_[idx].type == ::PinType::PWM_OUTPUT) {
+        pinSettings_[idx].actionMode = ::ActionMode::SLOW;
+      } else if (pinSettings_[idx].type == ::PinType::DIGITAL_INPUT) {
+        pinSettings_[idx].actionMode = ::ActionMode::MOMENTARY;
+      }
     }
 
+    // validity (P1-5)
+    String valKey = getNvsKey(ch, NVS::CH_VALIDITY_SUFFIX);
+    String valValue = settings_->getString(valKey.c_str(), "");
+    if (!valValue.isEmpty()) {
+      pinSettings_[idx].validity = valValue.toInt();
+    } else {
+      pinSettings_[idx].validity = 0;  // 0 = PINglobalから参照
+    }
+
+    // debounce (P1-5)
+    String debKey = getNvsKey(ch, NVS::CH_DEBOUNCE_SUFFIX);
+    String debValue = settings_->getString(debKey.c_str(), "");
+    if (!debValue.isEmpty()) {
+      pinSettings_[idx].debounce = debValue.toInt();
+    } else {
+      pinSettings_[idx].debounce = 0;  // 0 = PINglobalから参照
+    }
+
+    // rateOfChange (P1-5)
+    String rocKey = getNvsKey(ch, NVS::CH_RATE_OF_CHANGE_SUFFIX);
+    String rocValue = settings_->getString(rocKey.c_str(), "");
+    if (!rocValue.isEmpty()) {
+      pinSettings_[idx].rateOfChange = rocValue.toInt();
+    } else {
+      pinSettings_[idx].rateOfChange = 0;  // 0 = PINglobalから参照
+    }
+
+    // allocation (P1-3)
+    String allocKey = getNvsKey(ch, NVS::CH_ALLOCATION_SUFFIX);
+    String allocValue = settings_->getString(allocKey.c_str(), "");
+    parseAllocation(ch, allocValue);
+
+    // stateName (P1-2)
+    String stnKey = getNvsKey(ch, NVS::CH_STATE_NAME_SUFFIX);
+    String stnValue = settings_->getString(stnKey.c_str(), "");
+    parseStateName(ch, stnValue);
+
     // expiryDate settings (P3-5)
-    String expEnKey = getNvsKey(ch, "_expEn");
+    String expEnKey = getNvsKey(ch, NVS::CH_EXPIRY_ENABLED_SUFFIX);
     String expEnValue = settings_->getString(expEnKey.c_str(), "false");
     pinSettings_[idx].expiryEnabled = (expEnValue == "true");
 
-    String expDtKey = getNvsKey(ch, "_expDt");
+    String expDtKey = getNvsKey(ch, NVS::CH_EXPIRY_DATE_SUFFIX);
     pinSettings_[idx].expiryDate = settings_->getString(expDtKey.c_str(), "");
   }
 
@@ -651,10 +710,316 @@ void Is06PinManager::loadFromNvs() {
 }
 
 void Is06PinManager::saveToNvs() {
-  Serial.println("Is06PinManager: Saving settings to NVS...");
-  // 必要に応じて各設定を保存
-  // （現状はsetPinEnabled/setPinTypeで個別保存）
-  Serial.println("Is06PinManager: Settings saved.");
+  namespace ASD = AraneaSettingsDefaults;
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  Serial.println("Is06PinManager: Saving all settings to NVS...");
+
+  for (int ch = 1; ch <= IS06_CHANNEL_COUNT; ch++) {
+    int idx = ch - 1;
+    const PinSetting& setting = pinSettings_[idx];
+
+    // name
+    String nameKey = getNvsKey(ch, NVS::CH_NAME_SUFFIX);
+    settings_->setString(nameKey.c_str(), setting.name.c_str());
+
+    // actionMode
+    String modeKey = getNvsKey(ch, NVS::CH_ACTION_MODE_SUFFIX);
+    const char* modeStr = "";
+    switch (setting.actionMode) {
+      case ::ActionMode::MOMENTARY: modeStr = ASD::ActionMode::MOMENTARY; break;
+      case ::ActionMode::ALTERNATE: modeStr = ASD::ActionMode::ALTERNATE; break;
+      case ::ActionMode::SLOW: modeStr = ASD::ActionMode::SLOW; break;
+      case ::ActionMode::RAPID: modeStr = ASD::ActionMode::RAPID; break;
+      case ::ActionMode::ROTATE: modeStr = ASD::ActionMode::ROTATE; break;
+    }
+    settings_->setString(modeKey.c_str(), modeStr);
+
+    // validity
+    if (setting.validity > 0) {
+      String valKey = getNvsKey(ch, NVS::CH_VALIDITY_SUFFIX);
+      settings_->setString(valKey.c_str(), String(setting.validity).c_str());
+    }
+
+    // debounce
+    if (setting.debounce > 0) {
+      String debKey = getNvsKey(ch, NVS::CH_DEBOUNCE_SUFFIX);
+      settings_->setString(debKey.c_str(), String(setting.debounce).c_str());
+    }
+
+    // rateOfChange
+    if (setting.rateOfChange > 0) {
+      String rocKey = getNvsKey(ch, NVS::CH_RATE_OF_CHANGE_SUFFIX);
+      settings_->setString(rocKey.c_str(), String(setting.rateOfChange).c_str());
+    }
+
+    // allocation (CSV形式)
+    String allocKey = getNvsKey(ch, NVS::CH_ALLOCATION_SUFFIX);
+    String allocStr = buildAllocationString(ch);
+    settings_->setString(allocKey.c_str(), allocStr.c_str());
+
+    // stateName (JSON配列形式)
+    if (setting.stateNameCount > 0) {
+      String stnKey = getNvsKey(ch, NVS::CH_STATE_NAME_SUFFIX);
+      String jsonStr = "[";
+      for (int i = 0; i < setting.stateNameCount; i++) {
+        if (i > 0) jsonStr += ",";
+        jsonStr += "\"" + setting.stateName[i] + "\"";
+      }
+      jsonStr += "]";
+      settings_->setString(stnKey.c_str(), jsonStr.c_str());
+    }
+  }
+
+  Serial.println("Is06PinManager: All settings saved.");
+}
+
+// ============================================================
+// 設定セッター (P1-4, P1-5, P1-2, P1-3)
+// ============================================================
+void Is06PinManager::setActionMode(int channel, ::ActionMode mode) {
+  namespace ASD = AraneaSettingsDefaults;
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].actionMode = mode;
+
+  // NVSに保存
+  String modeKey = getNvsKey(channel, NVS::CH_ACTION_MODE_SUFFIX);
+  const char* modeStr = "";
+  switch (mode) {
+    case ::ActionMode::MOMENTARY: modeStr = ASD::ActionMode::MOMENTARY; break;
+    case ::ActionMode::ALTERNATE: modeStr = ASD::ActionMode::ALTERNATE; break;
+    case ::ActionMode::SLOW: modeStr = ASD::ActionMode::SLOW; break;
+    case ::ActionMode::RAPID: modeStr = ASD::ActionMode::RAPID; break;
+    case ::ActionMode::ROTATE: modeStr = ASD::ActionMode::ROTATE; break;
+  }
+  settings_->setString(modeKey.c_str(), modeStr);
+
+  Serial.printf("Is06PinManager: CH%d actionMode set to %s\n", channel, modeStr);
+}
+
+void Is06PinManager::setValidity(int channel, int validity) {
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].validity = validity;
+
+  String valKey = getNvsKey(channel, NVS::CH_VALIDITY_SUFFIX);
+  settings_->setString(valKey.c_str(), String(validity).c_str());
+
+  Serial.printf("Is06PinManager: CH%d validity set to %d\n", channel, validity);
+}
+
+void Is06PinManager::setDebounce(int channel, int debounce) {
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].debounce = debounce;
+
+  String debKey = getNvsKey(channel, NVS::CH_DEBOUNCE_SUFFIX);
+  settings_->setString(debKey.c_str(), String(debounce).c_str());
+
+  Serial.printf("Is06PinManager: CH%d debounce set to %d\n", channel, debounce);
+}
+
+void Is06PinManager::setRateOfChange(int channel, int rateOfChange) {
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidDpChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].rateOfChange = rateOfChange;
+
+  String rocKey = getNvsKey(channel, NVS::CH_RATE_OF_CHANGE_SUFFIX);
+  settings_->setString(rocKey.c_str(), String(rateOfChange).c_str());
+
+  Serial.printf("Is06PinManager: CH%d rateOfChange set to %d\n", channel, rateOfChange);
+}
+
+void Is06PinManager::setName(int channel, const String& name) {
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+  pinSettings_[idx].name = name;
+
+  String nameKey = getNvsKey(channel, NVS::CH_NAME_SUFFIX);
+  settings_->setString(nameKey.c_str(), name.c_str());
+
+  Serial.printf("Is06PinManager: CH%d name set to %s\n", channel, name.c_str());
+}
+
+void Is06PinManager::setAllocation(int channel, const String allocations[], int count) {
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+
+  // 配列クリア
+  for (int i = 0; i < 4; i++) {
+    pinSettings_[idx].allocation[i] = "";
+  }
+
+  // 新しい値を設定（最大4個）
+  int actualCount = min(count, 4);
+  for (int i = 0; i < actualCount; i++) {
+    pinSettings_[idx].allocation[i] = allocations[i];
+  }
+  pinSettings_[idx].allocationCount = actualCount;
+
+  // NVSにCSV形式で保存
+  String allocKey = getNvsKey(channel, NVS::CH_ALLOCATION_SUFFIX);
+  String allocStr = buildAllocationString(channel);
+  settings_->setString(allocKey.c_str(), allocStr.c_str());
+
+  Serial.printf("Is06PinManager: CH%d allocation set to %s\n", channel, allocStr.c_str());
+}
+
+// ============================================================
+// Allocation ヘルパー
+// ============================================================
+void Is06PinManager::parseAllocation(int channel, const String& allocStr) {
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+
+  // 配列クリア
+  for (int i = 0; i < 4; i++) {
+    pinSettings_[idx].allocation[i] = "";
+  }
+  pinSettings_[idx].allocationCount = 0;
+
+  if (allocStr.isEmpty()) return;
+
+  // CSV形式 "CH1,CH2,CH3" をパース
+  int count = 0;
+  int start = 0;
+  int commaPos;
+
+  while ((commaPos = allocStr.indexOf(',', start)) != -1 && count < 4) {
+    String item = allocStr.substring(start, commaPos);
+    item.trim();
+    if (!item.isEmpty()) {
+      pinSettings_[idx].allocation[count++] = item;
+    }
+    start = commaPos + 1;
+  }
+
+  // 最後の要素
+  if (start < (int)allocStr.length() && count < 4) {
+    String item = allocStr.substring(start);
+    item.trim();
+    if (!item.isEmpty()) {
+      pinSettings_[idx].allocation[count++] = item;
+    }
+  }
+
+  pinSettings_[idx].allocationCount = count;
+}
+
+String Is06PinManager::buildAllocationString(int channel) {
+  if (!isValidChannel(channel)) return "";
+
+  int idx = channel - 1;
+  String result = "";
+
+  for (int i = 0; i < pinSettings_[idx].allocationCount; i++) {
+    if (!pinSettings_[idx].allocation[i].isEmpty()) {
+      if (!result.isEmpty()) result += ",";
+      result += pinSettings_[idx].allocation[i];
+    }
+  }
+
+  return result;
+}
+
+// ============================================================
+// StateName 設定 (P1-2)
+// ============================================================
+void Is06PinManager::setStateName(int channel, const String stateNames[], int count) {
+  namespace NVS = AraneaSettingsDefaults::NVSKeys;
+
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+
+  // 配列クリア
+  for (int i = 0; i < 4; i++) {
+    pinSettings_[idx].stateName[i] = "";
+  }
+
+  // 新しい値を設定（最大4個）
+  int actualCount = min(count, 4);
+  for (int i = 0; i < actualCount; i++) {
+    pinSettings_[idx].stateName[i] = stateNames[i];
+  }
+  pinSettings_[idx].stateNameCount = actualCount;
+
+  // NVSにJSON配列形式で保存
+  String key = getNvsKey(channel, NVS::CH_STATE_NAME_SUFFIX);
+  String jsonStr = "[";
+  for (int i = 0; i < actualCount; i++) {
+    if (i > 0) jsonStr += ",";
+    jsonStr += "\"" + stateNames[i] + "\"";
+  }
+  jsonStr += "]";
+  settings_->setString(key.c_str(), jsonStr.c_str());
+
+  Serial.printf("Is06PinManager: CH%d stateName set to %s\n", channel, jsonStr.c_str());
+}
+
+String Is06PinManager::getStateName(int channel, int index) {
+  if (!isValidChannel(channel)) return "";
+  if (index < 0 || index >= 4) return "";
+
+  int idx = channel - 1;
+  return pinSettings_[idx].stateName[index];
+}
+
+void Is06PinManager::parseStateName(int channel, const String& jsonStr) {
+  if (!isValidChannel(channel)) return;
+
+  int idx = channel - 1;
+
+  // 配列クリア
+  for (int i = 0; i < 4; i++) {
+    pinSettings_[idx].stateName[i] = "";
+  }
+  pinSettings_[idx].stateNameCount = 0;
+
+  if (jsonStr.isEmpty()) return;
+
+  // 簡易JSONパース: ["value1","value2",...]
+  int count = 0;
+  int start = jsonStr.indexOf('[');
+  int end = jsonStr.lastIndexOf(']');
+  if (start < 0 || end < 0 || end <= start) return;
+
+  String content = jsonStr.substring(start + 1, end);
+
+  // カンマ区切りで分解（引用符内のカンマは無視）
+  int pos = 0;
+  while (pos < (int)content.length() && count < 4) {
+    // 次の引用符を探す
+    int quoteStart = content.indexOf('"', pos);
+    if (quoteStart < 0) break;
+    int quoteEnd = content.indexOf('"', quoteStart + 1);
+    if (quoteEnd < 0) break;
+
+    pinSettings_[idx].stateName[count++] = content.substring(quoteStart + 1, quoteEnd);
+    pos = quoteEnd + 1;
+  }
+
+  pinSettings_[idx].stateNameCount = count;
 }
 
 // ============================================================

@@ -114,6 +114,17 @@ namespace NVSKeys {
 
     // PIN type keys (ch1_type ~ ch6_type)
     constexpr const char* CH_TYPE_SUFFIX = "_type";
+
+    // PIN setting keys (ch{n}_{suffix})
+    constexpr const char* CH_NAME_SUFFIX = "_name";
+    constexpr const char* CH_ACTION_MODE_SUFFIX = "_mode";
+    constexpr const char* CH_VALIDITY_SUFFIX = "_val";
+    constexpr const char* CH_DEBOUNCE_SUFFIX = "_deb";
+    constexpr const char* CH_RATE_OF_CHANGE_SUFFIX = "_roc";
+    constexpr const char* CH_EXPIRY_DATE_SUFFIX = "_expDt";
+    constexpr const char* CH_EXPIRY_ENABLED_SUFFIX = "_expEn";
+    constexpr const char* CH_STATE_NAME_SUFFIX = "_stn";  // JSON配列として保存
+    constexpr const char* CH_ALLOCATION_SUFFIX = "_alloc"; // CSV形式 "CH1,CH2"
 }
 
 // ============================================================

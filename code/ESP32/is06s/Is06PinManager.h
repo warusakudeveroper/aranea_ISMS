@@ -80,6 +80,9 @@ struct PinSetting {
   int allocationCount = 0;
   int pwmPresets[4] = {0, 30, 60, 100};  // PWMプリセット値
   int presetCount = 4;
+  // stateName: Digital=["on:ON表示","off:OFF表示"], PWM=["0:0%表示","30:30%表示",...]
+  String stateName[4] = {"", "", "", ""};  // 状態名ラベル (P1-2)
+  int stateNameCount = 0;
 };
 
 // ============================================================
@@ -239,6 +242,66 @@ public:
    */
   void setExpiryEnabled(int channel, bool enabled);
 
+  // --- 個別設定セッター (P1-2, P1-3, P1-4, P1-5) ---
+  /**
+   * actionModeを設定 (P1-4)
+   * @param channel チャンネル番号 (1-6)
+   * @param mode ActionMode
+   */
+  void setActionMode(int channel, ActionMode mode);
+
+  /**
+   * Validity（モーメンタリ動作時間）を設定 (P1-5)
+   * @param channel チャンネル番号 (1-6)
+   * @param validity 動作時間 (ms)
+   */
+  void setValidity(int channel, int validity);
+
+  /**
+   * Debounce（デバウンス時間）を設定 (P1-5)
+   * @param channel チャンネル番号 (1-6)
+   * @param debounce デバウンス時間 (ms)
+   */
+  void setDebounce(int channel, int debounce);
+
+  /**
+   * RateOfChange（PWM変化時間）を設定 (P1-5)
+   * @param channel チャンネル番号 (1-4)
+   * @param rateOfChange 変化時間 (ms)
+   */
+  void setRateOfChange(int channel, int rateOfChange);
+
+  /**
+   * PIN名を設定 (P1-2)
+   * @param channel チャンネル番号 (1-6)
+   * @param name 表示名
+   */
+  void setName(int channel, const String& name);
+
+  /**
+   * Allocation（連動先）を設定 (P1-3)
+   * @param channel チャンネル番号 (1-6)
+   * @param allocations 連動先配列 (例: {"CH1", "CH2"})
+   * @param count 連動先数 (最大4)
+   */
+  void setAllocation(int channel, const String allocations[], int count);
+
+  /**
+   * StateName（状態表示名）を設定 (P1-2)
+   * @param channel チャンネル番号 (1-6)
+   * @param stateNames 状態名配列 (例: {"on:解錠", "off:施錠"})
+   * @param count 状態名数 (最大4)
+   */
+  void setStateName(int channel, const String stateNames[], int count);
+
+  /**
+   * StateName（状態表示名）を取得
+   * @param channel チャンネル番号 (1-6)
+   * @param index 状態インデックス
+   * @return 状態名（見つからない場合は空文字）
+   */
+  String getStateName(int channel, int index);
+
   // --- コールバック ---
   /**
    * 状態変化コールバックを設定
@@ -300,6 +363,13 @@ private:
 
   // ExpiryDate helper (P3-5)
   time_t parseExpiryDate(const String& expiryDate);
+
+  // Allocation helper (P1-3)
+  void parseAllocation(int channel, const String& allocStr);
+  String buildAllocationString(int channel);
+
+  // StateName helper (P1-2)
+  void parseStateName(int channel, const String& jsonStr);
 };
 
 #endif // IS06_PIN_MANAGER_H
