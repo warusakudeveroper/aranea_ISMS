@@ -238,6 +238,8 @@ bool Is06PinManager::setPinState(int channel, int state) {
     } else {
       // オルタネート: トグル
       pinStates_[idx].digitalState = newState;
+      // Must Fix #2: Altモードでもdebounceを適用（チャタリング/連打抑止）
+      pinStates_[idx].debounceEnd = now + (unsigned long)getEffectiveDebounce(channel);
       applyDigitalOutput(channel, newState);
       Serial.printf("Is06PinManager: CH%d alternate set to %d\n", channel, newState);
     }
@@ -352,6 +354,32 @@ void Is06PinManager::setPinType(int channel, ::PinType type) {
 
   int idx = channel - 1;
   pinSettings_[idx].type = type;
+
+  // PinType変更時、actionModeを適切なデフォルトに補正（整合バリデーション）
+  switch (type) {
+    case ::PinType::DIGITAL_OUTPUT:
+      // Digital Output: MOMENTARY or ALTERNATE のみ許可
+      if (pinSettings_[idx].actionMode != ::ActionMode::MOMENTARY &&
+          pinSettings_[idx].actionMode != ::ActionMode::ALTERNATE) {
+        pinSettings_[idx].actionMode = ::ActionMode::MOMENTARY;
+        Serial.printf("Is06PinManager: CH%d actionMode corrected to MOMENTARY\n", channel);
+      }
+      break;
+    case ::PinType::PWM_OUTPUT:
+      // PWM Output: SLOW or RAPID のみ許可
+      if (pinSettings_[idx].actionMode != ::ActionMode::SLOW &&
+          pinSettings_[idx].actionMode != ::ActionMode::RAPID) {
+        pinSettings_[idx].actionMode = ::ActionMode::SLOW;
+        Serial.printf("Is06PinManager: CH%d actionMode corrected to SLOW\n", channel);
+      }
+      break;
+    case ::PinType::DIGITAL_INPUT:
+      // Digital Input: MOMENTARY, ALTERNATE, ROTATE 許可
+      // 特に補正不要（全て有効）
+      break;
+    default:
+      break;
+  }
 
   // GPIOモード再設定
   if (type == ::PinType::DIGITAL_INPUT) {
@@ -784,12 +812,41 @@ void Is06PinManager::setActionMode(int channel, ::ActionMode mode) {
   if (!isValidChannel(channel)) return;
 
   int idx = channel - 1;
-  pinSettings_[idx].actionMode = mode;
+
+  // PinTypeに対して許可されたactionModeかチェック（整合バリデーション）
+  ::ActionMode validatedMode = mode;
+  switch (pinSettings_[idx].type) {
+    case ::PinType::DIGITAL_OUTPUT:
+      // MOMENTARY or ALTERNATE のみ
+      if (mode != ::ActionMode::MOMENTARY && mode != ::ActionMode::ALTERNATE) {
+        validatedMode = ::ActionMode::MOMENTARY;
+        Serial.printf("Is06PinManager: CH%d actionMode %d invalid for DO, using MOMENTARY\n", channel, (int)mode);
+      }
+      break;
+    case ::PinType::PWM_OUTPUT:
+      // SLOW or RAPID のみ
+      if (mode != ::ActionMode::SLOW && mode != ::ActionMode::RAPID) {
+        validatedMode = ::ActionMode::SLOW;
+        Serial.printf("Is06PinManager: CH%d actionMode %d invalid for PWM, using SLOW\n", channel, (int)mode);
+      }
+      break;
+    case ::PinType::DIGITAL_INPUT:
+      // MOMENTARY, ALTERNATE, ROTATE 許可
+      if (mode != ::ActionMode::MOMENTARY && mode != ::ActionMode::ALTERNATE && mode != ::ActionMode::ROTATE) {
+        validatedMode = ::ActionMode::MOMENTARY;
+        Serial.printf("Is06PinManager: CH%d actionMode %d invalid for DI, using MOMENTARY\n", channel, (int)mode);
+      }
+      break;
+    default:
+      break;
+  }
+
+  pinSettings_[idx].actionMode = validatedMode;
 
   // NVSに保存
   String modeKey = getNvsKey(channel, NVS::CH_ACTION_MODE_SUFFIX);
   const char* modeStr = "";
-  switch (mode) {
+  switch (validatedMode) {
     case ::ActionMode::MOMENTARY: modeStr = ASD::ActionMode::MOMENTARY; break;
     case ::ActionMode::ALTERNATE: modeStr = ASD::ActionMode::ALTERNATE; break;
     case ::ActionMode::SLOW: modeStr = ASD::ActionMode::SLOW; break;

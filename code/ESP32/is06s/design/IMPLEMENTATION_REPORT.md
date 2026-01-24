@@ -1,9 +1,9 @@
 # IS06S 実装状況報告書
 
-**報告日**: 2026-01-24
+**報告日**: 2026-01-25（レビュー対応更新）
 **報告者**: Claude Code (開発支援)
 **デバイス**: IS06S (aranea_ar-is06s)
-**ステータス**: ✅ **実装完了** - レビュー依頼可能
+**ステータス**: ✅ **実装完了・レビュー対応済み**
 
 ---
 
@@ -224,10 +224,11 @@ GAP_ANALYSIS.mdで指摘された乖離項目（38%）を全て解消し、実�
 ## 10. コンパイル情報
 
 ```
-フラッシュ使用: 1,438,801 / 1,966,080 バイト (73%)
+フラッシュ使用: 1,440,641 / 1,966,080 バイト (73%)
 RAM使用: 53,872 / 327,680 バイト (16%)
 パーティション: min_spiffs (OTA対応)
 ```
+（2026-01-25 レビュー対応後更新）
 
 ---
 
@@ -252,9 +253,44 @@ code/ESP32/is06s/
 
 ---
 
-## 12. 結論
+## 12. レビュー対応（2026-01-25）
+
+review5.md, review6.mdによる指摘を受けて以下の修正を実施。
+
+### 12.1 Must Fix 対応
+
+| 項目 | 問題 | 対応 | 状況 |
+|------|------|------|------|
+| /api/pin/all | 設定値が含まれていない | buildAllPinsJson()に全設定追加 | ✅ |
+| Alt debounce | トグル時のdebounce未適用 | setPinState()でdebounceEnd更新追加 | ✅ |
+| ドキュメント整合 | 実装と記述のズレ | review_response.mdで明確化 | ✅ |
+
+### 12.2 Should Fix 対応
+
+| 項目 | 問題 | 対応 | 状況 |
+|------|------|------|------|
+| Type×Mode検証 | 不正な組み合わせ許可 | setPinType/setActionModeでバリデーション | ✅ |
+| HTMLエスケープ | XSS/HTML破損リスク | escapeHtml()関数追加 | ✅ |
+| SaveAll範囲 | allocation/expiry未送信 | savePinSettings()全フィールド対応 | ✅ |
+| allocation検証 | 同一タイプ縛りなし | 未対応（Medium Priority） | - |
+| stateName JSON | エスケープ脆弱性 | 未対応（Low Priority） | - |
+
+### 12.3 追加されたバリデーション
+
+**PinType × ActionMode 整合性チェック**:
+- Digital Output → MOMENTARY/ALTERNATE のみ
+- PWM Output → SLOW/RAPID のみ
+- Digital Input → MOMENTARY/ALTERNATE/ROTATE
+
+詳細は [review_response.md](./review/review_response.md) を参照。
+
+---
+
+## 13. 結論
 
 IS06SはDesignerInstructions.mdに基づく全機能の実装が完了しました。
+レビュー指摘事項のMust Fix項目はすべて対応済みです。
+
 以下の動作確認が完了しています：
 
 - ✅ PIN制御 (Digital Output / PWM Output / Digital Input)
@@ -263,20 +299,24 @@ IS06SはDesignerInstructions.mdに基づく全機能の実装が完了しまし�
 - ✅ 全PIN設定のNVS永続化
 - ✅ システムボタン (Reconnect / Reset)
 - ✅ OLED表示
-- ✅ Web UI (PIN Control / PIN Settings)
-- ✅ HTTP API (全設定対応)
+- ✅ Web UI (PIN Control / PIN Settings) - 全設定一括保存対応
+- ✅ HTTP API (全設定対応) - /api/pin/all で状態＋設定を返却
 - ✅ MQTT双方向通信
 - ✅ State Report送信
 - ✅ OTAアップデート
 - ✅ スキーマ登録
+- ✅ PinType×ActionMode整合性バリデーション
 
-**レビュー完了後、本番環境での運用開始が可能な状態です。**
+**本番環境での運用開始が可能な状態です。**
 
 ---
 
-## 13. 参考リンク
+## 14. 参考リンク
 
 - [DesignerInstructions.md](./DesignerInstructions.md) - 設計指示書
 - [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) - 乖離分析（解消済み）
 - [TYPE_REGISTRATION_ISSUE.md](./TYPE_REGISTRATION_ISSUE.md) - スキーマ登録問題解決報告
 - [aranea_ar-is06s.json](../../../araneaSDK/schemas/types/aranea_ar-is06s.json) - デバイススキーマ
+- [review5.md](./review/review5.md) - 外部レビュー（静的コードレビュー）
+- [review6.md](./review/review6.md) - 外部レビュー（報告書整合レビュー）
+- [review_response.md](./review/review_response.md) - レビュー対応報告

@@ -77,6 +77,11 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         .catch(function(e) { console.error('Load pin states error:', e); });
     }
 
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
     function getStateLabel(stateName, stateVal, defaultOn, defaultOff) {
       if (!stateName || stateName.length === 0) return stateVal ? defaultOn : defaultOff;
       var target = stateVal ? 'on:' : 'off:';
@@ -180,7 +185,11 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         html += '<div class="form-group"><label>Validity (ms)</label><input type="number" id="validity-' + ch + '" value="' + (p.validity || 0) + '" min="0" step="100"></div>';
         html += '<div class="form-group"><label>Debounce (ms)</label><input type="number" id="debounce-' + ch + '" value="' + (p.debounce || 0) + '" min="0" step="100"></div>';
         html += '<div class="form-group"><label>Rate of Change (ms)</label><input type="number" id="rateOfChange-' + ch + '" value="' + (p.rateOfChange || 0) + '" min="0" step="100"></div>';
-        html += '<div class="form-group"><label>State Names</label><input type="text" id="stateName-' + ch + '" value="' + stn.join(',') + '" placeholder="on:ON,off:OFF"></div>';
+        html += '<div class="form-group"><label>State Names</label><input type="text" id="stateName-' + ch + '" value="' + escapeHtml(stn.join(',')) + '" placeholder="on:ON,off:OFF"></div>';
+        var alloc = p.allocation || [];
+        html += '<div class="form-group"><label>Allocation (I/O)</label><input type="text" id="allocation-' + ch + '" value="' + escapeHtml(alloc.join(',')) + '" placeholder="CH1,CH2"></div>';
+        html += '<div class="form-group"><label>Expiry Date</label><input type="text" id="expiryDate-' + ch + '" value="' + (p.expiryDate || '') + '" placeholder="YYYYMMDDHHMM"></div>';
+        html += '<div class="form-group"><label>Expiry Enabled</label><input type="checkbox" id="expiryEnabled-' + ch + '"' + (p.expiryEnabled ? ' checked' : '') + '></div>';
         html += '</div>';
       }
       list.innerHTML = html;
@@ -194,6 +203,8 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         var ch = card.getAttribute('data-ch');
         var stnStr = document.getElementById('stateName-' + ch).value;
         var stnArr = stnStr ? stnStr.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
+        var allocStr = document.getElementById('allocation-' + ch).value;
+        var allocArr = allocStr ? allocStr.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
         var setting = {
           type: document.getElementById('type-' + ch).value,
           name: document.getElementById('name-' + ch).value,
@@ -201,7 +212,10 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
           validity: parseInt(document.getElementById('validity-' + ch).value) || 0,
           debounce: parseInt(document.getElementById('debounce-' + ch).value) || 0,
           rateOfChange: parseInt(document.getElementById('rateOfChange-' + ch).value) || 0,
-          stateName: stnArr
+          stateName: stnArr,
+          allocation: allocArr,
+          expiryDate: document.getElementById('expiryDate-' + ch).value || '',
+          expiryEnabled: document.getElementById('expiryEnabled-' + ch).checked
         };
         promises.push(
           fetch('/api/pin/' + ch + '/setting', {
@@ -653,7 +667,24 @@ void HttpManagerIs06s::buildPinSettingJson(JsonObject& obj, int channel) {
 void HttpManagerIs06s::buildAllPinsJson(JsonArray& arr) {
   for (int ch = 1; ch <= 6; ch++) {
     JsonObject p = arr.createNestedObject();
+    // Must Fix #1: 状態と設定の両方を含める（PIN Settingsタブ対応）
     buildPinStateJson(p, ch);
+    // 設定値も追加（buildPinStateJsonに含まれないもの）
+    if (pinManager_) {
+      const PinSetting& setting = pinManager_->getPinSetting(ch);
+      p["validity"] = setting.validity;
+      p["debounce"] = setting.debounce;
+      p["rateOfChange"] = setting.rateOfChange;
+      p["expiryDate"] = setting.expiryDate;
+      p["expiryEnabled"] = setting.expiryEnabled;
+      // allocation
+      JsonArray allocArr = p.createNestedArray("allocation");
+      for (int i = 0; i < setting.allocationCount; i++) {
+        if (!setting.allocation[i].isEmpty()) {
+          allocArr.add(setting.allocation[i]);
+        }
+      }
+    }
   }
 }
 
