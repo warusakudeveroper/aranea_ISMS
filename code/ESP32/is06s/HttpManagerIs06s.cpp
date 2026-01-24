@@ -42,8 +42,8 @@ void HttpManagerIs06s::getTypeSpecificStatus(JsonObject& obj) {
 // ============================================================
 String HttpManagerIs06s::generateTypeSpecificTabs() {
   String html = "";
-  html += "<button class=\"tab-btn\" data-tab=\"pincontrol\">PIN Control</button>";
-  html += "<button class=\"tab-btn\" data-tab=\"pinsetting\">PIN Settings</button>";
+  html += "<div class=\"tab\" data-tab=\"pincontrol\" onclick=\"showTab('pincontrol')\">PIN Control</div>";
+  html += "<div class=\"tab\" data-tab=\"pinsetting\" onclick=\"showTab('pinsetting')\">PIN Settings</div>";
   return html;
 }
 
@@ -52,15 +52,14 @@ String HttpManagerIs06s::generateTypeSpecificTabs() {
 // ============================================================
 String HttpManagerIs06s::generateTypeSpecificTabContents() {
   String html = "";
-  html += "<div id=\"pincontrol\" class=\"tab-content\">";
-  html += "<h3>PIN Control</h3>";
-  html += "<div class=\"pin-grid\" id=\"pin-control-grid\"></div>";
+  html += "<div id=\"tab-pincontrol\" class=\"tab-content\">";
+  html += "<div class=\"card\"><div class=\"card-title\">PIN Control</div>";
+  html += "<div class=\"pin-grid\" id=\"pin-control-grid\"></div></div>";
   html += "</div>";
-  html += "<div id=\"pinsetting\" class=\"tab-content\">";
-  html += "<h3>PIN Settings</h3>";
+  html += "<div id=\"tab-pinsetting\" class=\"tab-content\">";
+  html += "<div class=\"card\"><div class=\"card-title\">PIN Settings</div>";
   html += "<div class=\"pin-settings\" id=\"pin-settings-list\"></div>";
-  html += "<div class=\"form-buttons\">";
-  html += "<button type=\"button\" onclick=\"savePinSettings()\" class=\"btn-primary\">Save All Settings</button>";
+  html += "<div class=\"btn-group\"><button class=\"btn btn-primary\" onclick=\"savePinSettings()\">Save All Settings</button></div>";
   html += "</div></div>";
   return html;
 }

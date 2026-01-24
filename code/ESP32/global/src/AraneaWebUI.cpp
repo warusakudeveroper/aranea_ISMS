@@ -1390,6 +1390,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .scan-item:hover{background:var(--bg-secondary)}
 .scan-item .ssid{font-weight:500}
 .scan-item .info{font-size:12px;color:var(--text-muted)}
+.pin-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.pin-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative}
+.pin-card.disabled{opacity:.5}
+.pin-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.pin-name{font-weight:600;font-size:14px}
+.pin-type{font-size:11px;color:var(--text-muted);text-transform:uppercase}
+.pin-control{margin:12px 0}
+.btn-toggle{padding:8px 20px;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;width:100%}
+.btn-toggle.on{background:var(--success);color:#fff}
+.btn-toggle.off{background:var(--border);color:var(--text)}
+.btn-toggle:disabled{cursor:not-allowed;opacity:.6}
+.input-state{display:block;text-align:center;padding:8px;background:var(--bg);border-radius:4px;font-weight:500}
+.switch{position:relative;display:inline-block;width:44px;height:24px}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:var(--border);transition:.3s;border-radius:24px}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background-color:#fff;transition:.3s;border-radius:50%}
+input:checked+.slider{background-color:var(--accent)}
+input:checked+.slider:before{transform:translateX(20px)}
+.pin-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.pin-setting-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px}
+.pin-setting-card h4{margin-bottom:12px;color:var(--primary)}
 @media(max-width:600px){.form-row{flex-direction:column}.tabs{gap:0}.tab{padding:8px 12px;font-size:12px}}
 </style>
 )CSS";
@@ -1488,6 +1509,8 @@ function showTab(n){
   document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
   document.querySelector(`[data-tab="${n}"]`).classList.add('active');
   document.getElementById(`tab-${n}`).classList.add('active');
+  // Fire custom event for type-specific tabs
+  document.dispatchEvent(new CustomEvent('tabchange',{detail:n}));
 }
 async function saveNetwork(){
   const wifi=[];
@@ -1535,11 +1558,14 @@ async function refreshStatus(){
   }catch(e){}
 }
 window.onload=()=>{load();refreshStatus();setInterval(refreshStatus,5000)};
-</script>
 )JS";
 
-  // 派生クラスの追加JS
+  // 派生クラスの追加JS（</script>タグの前に挿入）
   js += generateTypeSpecificJS();
+
+  js += R"JS(
+</script>
+)JS";
 
   return js;
 }
