@@ -324,19 +324,10 @@ void setup() {
   Serial.println("StateReporter: Initialized");
 
   // MQTT初期化（P2-4, P2-5）
-  // 注意: ESP-IDF TLS設定問題でMQTT WSS接続がエラー
-  // "No server verification option set" - 証明書なし設定が未対応
-  // → MQTT一時無効化、StateReporter（setInsecure()済み）のみ有効
-  // TODO: MQTT over non-TLS (mqtt://) または HTTP long polling への移行検討
-#if 0  // MQTT無効化（TLS設定問題）
+  // Serial出力削減で安定化確認済み - MQTT再有効化
   if (wifiConnected) {
-    Serial.printf("MQTT: Free heap before init: %d bytes\n", ESP.getFreeHeap());
     initMqtt();
   }
-#else
-  Serial.println("MQTT: Disabled (TLS configuration issue)");
-  mqttEnabled = false;
-#endif
 
   Serial.println("Setup complete.");
   display.showBoot("IS06S Ready");

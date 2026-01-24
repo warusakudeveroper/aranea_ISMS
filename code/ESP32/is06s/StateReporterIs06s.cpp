@@ -123,14 +123,12 @@ bool StateReporterIs06s::sendStateReport(bool force) {
         yield();
     }
 
-    // クラウドURL（HTTPS）を一時無効化 - TLSクラッシュ問題未解決
-    // TODO: TLS安定化後に再有効化
-    // if (cloudUrl_.length() > 0 && tid_.length() > 0 && cic_.length() > 0) {
-    //     String cloudPayload = buildCloudPayload();
-    //     if (postToUrl(cloudUrl_, cloudPayload)) successCount++;
-    //     yield();
-    // }
-    Serial.println("[StateReporter] Cloud URL skipped (TLS stability issue)");
+    // クラウドURL（HTTPS）送信 - Serial出力削減で安定化確認済み
+    if (cloudUrl_.length() > 0 && tid_.length() > 0 && cic_.length() > 0) {
+        String cloudPayload = buildCloudPayload();
+        if (postToUrl(cloudUrl_, cloudPayload)) successCount++;
+        yield();
+    }
 
     if (successCount > 0) {
         sentCount_++;
