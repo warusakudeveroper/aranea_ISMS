@@ -3,6 +3,7 @@
 **報告日**: 2026-01-24
 **報告者**: Claude Code (開発支援)
 **デバイス**: IS06S (ar-is06s)
+**ステータス**: ✅ **解決済み** (2026-01-24)
 
 ---
 
@@ -10,6 +11,25 @@
 
 `deviceStateReport` API呼び出し時に `TYPE_MISMATCH` 警告が継続して発生する。
 SDK経由での登録は完了しているが、警告が解消されない。
+
+### 解決結果
+
+**原因**: `userTypeDefinitions/araneaDevice__aranea_ar-is06s`ドキュメントのフィールド名が誤っていた
+- 誤: `typeDomainId`, `typeId`
+- 正: `typeDomain`, `type`
+
+**対応**: 開発チームがFirestoreドキュメントに正しいフィールドを追加
+
+**確認**: キャッシュTTL(5分)経過後、State Reportで警告なしを確認
+```json
+{
+  "ok": true,
+  "duplicate": false,
+  "dedupHash": "5d60b5de39eae03990deec2fde8d729404e9a3b313c1a6a063ed38c2a1f09086",
+  "semanticTags": [],
+  "bigQueryRowId": "evt_1769241954517_6a2xq8"
+}
+```
 
 ---
 
@@ -126,15 +146,33 @@ SDK登録パスと deviceStateReport の検証パスが異なる可能性があ�
 
 ---
 
-## 5. 質問事項
+## 5. 質問事項 → 回答済み
 
 1. **TYPE_MISMATCH警告を解消するために必要な追加登録手順はありますか？**
+   → `userTypeDefinitions`ドキュメントに`typeDomain`と`type`フィールドが必要
 
 2. **deviceStateReportがType検証で参照するFirestoreコレクションはどこですか？**
-   - `araneaSDK/typeSettings/schemas/` と `typeSettings/araneaDevice/` の関係は？
+   → `userTypeDefinitions/araneaDevice__{type}`を参照（5分キャッシュあり）
 
 3. **過去の他デバイス(is04a, is05a等)はどのような手順で登録しましたか？**
-   - SDK以外の登録方法がある場合、教えてください
+   → SDK経由で同様に登録。フィールド名の不整合が本問題の原因だった
+
+---
+
+## 7. 根本原因と教訓
+
+### 根本原因
+`aranea-sdk type create`コマンドが生成するFirestoreドキュメントのフィールド名が、
+`deviceStateReport`が期待するフィールド名と一致していなかった。
+
+| 生成されたフィールド | 期待されるフィールド |
+|---------------------|---------------------|
+| `typeDomainId` | `typeDomain` |
+| `typeId` | `type` |
+
+### 教訓
+- SDK登録後も警告が出る場合は、Firestoreドキュメントのフィールド構造を直接確認する
+- `deviceStateReport`は`userTypeDefinitions`コレクションを5分間キャッシュする
 
 ---
 
