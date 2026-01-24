@@ -293,20 +293,13 @@ String StateReporterIs06s::buildCloudPayload() {
 bool StateReporterIs06s::postToUrl(const String& url, const String& payload) {
     if (url.length() == 0) return false;
 
-    Serial.printf("[StateReporter] Heap before: %d\n", ESP.getFreeHeap());
-
     HTTPClient http;
     bool success = false;
 
-    // HTTPS URLの場合、WiFiClientSecureを使用してsetInsecure()を適用
-    // 注意: 静的変数を使わず毎回新規インスタンスを作成（TLSセッション蓄積回避）
     if (url.startsWith("https://")) {
         WiFiClientSecure* secureClient = new WiFiClientSecure();
-        if (!secureClient) {
-            Serial.println("[StateReporter] Failed to allocate WiFiClientSecure");
-            return false;
-        }
-        secureClient->setInsecure();  // 証明書検証スキップ（メモリ節約）
+        if (!secureClient) return false;
+        secureClient->setInsecure();
 
         http.begin(*secureClient, url);
         http.addHeader("Content-Type", "application/json");
@@ -316,14 +309,8 @@ bool StateReporterIs06s::postToUrl(const String& url, const String& payload) {
         yield();
 
         success = (httpCode >= 200 && httpCode < 300);
-        if (success) {
-            Serial.printf("[StateReporter] OK %d -> %s\n", httpCode, url.substring(0, 50).c_str());
-        } else {
-            Serial.printf("[StateReporter] NG %d -> %s\n", httpCode, url.substring(0, 50).c_str());
-        }
-
         http.end();
-        delete secureClient;  // 明示的に解放
+        delete secureClient;
     } else {
         http.begin(url);
         http.addHeader("Content-Type", "application/json");
@@ -333,15 +320,8 @@ bool StateReporterIs06s::postToUrl(const String& url, const String& payload) {
         yield();
 
         success = (httpCode >= 200 && httpCode < 300);
-        if (success) {
-            Serial.printf("[StateReporter] OK %d -> %s\n", httpCode, url.substring(0, 50).c_str());
-        } else {
-            Serial.printf("[StateReporter] NG %d -> %s\n", httpCode, url.substring(0, 50).c_str());
-        }
-
         http.end();
     }
 
-    Serial.printf("[StateReporter] Heap after: %d\n", ESP.getFreeHeap());
     return success;
 }
