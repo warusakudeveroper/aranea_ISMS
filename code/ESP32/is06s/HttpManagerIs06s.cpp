@@ -5,6 +5,7 @@
  */
 
 #include "HttpManagerIs06s.h"
+#include <driver/gpio.h>  // ESP-IDF GPIO for handleDebugGpio()
 
 // ============================================================
 // コンストラクタ/デストラクタ
@@ -571,6 +572,9 @@ void HttpManagerIs06s::registerTypeSpecificEndpoints() {
   server_->on("/api/settings", HTTP_GET, [this]() { handleSettingsGet(); });
   server_->on("/api/settings", HTTP_POST, [this]() { handleSettingsPost(); });
 
+  // GPIO診断API (review8.md)
+  server_->on("/api/debug/gpio", HTTP_GET, [this]() { handleDebugGpio(); });
+
   Serial.println("HttpManagerIs06s: PIN API endpoints registered.");
 }
 
@@ -1095,4 +1099,164 @@ void HttpManagerIs06s::handleSettingsPost() {
   } else {
     sendJsonSuccess("No changes");
   }
+}
+
+// ============================================================
+// GPIO診断API (review8.md対応)
+// GPIO Matrix状態と高頻度サンプリングで診断
+// ============================================================
+void HttpManagerIs06s::handleDebugGpio() {
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["description"] = "GPIO diagnostic (review8.md Method A+B)";
+
+  // 診断対象GPIO: CH1-4のみ（問題のあるGPIO18, GPIO5を含む）
+  const int TARGET_GPIOS[] = {18, 5, 15, 27};  // CH1, CH2, CH3, CH4
+  const int TARGET_COUNT = 4;
+
+  JsonArray gpios = doc.createNestedArray("gpios");
+
+  for (int i = 0; i < TARGET_COUNT; i++) {
+    int pin = TARGET_GPIOS[i];
+    JsonObject g = gpios.createNestedObject();
+    g["gpio"] = pin;
+    g["channel"] = i + 1;
+
+    // === Method B: GPIO Matrix Register Read ===
+    // GPIO_FUNCx_OUT_SEL_CFG_REG: bits 8:0 = signal output index
+    // Signal ID 256 = simple GPIO output
+    // Other values = peripheral (LEDC, SPI, etc.)
+    volatile uint32_t* funcOutSelReg = (volatile uint32_t*)(0x3FF44530 + (pin * 4));
+    uint32_t regValue = *funcOutSelReg;
+    int sigOutId = regValue & 0x1FF;  // bits 8:0
+    g["sigOutId"] = sigOutId;
+    g["sigOutIdHex"] = String("0x") + String(sigOutId, HEX);
+    g["isSimpleGpio"] = (sigOutId == 256);
+
+    // GPIOの現在レベル（単発）
+    int currentLevel = gpio_get_level((gpio_num_t)pin);
+    g["currentLevel"] = currentLevel;
+
+    // === 追加診断: GPIO_OUT_REG, GPIO_ENABLE_REG, GPIO_IN_REG 直接読み取り ===
+    // GPIO_OUT_REG (0x3FF44004): 出力ラッチの状態
+    // GPIO_ENABLE_REG (0x3FF44020): 出力有効化状態
+    // GPIO_IN_REG (0x3FF4403C): 入力レベル
+    volatile uint32_t* gpioOutReg = (volatile uint32_t*)0x3FF44004;
+    volatile uint32_t* gpioEnableReg = (volatile uint32_t*)0x3FF44020;
+    volatile uint32_t* gpioInReg = (volatile uint32_t*)0x3FF4403C;
+    bool outBit = (*gpioOutReg >> pin) & 1;
+    bool enableBit = (*gpioEnableReg >> pin) & 1;
+    bool inBit = (*gpioInReg >> pin) & 1;
+    g["gpioOutBit"] = outBit ? 1 : 0;
+    g["gpioEnableBit"] = enableBit ? 1 : 0;
+    g["gpioInBit"] = inBit ? 1 : 0;
+
+    // === GPIO_PINx_REG: オープンドレイン設定確認 ===
+    // GPIO_PINx_REG: bit 2 = PAD_DRIVER (0=push-pull, 1=open-drain)
+    volatile uint32_t* gpioPinReg = (volatile uint32_t*)(0x3FF44088 + pin * 4);
+    uint32_t pinRegValue = *gpioPinReg;
+    bool isOpenDrain = (pinRegValue >> 2) & 1;
+    g["isOpenDrain"] = isOpenDrain;
+    g["gpioPinReg"] = String("0x") + String(pinRegValue, HEX);
+
+    // === IO_MUX Register: GPIO function選択確認 ===
+    // IO_MUXレジスタはGPIO番号によってオフセットが異なる
+    // bits 14:12 = MCU_SEL (function select, 2=GPIO)
+    // bits 7 = FUN_OE (output enable)
+    // bits 0 = SLP_SEL (sleep mode)
+    static const uint16_t IOMUX_OFFSETS[] = {
+      0x44, 0x88, 0x40, 0x84, 0x48, 0x6C, // GPIO 0-5
+      0,0,0,0,0,0, // GPIO 6-11 (flash, not available)
+      0x34, 0x38, 0x30, 0x4C, 0x50, 0x54, // GPIO 12-17
+      0x70, 0x74, 0, 0x7C, 0x80, 0x8C, // GPIO 18-23 (20 not available)
+      0, 0x24, 0x28, 0x2C // GPIO 24-27
+    };
+    uint16_t iomuxOffset = 0;
+    if (pin < 28) iomuxOffset = IOMUX_OFFSETS[pin];
+    if (iomuxOffset != 0) {
+      volatile uint32_t* iomuxReg = (volatile uint32_t*)(0x3FF49000 + iomuxOffset);
+      uint32_t iomuxValue = *iomuxReg;
+      int funSel = (iomuxValue >> 12) & 0x7;  // MCU_SEL bits 14:12
+      bool funOe = (iomuxValue >> 7) & 1;     // FUN_OE bit 7
+      g["iomuxReg"] = String("0x") + String(iomuxValue, HEX);
+      g["iomuxFunSel"] = funSel;  // 2 = GPIO function
+      g["iomuxFunOe"] = funOe;
+    }
+
+    // Is06PinManagerからのソフトウェア状態
+    if (pinManager_) {
+      int swState = pinManager_->getPinState(i + 1);
+      g["softwareState"] = swState;
+    }
+
+    // === Method A: High-frequency sampling with delay ===
+    // 100ms遅延後に1000サンプルを高速取得してPWM/トグルを検出
+    delay(100);  // 他のコードが介入する時間を与える
+
+    const int SAMPLE_COUNT = 1000;
+    int highCount = 0;
+    int lowCount = 0;
+    int transitions = 0;
+    int lastSample = gpio_get_level((gpio_num_t)pin);
+
+    for (int s = 0; s < SAMPLE_COUNT; s++) {
+      int sample = gpio_get_level((gpio_num_t)pin);
+      if (sample == 1) {
+        highCount++;
+      } else {
+        lowCount++;
+      }
+      if (sample != lastSample) {
+        transitions++;
+        lastSample = sample;
+      }
+      if (s % 100 == 0) delayMicroseconds(10);  // 時間分散
+    }
+
+    // 遅延後の状態
+    g["delayedLevel"] = gpio_get_level((gpio_num_t)pin);
+
+    g["sampleCount"] = SAMPLE_COUNT;
+    g["highCount"] = highCount;
+    g["lowCount"] = lowCount;
+    g["transitions"] = transitions;
+    g["highPercent"] = (highCount * 100) / SAMPLE_COUNT;
+
+    // 診断結果の解釈
+    String diagnosis = "";
+    if (transitions > 10) {
+      diagnosis = "PWM_DETECTED: Pin is toggling (peripheral driving)";
+    } else if (sigOutId != 256) {
+      diagnosis = "PERIPHERAL_ASSIGNED: SigOut=" + String(sigOutId) + " (not GPIO)";
+    } else if (highCount == SAMPLE_COUNT) {
+      diagnosis = "STABLE_HIGH: Simple GPIO, DC high";
+    } else if (lowCount == SAMPLE_COUNT) {
+      diagnosis = "STABLE_LOW: Simple GPIO, DC low";
+    } else {
+      diagnosis = "UNSTABLE: Mixed readings without transitions";
+    }
+    g["diagnosis"] = diagnosis;
+
+    // LEDCチャンネル状態（Is06PinManagerから取得可能であれば）
+    if (pinManager_ && i < 4) {
+      // 注: ledcChannel_はprivateなので外部からはアクセス不可
+      // setPinType()を経由して取得するか、公開メソッドが必要
+      // 今回は「type」から推測
+      const PinSetting& setting = pinManager_->getPinSetting(i + 1);
+      g["configuredType"] = (setting.type == ::PinType::PWM_OUTPUT) ? "pwmOutput" :
+                           (setting.type == ::PinType::DIGITAL_OUTPUT) ? "digitalOutput" :
+                           (setting.type == ::PinType::DIGITAL_INPUT) ? "digitalInput" : "disabled";
+    }
+  }
+
+  // GPIO Matrix peripheral reference (参考情報)
+  JsonObject reference = doc.createNestedObject("sigOutIdReference");
+  reference["256"] = "Simple GPIO output";
+  reference["79-86"] = "LEDC channels (PWM)";
+  reference["63"] = "SPICLK (VSPI/HSPI)";
+  reference["68"] = "SPICS0 (VSPI/HSPI)";
+
+  String response;
+  serializeJson(doc, response);
+  server_->send(200, "application/json", response);
 }

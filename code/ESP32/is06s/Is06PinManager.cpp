@@ -6,6 +6,9 @@
 
 #include "Is06PinManager.h"
 #include <time.h>
+#include <driver/gpio.h>  // ESP-IDF GPIO API
+#include <rom/gpio.h>     // gpio_matrix_out, gpio_pad_select_gpio
+#include <soc/io_mux_reg.h>  // IO_MUX registers
 
 // ============================================================
 // 初期化
@@ -24,6 +27,10 @@ void Is06PinManager::begin(SettingManager* settings, NtpManager* ntp) {
 
   // NVSから設定読み込み
   loadFromNvs();
+
+  // 【重要】NVSから読み込んだ設定をハードウェアに適用
+  // これがないと、NVSにPWM_OUTPUTが保存されていてもLEDCがアタッチされない
+  applyLoadedPinTypes();
 
   Serial.println("Is06PinManager: Initialization complete.");
   printStatus();
@@ -46,21 +53,126 @@ void Is06PinManager::initGpio() {
 void Is06PinManager::initLedc() {
   using namespace AraneaSettingsDefaults;
 
-  // LEDC設定（CH1-4用）
-  Serial.printf("Is06PinManager: LEDC config: freq=%dHz, resolution=%dbit\n",
-                PWM_FREQUENCY, PWM_RESOLUTION);
+  Serial.println("Is06PinManager: Initializing GPIO with explicit LEDC detach...");
 
   for (int i = 0; i < IS06_DP_CHANNELS; i++) {
-    bool ok = ledcAttach(IS06_PIN_MAP[i], PWM_FREQUENCY, PWM_RESOLUTION);
-    if (ok) {
-      ledcWrite(IS06_PIN_MAP[i], 0);
-      Serial.printf("  CH%d (GPIO%d): LEDC attached OK\n", i + 1, IS06_PIN_MAP[i]);
-    } else {
-      Serial.printf("  CH%d (GPIO%d): LEDC attach FAILED!\n", i + 1, IS06_PIN_MAP[i]);
+    int pin = IS06_PIN_MAP[i];
+
+    // 1. LEDCから明示的にデタッチ（以前のアタッチが残っている場合に対応）
+    ledcDetach(pin);
+
+    // 2. LEDCチャンネル管理をクリア
+    ledcChannel_[i] = -1;
+
+    // 3. IO_MUXでGPIO functionを選択
+    gpio_pad_select_gpio(pin);
+
+    // 4. GPIO Matrixで出力をシンプルGPIOに設定
+    gpio_matrix_out(pin, 256, false, false);
+
+    // 5. gpio_config()で完全な設定
+    gpio_config_t io_conf = {};
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_INPUT_OUTPUT;  // 入出力両方を有効化
+    io_conf.pin_bit_mask = (1ULL << pin);
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    gpio_config(&io_conf);
+
+    // 6. ドライブ強度を最大に
+    gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
+    gpio_set_level((gpio_num_t)pin, 0);
+
+    // 7. 確認読み取り
+    int readBack = gpio_get_level((gpio_num_t)pin);
+    Serial.printf("  CH%d (GPIO%d): full config, read=%d\n", i + 1, pin, readBack);
+  }
+
+  Serial.println("Is06PinManager: GPIO initialized (full config, all LOW, drive=MAX).");
+}
+
+// ============================================================
+// NVSから読み込んだ設定をハードウェアに適用
+// ============================================================
+void Is06PinManager::applyLoadedPinTypes() {
+  using namespace AraneaSettingsDefaults;
+
+  Serial.println("Is06PinManager: Applying loaded pin types to hardware...");
+
+  for (int ch = 1; ch <= IS06_CHANNEL_COUNT; ch++) {
+    int idx = ch - 1;
+    ::PinType type = pinSettings_[idx].type;
+    int pin = IS06_PIN_MAP[idx];
+
+    if (type == ::PinType::PWM_OUTPUT && idx < IS06_DP_CHANNELS) {
+      // PWMモード: LEDCアタッチ
+      ledcDetach(pin);
+      int ledcCh = ledcAttach(pin, PWM_FREQUENCY, PWM_RESOLUTION);
+      if (ledcCh >= 0) {
+        ledcChannel_[idx] = ledcCh;
+        ledcWriteChannel(ledcCh, 0);
+        Serial.printf("  CH%d GPIO%d: LEDC attached (ch=%d)\n", ch, pin, ledcCh);
+      } else {
+        ledcChannel_[idx] = -1;
+        // フォールバック: GPIO出力 (full config)
+        gpio_pad_select_gpio(pin);
+        gpio_matrix_out(pin, 256, false, false);
+        gpio_config_t io_conf = {};
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
+        io_conf.pin_bit_mask = (1ULL << pin);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
+        gpio_set_level((gpio_num_t)pin, 0);
+        Serial.printf("  CH%d GPIO%d: LEDC attach failed, using GPIO (full config)\n", ch, pin);
+      }
+    } else if (type == ::PinType::DIGITAL_OUTPUT) {
+      // Digital出力モード - IO_MUXとGPIO Matrixを完全に設定
+      ledcDetach(pin);
+      if (idx < IS06_DP_CHANNELS) ledcChannel_[idx] = -1;
+
+      gpio_pad_select_gpio(pin);
+      gpio_matrix_out(pin, 256, false, false);
+
+      gpio_config_t io_conf = {};
+      io_conf.intr_type = GPIO_INTR_DISABLE;
+      io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
+      io_conf.pin_bit_mask = (1ULL << pin);
+      io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+      io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+      gpio_config(&io_conf);
+
+      gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
+      gpio_set_level((gpio_num_t)pin, 0);
+      Serial.printf("  CH%d GPIO%d: Digital OUTPUT (full config)\n", ch, pin);
+    } else if (type == ::PinType::DIGITAL_INPUT) {
+      // Digital入力モード - IO_MUXを正しく設定
+      ledcDetach(pin);
+      if (idx < IS06_DP_CHANNELS) ledcChannel_[idx] = -1;
+
+      gpio_pad_select_gpio(pin);
+
+      gpio_config_t io_conf = {};
+      io_conf.intr_type = GPIO_INTR_DISABLE;
+      io_conf.mode = GPIO_MODE_INPUT;
+      io_conf.pin_bit_mask = (1ULL << pin);
+      io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+      io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+      gpio_config(&io_conf);
+      Serial.printf("  CH%d GPIO%d: Digital INPUT\n", ch, pin);
+    } else if (type == ::PinType::PIN_DISABLED) {
+      // 無効モード
+      ledcDetach(pin);
+      if (idx < IS06_DP_CHANNELS) ledcChannel_[idx] = -1;
+      gpio_reset_pin((gpio_num_t)pin);
+      gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
+      Serial.printf("  CH%d GPIO%d: DISABLED (Hi-Z)\n", ch, pin);
     }
   }
 
-  Serial.println("Is06PinManager: LEDC initialized.");
+  Serial.println("Is06PinManager: Pin types applied to hardware.");
 }
 
 // ============================================================
@@ -409,16 +521,47 @@ void Is06PinManager::setPinType(int channel, ::PinType type) {
       break;
   }
 
-  // GPIOモード再設定
+  // GPIOモード再設定 (ESP-IDF API使用)
+  int pin = IS06_PIN_MAP[idx];
+
   if (type == ::PinType::DIGITAL_INPUT) {
-    pinMode(IS06_PIN_MAP[idx], INPUT_PULLDOWN);
-  } else if (type == ::PinType::DIGITAL_OUTPUT || type == ::PinType::PWM_OUTPUT) {
-    // CH1-4はLEDCを使用（Digital Output時も ledcWrite(0/255) で制御するため）
-    // pinMode(OUTPUT)はLEDC設定を解除するため、ledcAttachで上書き
-    if (isValidDpChannel(channel)) {
-      ledcAttach(IS06_PIN_MAP[idx], ASD::PWM_FREQUENCY, ASD::PWM_RESOLUTION);
+    ledcDetach(pin);  // LEDC解放
+    if (idx < IS06_DP_CHANNELS) ledcChannel_[idx] = -1;  // チャンネル管理クリア
+    gpio_reset_pin((gpio_num_t)pin);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
+    gpio_set_pull_mode((gpio_num_t)pin, GPIO_PULLDOWN_ONLY);
+    Serial.printf("Is06PinManager: CH%d GPIO%d set to INPUT_PULLDOWN\n", channel, pin);
+  } else if (type == ::PinType::DIGITAL_OUTPUT) {
+    ledcDetach(pin);  // LEDC解放
+    if (idx < IS06_DP_CHANNELS) ledcChannel_[idx] = -1;  // チャンネル管理クリア
+    gpio_reset_pin((gpio_num_t)pin);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)pin, 0);
+    int readBack = gpio_get_level((gpio_num_t)pin);
+    Serial.printf("Is06PinManager: CH%d GPIO%d set to OUTPUT LOW (detach), read=%d\n", channel, pin, readBack);
+  } else if (type == ::PinType::PWM_OUTPUT) {
+    // PWMモード: LEDCアタッチ
+    // 【重要】Arduino-ESP32 3.x: ledcAttach()はint(チャンネル番号)を返す
+    // ch=0は正常値！boolで受けるとch=0がfalseになりCH1が初期化失敗扱いになる
+    ledcDetach(pin);  // 既存のアタッチをクリア
+    int ch = ledcAttach(pin, AraneaSettingsDefaults::PWM_FREQUENCY, AraneaSettingsDefaults::PWM_RESOLUTION);
+    Serial.printf("Is06PinManager: CH%d GPIO%d ledcAttach returned ch=%d\n", channel, pin, ch);
+
+    if (ch >= 0) {
+      // ch >= 0 は成功（ch=0も正常値）
+      ledcChannel_[idx] = ch;
+      // Arduino-ESP32 3.x: ledcWriteChannel(ch, duty) を使用（ledcWrite(pin,duty)は非推奨）
+      ledcWriteChannel(ch, 0);
+      Serial.printf("Is06PinManager: CH%d GPIO%d LEDC attached ch=%d (freq=%d, res=%d)\n",
+                    channel, pin, ch, AraneaSettingsDefaults::PWM_FREQUENCY, AraneaSettingsDefaults::PWM_RESOLUTION);
     } else {
-      pinMode(IS06_PIN_MAP[idx], OUTPUT);
+      // ch < 0 は失敗
+      ledcChannel_[idx] = -1;
+      // LEDC失敗時はGPIO直接制御にフォールバック
+      gpio_reset_pin((gpio_num_t)pin);
+      gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+      gpio_set_level((gpio_num_t)pin, 0);
+      Serial.printf("Is06PinManager: CH%d GPIO%d LEDC attach FAILED (ch=%d), fallback to GPIO\n", channel, pin, ch);
     }
   }
 
@@ -1116,28 +1259,82 @@ void Is06PinManager::parseStateName(int channel, const String& jsonStr) {
 void Is06PinManager::applyDigitalOutput(int channel, int state) {
   if (!isValidChannel(channel)) return;
   int idx = channel - 1;
+  int pin = IS06_PIN_MAP[idx];
 
-  // CH1-4はLEDCにアタッチ済みなのでledcWriteを使用
-  // （digitalWrite()はledcAttach()後は動作しない）
-  if (isValidDpChannel(channel)) {
-    int pwmValue = state ? 255 : 0;
-    ledcWrite(IS06_PIN_MAP[idx], pwmValue);
-  } else {
-    // CH5-6: LEDCアタッチなしのためdigitalWrite使用
-    digitalWrite(IS06_PIN_MAP[idx], state ? HIGH : LOW);
+  // 【重要】LEDCがアタッチされている可能性があるため、まずデタッチ
+  // これがないと、gpio_set_level()が効かない場合がある
+  if (idx < IS06_DP_CHANNELS && ledcChannel_[idx] >= 0) {
+    ledcDetach(pin);
+    ledcChannel_[idx] = -1;
+    Serial.printf("Is06PinManager: CH%d GPIO%d LEDC detached for digital output\n", channel, pin);
   }
+
+  // 【根本原因修正】IO_MUXとGPIO Matrixを明示的に設定
+  // Step 1: IO_MUXでGPIO functionを選択
+  gpio_pad_select_gpio(pin);
+
+  // Step 2: GPIO Matrixで出力をシンプルGPIOに設定 (SIG_GPIO_OUT_IDX = 256)
+  gpio_matrix_out(pin, 256, false, false);
+
+  // Step 3: gpio_config()で完全な設定
+  gpio_config_t io_conf = {};
+  io_conf.intr_type = GPIO_INTR_DISABLE;
+  io_conf.mode = GPIO_MODE_INPUT_OUTPUT;  // 入出力両方を有効化（読み取り可能に）
+  io_conf.pin_bit_mask = (1ULL << pin);
+  io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+  esp_err_t err = gpio_config(&io_conf);
+
+  // Step 4: ドライブ強度を最大に設定
+  gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
+
+  // Step 5: 出力レベル設定
+  gpio_set_level((gpio_num_t)pin, state ? 1 : 0);
+
+  // 確認読み取り
+  int readBack = gpio_get_level((gpio_num_t)pin);
+  Serial.printf("Is06PinManager: applyDigitalOutput CH%d GPIO%d set=%d read=%d err=%d (full config)\n",
+                channel, pin, state, readBack, err);
 }
 
 void Is06PinManager::applyPwmOutput(int channel, int value) {
+  using namespace AraneaSettingsDefaults;
+
   if (!isValidDpChannel(channel)) return;
   int idx = channel - 1;
+  int pin = IS06_PIN_MAP[idx];
+  int ch = ledcChannel_[idx];
 
   // 0-100% → 0-255
   int pwm8bit = map(value, 0, 100, 0, 255);
-  ledcWrite(IS06_PIN_MAP[idx], pwm8bit);
 
-  Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d duty=%d (8bit)\n",
-                channel, IS06_PIN_MAP[idx], pwm8bit);
+  if (ch >= 0) {
+    // LEDCチャンネルが有効な場合はledcWriteChannel()を使用
+    // Arduino-ESP32 3.x: ledcWrite(pin,duty)は非推奨、ledcWriteChannel(ch,duty)を使う
+    ledcWriteChannel(ch, pwm8bit);
+    Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d ch=%d value=%d duty=%d\n",
+                  channel, pin, ch, value, pwm8bit);
+  } else {
+    // LEDCチャンネルが無効 - 自動的にLEDCをアタッチして再試行
+    Serial.printf("Is06PinManager: WARNING CH%d GPIO%d LEDC not attached, attempting attach...\n",
+                  channel, pin);
+
+    ledcDetach(pin);
+    int newCh = ledcAttach(pin, PWM_FREQUENCY, PWM_RESOLUTION);
+    if (newCh >= 0) {
+      ledcChannel_[idx] = newCh;
+      ledcWriteChannel(newCh, pwm8bit);
+      Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d LEDC attached ch=%d value=%d duty=%d\n",
+                    channel, pin, newCh, value, pwm8bit);
+    } else {
+      // LEDC失敗時はGPIO直接制御（ON/OFFのみ）
+      // value > 0 ならHIGH（フルオン相当）、0ならLOW
+      int state = (value > 0) ? 1 : 0;
+      gpio_set_level((gpio_num_t)pin, state);
+      Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d LEDC failed, GPIO=%d\n",
+                    channel, pin, state);
+    }
+  }
 }
 
 String Is06PinManager::getNvsKey(int channel, const char* suffix) {

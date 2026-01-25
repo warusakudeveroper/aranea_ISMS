@@ -32,6 +32,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_mac.h>
+#include <driver/gpio.h>  // ESP-IDF GPIO API
 
 // ============================================================
 // Araneaモジュール一括インポート
@@ -113,6 +114,48 @@ unsigned long lastHeartbeatTime = 0;
 unsigned long bootTime = 0;
 int heartbeatIntervalSec = 60;
 
+// ========================================
+// DR1-13: RSSI監視（WiFi品質チェック）
+// ========================================
+const int RSSI_RECONNECT_THRESHOLD = -85;       // dBm: この値以下で再接続
+const unsigned long RSSI_CHECK_INTERVAL = 30000; // 30秒間隔
+unsigned long lastRssiCheck = 0;
+
+// ========================================
+// DR1-14: ヒープ監視（メモリ枯渇チェック）
+// ========================================
+const int HEAP_CRITICAL_THRESHOLD = 20000;       // 20KB以下で再起動
+const int HEAP_WARNING_THRESHOLD = 40000;        // 40KB以下で警告
+const unsigned long HEAP_CHECK_INTERVAL = 10000; // 10秒間隔
+unsigned long lastHeapCheck = 0;
+
+// ========================================
+// OLED拡張: 制御ソース識別とスクロール
+// ========================================
+enum class ControlSource {
+  NONE,     // 通常表示
+  PHYSICAL, // 物理ボタン入力
+  API,      // WebUI/HTTP API
+  CLOUD     // MQTT
+};
+
+// スクロール状態
+String scrollText = "";           // スクロール対象テキスト
+int scrollOffset = 0;             // スクロールオフセット（ピクセル）
+unsigned long lastScrollTime = 0; // 最終スクロール更新時刻
+bool isScrolling = false;         // スクロール中フラグ
+unsigned long scrollStartTime = 0; // スクロール開始時刻
+const int SCROLL_SPEED_MS = 80;   // スクロール速度（ms/pixel）
+const int SCROLL_HOLD_MS = 2000;  // 端で停止する時間
+const int CHAR_WIDTH_SIZE2 = 12;  // TextSize=2の1文字幅
+
+// 状態変更通知
+ControlSource lastControlSource = ControlSource::NONE;
+int lastChangedChannel = 0;
+String lastChangeText = "";
+unsigned long lastChangeTime = 0;
+const unsigned long CHANGE_DISPLAY_MS = 5000; // 変更表示継続時間
+
 // MQTT (P2-4, P2-5)
 bool mqttEnabled = false;
 bool mqttJustConnected = false;  // 接続直後フラグ（loop()で初期状態送信用）
@@ -128,11 +171,17 @@ void initGpio();
 void initPinGlobalNvs();
 void handleSystemButtons();
 void updateDisplay();
+void updateDisplayScroll();
 String buildStatusLine();
 void initMqtt();
 void onMqttMessage(const String& topic, const char* data, int len);
 void publishPinState(int channel);
 void publishAllPinStates();
+void notifyStateChange(ControlSource source, int channel, const String& action);
+String getSourcePrefix(ControlSource source);
+void showScrollMessage(const String& msg);
+void checkWiFiQuality();   // DR1-13: RSSI監視
+void checkHeapHealth();    // DR1-14: ヒープ監視
 
 // ========================================
 // setup()
@@ -275,6 +324,28 @@ void setup() {
   // PinManager初期化（P1-1, P3-5: NtpManager渡してexpiryDate判定可能に）
   pinManager.begin(&settings, &ntp);
 
+  // 物理入力コールバック設定（入力トリガー→出力連動のOLED通知用）
+  pinManager.setInputCallback([](int channel, bool state) {
+    if (state) {
+      // 立ち上がりエッジ（allocation trigger発火タイミング）
+      // triggerAllocationsで連動先が操作されるので、ここで通知
+      const PinSetting& setting = pinManager.getPinSetting(channel);
+      if (setting.allocationCount > 0) {
+        // 連動先があれば通知（"CH5 → CHx" 形式）
+        String targets = "";
+        for (int i = 0; i < setting.allocationCount; i++) {
+          if (setting.allocation[i].length() > 0) {
+            if (targets.length() > 0) targets += ",";
+            targets += setting.allocation[i];
+          }
+        }
+        if (targets.length() > 0) {
+          notifyStateChange(ControlSource::PHYSICAL, channel, "→" + targets);
+        }
+      }
+    }
+  });
+
   // デバイス情報設定
   AraneaDeviceInfo devInfo;
   devInfo.deviceType = ARANEA_DEVICE_TYPE;
@@ -291,6 +362,21 @@ void setup() {
   // HttpManager初期化（P1-6）
   httpMgr.setDeviceInfo(devInfo);
   httpMgr.begin(&settings, &pinManager);
+  // MQTT状態取得コールバック設定（/api/statusでmqttConnectedを正しく返すため）
+  httpMgr.setMqttStatusCallback([]() {
+    return mqttEnabled && mqtt.isConnected();
+  });
+  // MQTTデバッグ情報コールバック設定（問題調査用）
+  httpMgr.setMqttDebugCallbacks(
+    []() { return mqttEnabled; },
+    []() { return mqttUrl; }
+  );
+  // PIN状態変更通知コールバック設定（API/WebUI経由でのOLED表示用）
+  httpMgr.setPinStateChangeCallback([](int ch, int state) {
+    String action = (state > 0) ? "ON" : "OFF";
+    if (state > 1) action = String(state) + "%";
+    notifyStateChange(ControlSource::API, ch, action);
+  });
   Serial.printf("HTTP: Web UI available at http://%s/\n", wifi.getIP().c_str());
 
   // HTTP OTA初期化（P3-2）
@@ -348,6 +434,11 @@ void loop() {
     updateDisplay();
   }
 
+  // スクロール更新（高頻度）
+  if (isScrolling) {
+    updateDisplayScroll();
+  }
+
   // PIN更新
   pinManager.update();
 
@@ -373,7 +464,19 @@ void loop() {
     }
   }
 
-  delay(1);  // 省電力
+  // DR1-13: RSSI監視（30秒間隔）
+  if (now - lastRssiCheck >= RSSI_CHECK_INTERVAL) {
+    lastRssiCheck = now;
+    checkWiFiQuality();
+  }
+
+  // DR1-14: ヒープ監視（10秒間隔）
+  if (now - lastHeapCheck >= HEAP_CHECK_INTERVAL) {
+    lastHeapCheck = now;
+    checkHeapHealth();
+  }
+
+  delay(1);  // 省電力 + WDT feed (DR1-12)
 }
 
 // ========================================
@@ -382,17 +485,12 @@ void loop() {
 void initGpio() {
   Serial.println("GPIO: Initializing...");
 
-  // D/P Type (CH1-4): 初期状態はOUTPUT LOW
-  pinMode(PIN_CH1, OUTPUT);
-  pinMode(PIN_CH2, OUTPUT);
-  pinMode(PIN_CH3, OUTPUT);
-  pinMode(PIN_CH4, OUTPUT);
-  digitalWrite(PIN_CH1, LOW);
-  digitalWrite(PIN_CH2, LOW);
-  digitalWrite(PIN_CH3, LOW);
-  digitalWrite(PIN_CH4, LOW);
+  // 【重要】CH1-4 (D/P Type) はIs06PinManager::initLedc()で初期化される
+  // ここでpinMode/digitalWriteを呼ぶとESP-IDF APIと競合する可能性があるため、
+  // CH1-4の初期化はIs06PinManagerに任せる
 
   // I/O Type (CH5-6): 初期状態はINPUT_PULLDOWN（設定で切替）
+  // ※これもIs06PinManagerで管理されるが、早期に設定しておく
   pinMode(PIN_CH5, INPUT_PULLDOWN);
   pinMode(PIN_CH6, INPUT_PULLDOWN);
 
@@ -400,7 +498,7 @@ void initGpio() {
   pinMode(PIN_RECONNECT, INPUT_PULLDOWN);
   pinMode(PIN_RESET, INPUT_PULLDOWN);
 
-  Serial.println("GPIO: CH1-4=OUTPUT, CH5-6=INPUT, System=INPUT");
+  Serial.println("GPIO: CH5-6=INPUT, System=INPUT (CH1-4 managed by PinManager)");
 }
 
 // ========================================
@@ -540,13 +638,118 @@ void handleSystemButtons() {
 }
 
 // ========================================
-// ディスプレイ更新
+// ステータス行構築（通常時は"Ready"を返す）
+// 操作通知は notifyStateChange() で別途処理され、
+// CHANGE_DISPLAY_MS (5秒) 後に "Ready" に復帰する
+// ========================================
+String buildStatusLine() {
+  return "Ready";
+}
+
+// ========================================
+// OLED拡張: 制御ソースプレフィックス取得
+// ========================================
+String getSourcePrefix(ControlSource source) {
+  switch (source) {
+    case ControlSource::PHYSICAL: return "[IN]";
+    case ControlSource::API:      return "[API]";
+    case ControlSource::CLOUD:    return "[CLOUD]";
+    default:                      return "";
+  }
+}
+
+// ========================================
+// OLED拡張: 状態変更通知
+// ========================================
+void notifyStateChange(ControlSource source, int channel, const String& action) {
+  lastControlSource = source;
+  lastChangedChannel = channel;
+  lastChangeTime = millis();
+
+  // 表示テキスト構築
+  String prefix = getSourcePrefix(source);
+  lastChangeText = prefix + " CH" + String(channel) + " " + action;
+
+  Serial.printf("[OLED] %s\n", lastChangeText.c_str());
+
+  // スクロール判定（128px幅、TextSize=2で約10文字）
+  // 文字列長をピクセルで推定（size=2: 12px/char）
+  int textWidth = lastChangeText.length() * CHAR_WIDTH_SIZE2;
+  if (textWidth > 128) {
+    showScrollMessage(lastChangeText);
+  } else {
+    // スクロール不要、即時表示
+    isScrolling = false;
+    scrollText = "";
+  }
+
+  // 強調表示: 画面を一瞬反転（目立たせる）
+  display.display();
+}
+
+// ========================================
+// OLED拡張: スクロールメッセージ設定
+// ========================================
+void showScrollMessage(const String& msg) {
+  scrollText = msg;
+  scrollOffset = 0;
+  scrollStartTime = millis();
+  lastScrollTime = millis();
+  isScrolling = true;
+}
+
+// ========================================
+// OLED拡張: スクロール更新
+// ========================================
+void updateDisplayScroll() {
+  unsigned long now = millis();
+
+  // スクロール開始前のホールド
+  if (now - scrollStartTime < SCROLL_HOLD_MS && scrollOffset == 0) {
+    return;
+  }
+
+  // スクロール速度制御
+  if (now - lastScrollTime < SCROLL_SPEED_MS) {
+    return;
+  }
+  lastScrollTime = now;
+
+  // 文字列幅計算
+  int textWidth = scrollText.length() * CHAR_WIDTH_SIZE2;
+  int maxOffset = textWidth - 128;
+
+  if (maxOffset <= 0) {
+    // スクロール不要
+    isScrolling = false;
+    return;
+  }
+
+  // スクロール終了判定
+  if (scrollOffset >= maxOffset) {
+    // 端でホールドしてからリセット
+    if (now - lastChangeTime > CHANGE_DISPLAY_MS) {
+      isScrolling = false;
+      scrollText = "";
+      lastControlSource = ControlSource::NONE;
+    }
+    return;
+  }
+
+  // スクロール進行
+  scrollOffset++;
+
+  // 表示更新はupdateDisplay()で行う
+}
+
+// ========================================
+// ディスプレイ更新（OLED拡張対応版）
 // ========================================
 void updateDisplay() {
   // 共通仕様: showIs02Main(line1, cic, statusLine, showLink)
-  // line1: IP + RSSI (小フォント)
-  // cic: CICコード (大フォント、中央)
-  // statusLine: 状態表示 (中フォント)
+  // line1: IP + RSSI (小フォント) - スクロールしない
+  // cic: CICコード (大フォント、中央) - スクロールしない
+  // statusLine: 状態表示 (中フォント) - スクロールエリア
 
   if (apModeActive) {
     String apSSID = "AP:" + myHostname;
@@ -555,71 +758,42 @@ void updateDisplay() {
     return;
   }
 
-  // Line 1: IP + RSSI
+  // Line 1: IP + RSSI（スクロールしない）
   String line1 = wifi.isConnected()
     ? wifi.getIP() + " " + String(wifi.getRSSI()) + "dBm"
     : "Connecting...";
 
-  // CIC表示（取得済みなら表示、未取得なら"------"）
+  // CIC表示（スクロールしない）
   String cicStr = myCic.length() > 0 ? myCic : "------";
 
-  // ステータス行: アクティブなPIN状態を表示
-  String statusLine = buildStatusLine();
+  // ステータス行（スクロールエリア）
+  String statusLine;
+
+  // 状態変更表示中か判定
+  unsigned long now = millis();
+  if (lastControlSource != ControlSource::NONE &&
+      (now - lastChangeTime) < CHANGE_DISPLAY_MS) {
+    // 変更通知表示
+    if (isScrolling && scrollText.length() > 0) {
+      // スクロール中: オフセット適用した部分文字列
+      // TextSize=2で12px/char、開始位置を計算
+      int startChar = scrollOffset / CHAR_WIDTH_SIZE2;
+      int maxChars = 128 / CHAR_WIDTH_SIZE2 + 1;  // 表示可能文字数
+      statusLine = scrollText.substring(startChar, startChar + maxChars);
+    } else {
+      // スクロール不要
+      statusLine = lastChangeText;
+    }
+  } else {
+    // 通常表示: PIN状態サマリ
+    statusLine = buildStatusLine();
+    lastControlSource = ControlSource::NONE;  // リセット
+    isScrolling = false;
+  }
 
   display.showIs02Main(line1, cicStr, statusLine, false);
 }
 
-// ========================================
-// ステータス行構築（PIN状態サマリ）
-// ========================================
-String buildStatusLine() {
-  // アクティブなPIN情報を収集
-  String digitalOns = "";   // ON中のデジタルCH
-  String pwmValues = "";    // PWM値
-
-  for (int ch = 1; ch <= 6; ch++) {
-    if (!pinManager.isPinEnabled(ch)) continue;
-
-    const PinSetting& setting = pinManager.getPinSetting(ch);
-
-    if (setting.type == PinType::DIGITAL_OUTPUT) {
-      if (pinManager.getPinState(ch) == 1) {
-        if (digitalOns.length() > 0) digitalOns += ",";
-        digitalOns += String(ch);
-      }
-    } else if (setting.type == PinType::PWM_OUTPUT) {
-      int pwmVal = pinManager.getPwmValue(ch);
-      if (pwmVal > 0) {
-        if (pwmValues.length() > 0) pwmValues += " ";
-        pwmValues += String(ch) + ":" + String(pwmVal) + "%";
-      }
-    }
-  }
-
-  // 状態サマリ構築
-  if (digitalOns.length() == 0 && pwmValues.length() == 0) {
-    return "Ready";
-  }
-
-  String status = "";
-
-  // デジタル: "ON:1,2" 形式
-  if (digitalOns.length() > 0) {
-    status = "ON:" + digitalOns;
-  }
-
-  // PWM: "1:50% 2:80%" 形式
-  if (pwmValues.length() > 0) {
-    if (status.length() > 0) status += " ";
-    status += pwmValues;
-  }
-
-  return status;
-}
-
-// ========================================
-// MQTT初期化 (P2-4)
-// ========================================
 // デフォルトMQTT URL (araneaSDK Designより)
 const char* DEFAULT_MQTT_URL = "wss://aranea-mqtt-bridge-1010551946141.asia-northeast1.run.app";
 
@@ -724,6 +898,10 @@ void onMqttMessage(const String& topic, const char* data, int len) {
       if (ok) {
         Serial.printf("MQTT: CH%d set to %d\n", ch, state);
         publishPinState(ch);
+        // OLED通知
+        String action = (state > 0) ? "ON" : "OFF";
+        if (state > 1) action = String(state) + "%";
+        notifyStateChange(ControlSource::CLOUD, ch, action);
       } else {
         ackStatus = "error";
         if (!pinManager.isPinEnabled(ch)) {
@@ -745,6 +923,8 @@ void onMqttMessage(const String& topic, const char* data, int len) {
       if (ok) {
         Serial.printf("MQTT: CH%d pulse\n", ch);
         publishPinState(ch);
+        // OLED通知
+        notifyStateChange(ControlSource::CLOUD, ch, "PULSE");
       } else {
         ackStatus = "error";
         ackError = "Pulse rejected";
@@ -762,6 +942,8 @@ void onMqttMessage(const String& topic, const char* data, int len) {
     }
     Serial.println("MQTT: All channels OFF");
     publishAllPinStates();
+    // OLED通知
+    notifyStateChange(ControlSource::CLOUD, 0, "ALL OFF");
   } else if (strcmp(cmd, "getState") == 0) {
     // 状態取得
     if (ch >= 1 && ch <= 6) {
@@ -861,4 +1043,68 @@ void publishAllPinStates() {
   serializeJson(doc, json);
   mqtt.publish(mqttStateTopic, json, 1);
   Serial.println("MQTT: All states published.");
+}
+
+// ========================================
+// DR1-13: WiFi品質監視
+// ========================================
+void checkWiFiQuality() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;  // 未接続時はスキップ
+  }
+
+  int rssi = WiFi.RSSI();
+
+  // ヒープも同時に出力（デバッグ用）
+  // Serial.printf("[Health] RSSI=%d dBm, Heap=%d bytes\n", rssi, ESP.getFreeHeap());
+
+  if (rssi < RSSI_RECONNECT_THRESHOLD) {
+    Serial.printf("[WiFi] RSSI weak (%d dBm < %d), reconnecting...\n",
+                  rssi, RSSI_RECONNECT_THRESHOLD);
+
+    // OLED通知
+    display.showBoot("WiFi weak...");
+
+    // 再接続試行
+    wifi.disconnect();
+    delay(100);
+
+    bool reconnected = wifi.connectWithSettings(&settings);
+    if (!reconnected) {
+      reconnected = wifi.connectDefault();
+    }
+
+    if (reconnected) {
+      Serial.printf("[WiFi] Reconnected! New RSSI=%d dBm\n", WiFi.RSSI());
+    } else {
+      Serial.println("[WiFi] Reconnect failed.");
+    }
+  }
+}
+
+// ========================================
+// DR1-14: ヒープメモリ監視
+// ========================================
+void checkHeapHealth() {
+  int freeHeap = ESP.getFreeHeap();
+  int largestBlock = ESP.getMaxAllocHeap();
+
+  // 警告レベル
+  if (freeHeap < HEAP_WARNING_THRESHOLD && freeHeap >= HEAP_CRITICAL_THRESHOLD) {
+    Serial.printf("[Heap] WARNING: Low memory (%d bytes, largest=%d)\n",
+                  freeHeap, largestBlock);
+  }
+
+  // クリティカルレベル - 再起動
+  if (freeHeap < HEAP_CRITICAL_THRESHOLD) {
+    Serial.printf("[Heap] CRITICAL: Memory exhausted (%d bytes)! Rebooting...\n",
+                  freeHeap);
+    Serial.flush();
+
+    // OLED表示
+    display.showBoot("Heap low! Reboot");
+    delay(1000);
+
+    ESP.restart();
+  }
 }

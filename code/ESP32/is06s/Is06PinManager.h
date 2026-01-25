@@ -344,9 +344,13 @@ private:
   unsigned long pwmTransitionStart_[IS06_DP_CHANNELS] = {0, 0, 0, 0};
   int pwmStartValue_[IS06_DP_CHANNELS] = {0, 0, 0, 0};
 
+  // LEDCチャンネル管理 (Arduino-ESP32 3.x: ledcAttach()はch番号を返す)
+  int ledcChannel_[IS06_DP_CHANNELS] = {-1, -1, -1, -1};
+
   // 内部メソッド
   void initGpio();
   void initLedc();
+  void applyLoadedPinTypes();  // NVSから読み込んだ設定をハードウェアに適用
   void handleMomentaryPulse();
   void handlePwmTransition();
   void handleDigitalInput();

@@ -23,8 +23,16 @@
 #define HTTP_MANAGER_IS06S_H
 
 #include <Arduino.h>
+#include <functional>
 #include "AraneaWebUI.h"
 #include "Is06PinManager.h"
+
+// MQTT状態取得用コールバック型
+using MqttStatusCallback = std::function<bool()>;
+
+// PIN状態変更通知コールバック型
+// (int channel, int newState) - channelは1-6、newStateは0/1またはPWM値
+using PinStateChangeCallback = std::function<void(int channel, int newState)>;
 
 class HttpManagerIs06s : public AraneaWebUI {
 public:
@@ -38,6 +46,31 @@ public:
    * @param port HTTPポート（デフォルト80）
    */
   void begin(SettingManager* settings, Is06PinManager* pinManager, int port = 80);
+
+  /**
+   * MQTT状態取得コールバック設定
+   * @param callback MQTTが接続されているかを返す関数
+   */
+  void setMqttStatusCallback(MqttStatusCallback callback) { mqttStatusCallback_ = callback; }
+
+  /**
+   * MQTTデバッグ情報取得コールバック設定
+   * @param enabledCb mqttEnabledを返す関数
+   * @param urlCb mqttUrlを返す関数
+   */
+  void setMqttDebugCallbacks(std::function<bool()> enabledCb, std::function<String()> urlCb) {
+    mqttEnabledCallback_ = enabledCb;
+    mqttUrlCallback_ = urlCb;
+  }
+
+  /**
+   * PIN状態変更通知コールバック設定
+   * API/WebUI経由での状態変更をOLED表示等に通知
+   * @param callback (channel, newState)を受け取る関数
+   */
+  void setPinStateChangeCallback(PinStateChangeCallback callback) {
+    pinStateChangeCallback_ = callback;
+  }
 
 protected:
   // ========================================
@@ -74,7 +107,16 @@ protected:
    */
   void getTypeSpecificConfig(JsonObject& obj) override;
 
+  /**
+   * クラウド接続状態取得（MQTT状態を含む）
+   */
+  AraneaCloudStatus getCloudStatus() override;
+
 private:
+  MqttStatusCallback mqttStatusCallback_ = nullptr;
+  std::function<bool()> mqttEnabledCallback_ = nullptr;
+  std::function<String()> mqttUrlCallback_ = nullptr;
+  PinStateChangeCallback pinStateChangeCallback_ = nullptr;
   Is06PinManager* pinManager_ = nullptr;
 
   // ========================================
@@ -88,6 +130,7 @@ private:
   void handlePinAll();
   void handleSettingsGet();
   void handleSettingsPost();
+  void handleDebugGpio();   // GPIO診断API
 
   // ========================================
   // ヘルパー
