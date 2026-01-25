@@ -28,6 +28,21 @@ void HttpManagerIs06s::begin(SettingManager* settings, Is06PinManager* pinManage
 }
 
 // ============================================================
+// クラウド接続状態取得
+// ============================================================
+AraneaCloudStatus HttpManagerIs06s::getCloudStatus() {
+  // 基底クラスのステータスを取得
+  AraneaCloudStatus status = AraneaWebUI::getCloudStatus();
+
+  // MQTT接続状態をコールバックから取得
+  if (mqttStatusCallback_) {
+    status.mqttConnected = mqttStatusCallback_();
+  }
+
+  return status;
+}
+
+// ============================================================
 // typeSpecificステータス（PIN状態）
 // ============================================================
 void HttpManagerIs06s::getTypeSpecificStatus(JsonObject& obj) {
@@ -35,6 +50,19 @@ void HttpManagerIs06s::getTypeSpecificStatus(JsonObject& obj) {
 
   JsonArray pins = obj.createNestedArray("pins");
   buildAllPinsJson(pins);
+
+  // MQTTデバッグ情報（問題調査用）
+  JsonObject mqttDebug = obj.createNestedObject("mqttDebug");
+  mqttDebug["callbackSet"] = (mqttStatusCallback_ != nullptr);
+  if (mqttEnabledCallback_) {
+    mqttDebug["enabled"] = mqttEnabledCallback_();
+  }
+  if (mqttUrlCallback_) {
+    mqttDebug["url"] = mqttUrlCallback_();
+  }
+  if (mqttStatusCallback_) {
+    mqttDebug["isConnected"] = mqttStatusCallback_();
+  }
 }
 
 // ============================================================
@@ -44,6 +72,7 @@ String HttpManagerIs06s::generateTypeSpecificTabs() {
   String html = "";
   html += "<div class=\"tab\" data-tab=\"pincontrol\" onclick=\"showTab('pincontrol')\">PIN Control</div>";
   html += "<div class=\"tab\" data-tab=\"pinsetting\" onclick=\"showTab('pinsetting')\">PIN Settings</div>";
+  html += "<div class=\"tab\" data-tab=\"devicesettings\" onclick=\"showTab('devicesettings')\">Device Settings</div>";
   return html;
 }
 
@@ -52,29 +81,106 @@ String HttpManagerIs06s::generateTypeSpecificTabs() {
 // ============================================================
 String HttpManagerIs06s::generateTypeSpecificTabContents() {
   String html = "";
+
+  // DR1-08: PIN Control改善用CSS
+  html += "<style>";
+  html += ".pin-row{display:flex;align-items:center;padding:10px;border-bottom:1px solid #e0e0e0;gap:12px;}";
+  html += ".pin-row:last-child{border-bottom:none;}";
+  html += ".pin-row.disabled{opacity:0.5;}";
+  html += ".pin-info{min-width:120px;display:flex;flex-direction:column;}";
+  html += ".pin-ch{font-weight:bold;color:#1976d2;font-size:14px;}";
+  html += ".pin-name{font-size:12px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;}";
+  html += ".pin-meta{min-width:100px;display:flex;flex-direction:column;font-size:11px;color:#888;}";
+  html += ".pin-type{font-weight:500;}";
+  html += ".pin-mode{color:#666;}";
+  html += ".pin-control{flex:1;min-width:120px;display:flex;align-items:center;gap:8px;}";
+  html += ".pin-control input[type=range]{flex:1;max-width:150px;}";
+  html += ".pin-control .pwm-label{min-width:50px;text-align:right;font-size:12px;}";
+  html += ".pin-enable{min-width:50px;}";
+  html += ".btn-toggle{padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font-size:13px;min-width:60px;}";
+  html += ".btn-toggle.on{background:#4CAF50;color:#fff;}";
+  html += ".btn-toggle.off{background:#9E9E9E;color:#fff;}";
+  html += ".btn-toggle:disabled{cursor:not-allowed;opacity:0.6;}";
+  html += ".input-state{padding:8px 12px;border-radius:4px;font-size:13px;background:#f5f5f5;}";
+  html += ".input-state.high{background:#e3f2fd;color:#1976d2;}";
+  html += ".input-state.low{background:#fafafa;color:#666;}";
+  html += ".input-state.disabled-state{background:#eee;color:#999;}";
+  html += ".pin-setting-card{border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin-bottom:16px;}";
+  html += ".pin-setting-card h4{margin:0 0 12px 0;color:#333;}";
+  html += ".form-row{display:flex;gap:12px;flex-wrap:wrap;}";
+  html += ".form-row .form-group{flex:1;min-width:120px;}";
+  html += "@media(max-width:600px){.pin-row{flex-wrap:wrap;}.pin-info,.pin-meta{min-width:80px;}.pin-control{width:100%;order:3;margin-top:8px;}}";
+  html += "</style>";
+
   html += "<div id=\"tab-pincontrol\" class=\"tab-content\">";
   html += "<div class=\"card\"><div class=\"card-title\">PIN Control</div>";
-  html += "<div class=\"pin-grid\" id=\"pin-control-grid\"></div></div>";
+  html += "<div id=\"pin-control-grid\"></div></div>";
   html += "</div>";
   html += "<div id=\"tab-pinsetting\" class=\"tab-content\">";
   html += "<div class=\"card\"><div class=\"card-title\">PIN Settings</div>";
   html += "<div class=\"pin-settings\" id=\"pin-settings-list\"></div>";
   html += "<div class=\"btn-group\"><button class=\"btn btn-primary\" onclick=\"savePinSettings()\">Save All Settings</button></div>";
   html += "</div></div>";
+
+  // Device Settings タブ（rid含む）
+  html += "<div id=\"tab-devicesettings\" class=\"tab-content\">";
+  html += "<div class=\"card\"><div class=\"card-title\">Device Identity</div>";
+  html += "<div class=\"form-group\"><label>Device Name</label><input type=\"text\" id=\"ds-device-name\" placeholder=\"例: 1F照明コントローラー\"></div>";
+  html += "<div class=\"form-group\"><label>Room ID (rid)</label><input type=\"text\" id=\"ds-rid\" placeholder=\"例: villa1, 101, 松の間\"></div>";
+  html += "<p style=\"font-size:12px;color:#666;margin:4px 0 12px 0\">ridはグループ/部屋識別に使用されます（mobes2.0連携）</p>";
+  html += "</div>";
+  html += "<div class=\"card\"><div class=\"card-title\">PIN Global Defaults</div>";
+  html += "<div class=\"form-row\">";
+  html += "<div class=\"form-group\"><label>Default Validity (ms)</label><input type=\"number\" id=\"ds-g-validity\" min=\"0\" step=\"100\"></div>";
+  html += "<div class=\"form-group\"><label>Default Debounce (ms)</label><input type=\"number\" id=\"ds-g-debounce\" min=\"0\" step=\"100\"></div>";
+  html += "<div class=\"form-group\"><label>Default RateOfChange (ms)</label><input type=\"number\" id=\"ds-g-rateofchange\" min=\"0\" step=\"100\"></div>";
+  html += "</div></div>";
+  html += "<div class=\"btn-group\"><button class=\"btn btn-primary\" onclick=\"saveDeviceSettings()\">Save Device Settings</button></div>";
+  html += "</div>";
+
   return html;
 }
 
 // ============================================================
 // 固有JavaScript生成
+// DR1-03～DR1-09対応: WebUI改善
 // ============================================================
 String HttpManagerIs06s::generateTypeSpecificJS() {
-  // JavaScriptはシンプルなフォーマットで、APIベースで動作
   String js = R"JS(
+    // DR1-04: ポーリング用変数
+    var pinPollInterval = null;
+    // スライダー操作中のチャンネル（操作中はポーリング更新をスキップ）
+    var activeSliderCh = null;
+    // 最後にキャッシュしたPINデータ
+    var cachedPins = null;
+
     function loadPinStates() {
       fetch('/api/pin/all')
-        .then(function(r) { return r.json(); })
-        .then(function(data) { renderPinControls(data.pins); })
-        .catch(function(e) { console.error('Load pin states error:', e); });
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          cachedPins = data.pins;
+          renderPinControls(data.pins);
+        })
+        .catch(function(e) {
+          console.error('Load pin states error:', e);
+          // エラー時は画面を再構築しない（最後の状態を維持）
+        });
+    }
+
+    // DR1-04: ポーリング開始/停止
+    function startPinPolling() {
+      if (!pinPollInterval) {
+        pinPollInterval = setInterval(loadPinStates, 3000);
+      }
+    }
+    function stopPinPolling() {
+      if (pinPollInterval) {
+        clearInterval(pinPollInterval);
+        pinPollInterval = null;
+      }
     }
 
     function escapeHtml(str) {
@@ -93,6 +199,10 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
       return stateVal ? defaultOn : defaultOff;
     }
 
+    // DR1-08: 改善されたPIN Control レイアウト
+    // DR1-05: enabled/disabled のみ透明化
+    // DR1-06: disabled時は操作不可
+    // DR1-07: digitalInputはトグル非表示、状態ラベルのみ
     function renderPinControls(pins) {
       var grid = document.getElementById('pin-control-grid');
       if (!grid) return;
@@ -104,35 +214,95 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         var st = p.state;
         var tp = p.type;
         var pw = p.pwm || 0;
-        var nm = p.name || ('CH' + ch);
+        var nm = p.name || '';
         var stn = p.stateName || [];
+        var mode = p.actionMode || 'Alt';
+        var validity = p.validity || 0;
+
+        // タイプ表示文字列
+        var typeLabel = tp === 'pwmOutput' ? 'PWM' : tp === 'digitalInput' ? 'INPUT' : 'DIGITAL';
+        // モード表示文字列
+        var modeLabel = mode;
+        if (mode === 'Mom' && validity > 0) modeLabel = 'Mom ' + validity + 'ms';
+        if (mode === 'Slow' || mode === 'Rapid') modeLabel = mode;
+
+        // 制御部分の構築
         var ctrl = '';
-        if (tp === 'pwmOutput') {
-          var pwmLabel = pw + '%';
+        if (tp === 'disabled') {
+          ctrl = '<span class="input-state disabled-state">DISABLED</span>';
+        } else if (tp === 'pwmOutput') {
+          // スライダー操作中はサーバー値で上書きしない
+          var sliderVal = pw;
+          var existingSlider = document.querySelector('[data-ch="' + ch + '"] input[type=range]');
+          if (activeSliderCh === ch && existingSlider) {
+            sliderVal = parseInt(existingSlider.value);
+          }
+          var pwmLabel = sliderVal + '%';
           for (var j = 0; j < stn.length; j++) {
             var parts = stn[j].split(':');
-            if (parts.length === 2 && parseInt(parts[0]) === pw) {
-              pwmLabel = parts[1];
-              break;
+            if (parts.length === 2 && parseInt(parts[0]) === sliderVal) {
+              pwmLabel = parts[1]; break;
             }
           }
-          ctrl = '<input type="range" min="0" max="100" value="' + pw + '" onchange="setPwm(' + ch + ', this.value)"' + (en ? '' : ' disabled') + '> <span id="pwm-val-' + ch + '">' + pwmLabel + '</span>';
+          // oninput: ドラッグ中に呼ばれる（activeSliderCh設定）
+          // onchange: リリース時に呼ばれる（値送信+activeSliderChクリア）
+          ctrl = '<input type="range" min="0" max="100" value="' + sliderVal + '" ';
+          ctrl += 'oninput="onSliderInput(' + ch + ', this.value)" ';
+          ctrl += 'onchange="onSliderChange(' + ch + ', this.value)"';
+          ctrl += (en ? '' : ' disabled') + '>';
+          ctrl += '<span id="pwm-val-' + ch + '" class="pwm-label">' + pwmLabel + '</span>';
         } else if (tp === 'digitalOutput') {
           var btnLabel = getStateLabel(stn, st, 'ON', 'OFF');
-          ctrl = '<button onclick="togglePin(' + ch + ')" class="btn-toggle ' + (st ? 'on' : 'off') + '"' + (en ? '' : ' disabled') + '>' + btnLabel + '</button>';
+          ctrl = '<button onclick="togglePin(' + ch + ', \'' + mode + '\', ' + validity + ')" class="btn-toggle ' + (st ? 'on' : 'off') + '"' + (en ? '' : ' disabled') + '>' + btnLabel + '</button>';
         } else if (tp === 'digitalInput') {
+          // DR1-07: digitalInputはトグル非表示、状態ラベルのみ
           var inputLabel = getStateLabel(stn, st, 'HIGH', 'LOW');
-          ctrl = '<span class="input-state">' + inputLabel + '</span>';
+          ctrl = '<span class="input-state ' + (st ? 'high' : 'low') + '">' + inputLabel + '</span>';
         }
-        html += '<div class="pin-card' + (en ? '' : ' disabled') + '"><div class="pin-header"><span class="pin-name">' + nm + '</span><span class="pin-type">' + tp + '</span></div><div class="pin-control">' + ctrl + '</div><label class="switch"><input type="checkbox"' + (en ? ' checked' : '') + ' onchange="setPinEnabled(' + ch + ', this.checked)"><span class="slider"></span></label></div>';
+
+        // DR1-08: 整理されたレイアウト（1行に収まる）
+        html += '<div class="pin-row' + (en ? '' : ' disabled') + '" data-ch="' + ch + '">';
+        html += '<div class="pin-info"><span class="pin-ch">CH' + ch + '</span>';
+        if (nm) html += '<span class="pin-name">' + escapeHtml(nm) + '</span>';
+        html += '</div>';
+        html += '<div class="pin-meta"><span class="pin-type">' + typeLabel + '</span>';
+        if (tp !== 'disabled' && tp !== 'digitalInput') html += '<span class="pin-mode">' + modeLabel + '</span>';
+        html += '</div>';
+        html += '<div class="pin-control">' + ctrl + '</div>';
+        // DR1-06: disabled時はenableトグルのみ操作可能
+        html += '<div class="pin-enable"><label class="switch"><input type="checkbox"' + (en ? ' checked' : '') + ' onchange="setPinEnabled(' + ch + ', this.checked)"><span class="slider"></span></label></div>';
+        html += '</div>';
       }
       grid.innerHTML = html;
     }
 
-    function togglePin(ch) {
+    // スライダードラッグ中（値送信しない、表示のみ更新）
+    function onSliderInput(ch, value) {
+      activeSliderCh = ch;
+      document.getElementById('pwm-val-' + ch).textContent = value + '%';
+    }
+
+    // スライダーリリース時（値送信+activeSliderChクリア）
+    function onSliderChange(ch, value) {
+      activeSliderCh = null;
+      setPwm(ch, value);
+    }
+
+    // DR1-03: モーメンタリ自動復帰
+    function togglePin(ch, mode, validity) {
       fetch('/api/pin/' + ch + '/toggle', {method: 'POST'})
         .then(function(r) { return r.json(); })
-        .then(function(data) { if (data.ok) loadPinStates(); else alert('Error: ' + data.message); });
+        .then(function(data) {
+          if (data.ok) {
+            loadPinStates();
+            // DR1-03: Momモードでvalidityミリ秒後に再取得
+            if (mode === 'Mom' && data.state === 1 && validity > 0) {
+              setTimeout(loadPinStates, validity + 100);
+            }
+          } else {
+            alert('Error: ' + data.message);
+          }
+        });
     }
 
     function setPwm(ch, value) {
@@ -159,6 +329,7 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         .then(function(data) { renderPinSettings(data.pins); });
     }
 
+    // DR1-09: 条件付き入力制御つきPIN Settings
     function renderPinSettings(pins) {
       var list = document.getElementById('pin-settings-list');
       if (!list) return;
@@ -167,32 +338,80 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         var p = pins[i];
         var ch = p.channel;
         var stn = p.stateName || [];
-        html += '<div class="pin-setting-card" data-ch="' + ch + '"><h4>CH' + ch + (p.name ? ' - ' + p.name : '') + '</h4>';
-        html += '<div class="form-group"><label>Type</label><select id="type-' + ch + '">';
+        html += '<div class="pin-setting-card" data-ch="' + ch + '"><h4>CH' + ch + (p.name ? ' - ' + escapeHtml(p.name) : '') + '</h4>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group"><label>Type</label><select id="type-' + ch + '" onchange="updateFieldVisibility(' + ch + ')">';
         html += '<option value="digitalOutput"' + (p.type === 'digitalOutput' ? ' selected' : '') + '>Digital Output</option>';
         html += '<option value="pwmOutput"' + (p.type === 'pwmOutput' ? ' selected' : '') + '>PWM Output</option>';
         html += '<option value="digitalInput"' + (p.type === 'digitalInput' ? ' selected' : '') + '>Digital Input</option>';
         html += '<option value="disabled"' + (p.type === 'disabled' ? ' selected' : '') + '>Disabled</option>';
         html += '</select></div>';
-        html += '<div class="form-group"><label>Name</label><input type="text" id="name-' + ch + '" value="' + (p.name || '') + '" placeholder="CH' + ch + '"></div>';
-        html += '<div class="form-group"><label>Mode</label><select id="mode-' + ch + '">';
+        html += '<div class="form-group"><label>Mode</label><select id="mode-' + ch + '" onchange="updateFieldVisibility(' + ch + ')">';
         html += '<option value="Mom"' + (p.actionMode === 'Mom' ? ' selected' : '') + '>Momentary</option>';
         html += '<option value="Alt"' + (p.actionMode === 'Alt' ? ' selected' : '') + '>Alternate</option>';
         html += '<option value="Slow"' + (p.actionMode === 'Slow' ? ' selected' : '') + '>Slow (PWM)</option>';
         html += '<option value="Rapid"' + (p.actionMode === 'Rapid' ? ' selected' : '') + '>Rapid (PWM)</option>';
         html += '<option value="rotate"' + (p.actionMode === 'rotate' ? ' selected' : '') + '>Rotate (Input)</option>';
         html += '</select></div>';
-        html += '<div class="form-group"><label>Validity (ms)</label><input type="number" id="validity-' + ch + '" value="' + (p.validity || 0) + '" min="0" step="100"></div>';
-        html += '<div class="form-group"><label>Debounce (ms)</label><input type="number" id="debounce-' + ch + '" value="' + (p.debounce || 0) + '" min="0" step="100"></div>';
-        html += '<div class="form-group"><label>Rate of Change (ms)</label><input type="number" id="rateOfChange-' + ch + '" value="' + (p.rateOfChange || 0) + '" min="0" step="100"></div>';
-        html += '<div class="form-group"><label>State Names</label><input type="text" id="stateName-' + ch + '" value="' + escapeHtml(stn.join(',')) + '" placeholder="on:ON,off:OFF"></div>';
+        html += '</div>';
+        html += '<div class="form-group"><label>Name</label><input type="text" id="name-' + ch + '" value="' + escapeHtml(p.name || '') + '" placeholder="CH' + ch + '"></div>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group" id="fg-validity-' + ch + '"><label>Validity (ms)</label><input type="number" id="validity-' + ch + '" value="' + (p.validity || 0) + '" min="0" step="100"></div>';
+        html += '<div class="form-group" id="fg-debounce-' + ch + '"><label>Debounce (ms)</label><input type="number" id="debounce-' + ch + '" value="' + (p.debounce || 0) + '" min="0" step="100"></div>';
+        html += '<div class="form-group" id="fg-rateOfChange-' + ch + '"><label>Rate of Change (ms)</label><input type="number" id="rateOfChange-' + ch + '" value="' + (p.rateOfChange || 0) + '" min="0" step="100"></div>';
+        html += '</div>';
+        html += '<div class="form-group" id="fg-stateName-' + ch + '"><label>State Names</label><input type="text" id="stateName-' + ch + '" value="' + escapeHtml(stn.join(',')) + '" placeholder="on:ON,off:OFF"></div>';
         var alloc = p.allocation || [];
-        html += '<div class="form-group"><label>Allocation (I/O)</label><input type="text" id="allocation-' + ch + '" value="' + escapeHtml(alloc.join(',')) + '" placeholder="CH1,CH2"></div>';
-        html += '<div class="form-group"><label>Expiry Date</label><input type="text" id="expiryDate-' + ch + '" value="' + (p.expiryDate || '') + '" placeholder="YYYYMMDDHHMM"></div>';
-        html += '<div class="form-group"><label>Expiry Enabled</label><input type="checkbox" id="expiryEnabled-' + ch + '"' + (p.expiryEnabled ? ' checked' : '') + '></div>';
+        html += '<div class="form-group" id="fg-allocation-' + ch + '"><label>Allocation (I/O)</label><input type="text" id="allocation-' + ch + '" value="' + escapeHtml(alloc.join(',')) + '" placeholder="CH1,CH2"></div>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group" id="fg-expiryDate-' + ch + '"><label>Expiry Date</label><input type="text" id="expiryDate-' + ch + '" value="' + (p.expiryDate || '') + '" placeholder="YYYYMMDDHHMM"></div>';
+        html += '<div class="form-group" id="fg-expiryEnabled-' + ch + '"><label>Expiry Enabled</label><input type="checkbox" id="expiryEnabled-' + ch + '"' + (p.expiryEnabled ? ' checked' : '') + '></div>';
+        html += '</div>';
         html += '</div>';
       }
       list.innerHTML = html;
+      // DR1-09: 初期表示時に各チャンネルのフィールド可視性を設定
+      for (var i = 0; i < pins.length; i++) {
+        updateFieldVisibility(pins[i].channel);
+      }
+    }
+
+    // DR1-09: タイプ/モードに応じたフィールド可視性制御
+    function updateFieldVisibility(ch) {
+      var type = document.getElementById('type-' + ch).value;
+      var mode = document.getElementById('mode-' + ch).value;
+
+      // Validity: digitalOutput/Input の Mom モードのみ
+      var validityEnabled = (type === 'digitalOutput' || type === 'digitalInput') && mode === 'Mom';
+      setFieldEnabled('validity-' + ch, 'fg-validity-' + ch, validityEnabled);
+
+      // Debounce: digitalOutput/Input のみ (pwm/disabledでは無効)
+      var debounceEnabled = (type === 'digitalOutput' || type === 'digitalInput');
+      setFieldEnabled('debounce-' + ch, 'fg-debounce-' + ch, debounceEnabled);
+
+      // RateOfChange: pwmOutput のみ
+      var rocEnabled = (type === 'pwmOutput');
+      setFieldEnabled('rateOfChange-' + ch, 'fg-rateOfChange-' + ch, rocEnabled);
+
+      // Allocation: digitalInput のみ
+      var allocEnabled = (type === 'digitalInput');
+      setFieldEnabled('allocation-' + ch, 'fg-allocation-' + ch, allocEnabled);
+
+      // stateName: digitalOutput/pwmOutput のみ
+      var stnEnabled = (type === 'digitalOutput' || type === 'pwmOutput');
+      setFieldEnabled('stateName-' + ch, 'fg-stateName-' + ch, stnEnabled);
+
+      // expiryDate/Enabled: digitalOutput/pwmOutput のみ
+      var expiryEnabled = (type === 'digitalOutput' || type === 'pwmOutput');
+      setFieldEnabled('expiryDate-' + ch, 'fg-expiryDate-' + ch, expiryEnabled);
+      setFieldEnabled('expiryEnabled-' + ch, 'fg-expiryEnabled-' + ch, expiryEnabled);
+    }
+
+    function setFieldEnabled(inputId, groupId, enabled) {
+      var input = document.getElementById(inputId);
+      var group = document.getElementById(groupId);
+      if (input) input.disabled = !enabled;
+      if (group) group.style.opacity = enabled ? '1' : '0.4';
     }
 
     function savePinSettings() {
@@ -238,10 +457,67 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
       });
     }
 
+    // Device Settings 読み込み
+    function loadDeviceSettings() {
+      fetch('/api/settings')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.ok && data.settings) {
+            var s = data.settings;
+            document.getElementById('ds-device-name').value = s.device_name || '';
+            document.getElementById('ds-rid').value = s.rid || '';
+            if (s.pinGlobal) {
+              document.getElementById('ds-g-validity').value = s.pinGlobal.validity || 0;
+              document.getElementById('ds-g-debounce').value = s.pinGlobal.debounce || 0;
+              document.getElementById('ds-g-rateofchange').value = s.pinGlobal.rateOfChange || 0;
+            }
+          }
+        })
+        .catch(function(e) { console.error('Load device settings error:', e); });
+    }
+
+    // Device Settings 保存
+    function saveDeviceSettings() {
+      var settings = {
+        device_name: document.getElementById('ds-device-name').value,
+        rid: document.getElementById('ds-rid').value,
+        pinGlobal: {
+          validity: parseInt(document.getElementById('ds-g-validity').value) || 0,
+          debounce: parseInt(document.getElementById('ds-g-debounce').value) || 0,
+          rateOfChange: parseInt(document.getElementById('ds-g-rateofchange').value) || 0
+        }
+      };
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(settings)
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.ok) {
+            alert('Device settings saved');
+          } else {
+            alert('Error: ' + data.message);
+          }
+        })
+        .catch(function(e) { alert('Error: ' + e.message); });
+    }
+
+    // DR1-04: タブ切り替え時のポーリング制御
     document.addEventListener('tabchange', function(e) {
-      if (e.detail === 'pincontrol') loadPinStates();
+      // 他タブに移動したらポーリング停止
+      stopPinPolling();
+
+      if (e.detail === 'pincontrol') {
+        loadPinStates();
+        startPinPolling();  // DR1-04: PIN Controlタブでポーリング開始
+      }
       if (e.detail === 'pinsetting') loadPinSettings();
+      if (e.detail === 'devicesettings') loadDeviceSettings();
     });
+
+    // ページ離脱時にポーリング停止
+    window.addEventListener('beforeunload', stopPinPolling);
   )JS";
   return js;
 }
@@ -356,6 +632,10 @@ void HttpManagerIs06s::handlePinStatePost() {
 
   if (success) {
     sendJsonSuccess();
+    // OLED通知コールバック（API制御）
+    if (pinStateChangeCallback_) {
+      pinStateChangeCallback_(ch, state);
+    }
   } else {
     sendJsonError(400, "Command rejected (disabled or debounce)");
   }
@@ -520,6 +800,11 @@ void HttpManagerIs06s::handlePinToggle() {
     String response;
     serializeJson(doc, response);
     server_->send(200, "application/json", response);
+
+    // OLED通知コールバック（API制御）
+    if (pinStateChangeCallback_) {
+      pinStateChangeCallback_(ch, newState);
+    }
   } else {
     sendJsonError(400, "Toggle failed (disabled or debounce)");
   }
@@ -704,6 +989,7 @@ void HttpManagerIs06s::handleSettingsGet() {
 
   // Device settings
   settings["device_name"] = settings_->getString("device_name", "");
+  settings["rid"] = settings_->getString("rid", "");  // roomID - グループ/部屋識別
   settings["mqtt_url"] = settings_->getString("mqtt_url", "");
 
   // WiFi settings (read-only for security)
@@ -751,6 +1037,13 @@ void HttpManagerIs06s::handleSettingsPost() {
   if (doc.containsKey("device_name")) {
     settings_->setString("device_name", doc["device_name"].as<String>());
     changed = true;
+  }
+
+  // Room ID (rid) - グループ/部屋識別
+  if (doc.containsKey("rid")) {
+    settings_->setString("rid", doc["rid"].as<String>());
+    changed = true;
+    Serial.printf("[Settings] rid set to: %s\n", doc["rid"].as<String>().c_str());
   }
 
   // MQTT URL

@@ -43,8 +43,8 @@ constexpr const char* PWM_RATE_OF_CHANGE = "4000";
 // アクションモード: "Slow" or "Rapid"
 constexpr const char* PWM_ACTION_MODE = "Slow";
 
-// PWM周波数 (Hz)
-constexpr int PWM_FREQUENCY = 5000;
+// PWM周波数 (Hz) - LEDテープライト向け20kHz
+constexpr int PWM_FREQUENCY = 20000;
 
 // PWM解像度 (bits)
 constexpr int PWM_RESOLUTION = 8;

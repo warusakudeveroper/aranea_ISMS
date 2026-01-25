@@ -98,6 +98,7 @@ struct PinState {
   bool inputState = false;         // 入力状態
   bool lastInputState = false;     // 前回入力状態
   int currentPresetIndex = 0;      // PWMローテート用
+  unsigned long inputHighStart = 0; // 入力HIGH開始時刻（安定入力検出用）
 };
 
 // ============================================================

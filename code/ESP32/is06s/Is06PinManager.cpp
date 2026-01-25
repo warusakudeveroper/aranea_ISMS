@@ -32,27 +32,32 @@ void Is06PinManager::begin(SettingManager* settings, NtpManager* ntp) {
 void Is06PinManager::initGpio() {
   using namespace AraneaSettingsDefaults;
 
-  // CH1-4 (D/P Type): 初期状態OUTPUT
-  for (int i = 0; i < IS06_DP_CHANNELS; i++) {
-    pinMode(IS06_PIN_MAP[i], OUTPUT);
-    digitalWrite(IS06_PIN_MAP[i], LOW);
-  }
+  // CH1-4 (D/P Type): LEDCで管理するためpinModeは呼ばない
+  // （pinModeとledcAttachの競合を避けるため）
 
   // CH5-6 (I/O Type): 初期状態はINPUT_PULLDOWN
   for (int i = IS06_DP_CHANNELS; i < IS06_CHANNEL_COUNT; i++) {
     pinMode(IS06_PIN_MAP[i], INPUT_PULLDOWN);
   }
 
-  Serial.println("Is06PinManager: GPIO initialized.");
+  Serial.println("Is06PinManager: GPIO initialized (CH5-6 only, CH1-4 use LEDC).");
 }
 
 void Is06PinManager::initLedc() {
   using namespace AraneaSettingsDefaults;
 
   // LEDC設定（CH1-4用）
+  Serial.printf("Is06PinManager: LEDC config: freq=%dHz, resolution=%dbit\n",
+                PWM_FREQUENCY, PWM_RESOLUTION);
+
   for (int i = 0; i < IS06_DP_CHANNELS; i++) {
-    ledcAttach(IS06_PIN_MAP[i], PWM_FREQUENCY, PWM_RESOLUTION);
-    ledcWrite(IS06_PIN_MAP[i], 0);
+    bool ok = ledcAttach(IS06_PIN_MAP[i], PWM_FREQUENCY, PWM_RESOLUTION);
+    if (ok) {
+      ledcWrite(IS06_PIN_MAP[i], 0);
+      Serial.printf("  CH%d (GPIO%d): LEDC attached OK\n", i + 1, IS06_PIN_MAP[i]);
+    } else {
+      Serial.printf("  CH%d (GPIO%d): LEDC attach FAILED!\n", i + 1, IS06_PIN_MAP[i]);
+    }
   }
 
   Serial.println("Is06PinManager: LEDC initialized.");
@@ -121,6 +126,7 @@ void Is06PinManager::handlePwmTransition() {
 
 void Is06PinManager::handleDigitalInput() {
   unsigned long now = millis();
+  const unsigned long INPUT_STABLE_MS = 200;  // 入力安定判定時間
 
   for (int ch = IS06_DP_CHANNELS; ch < IS06_CHANNEL_COUNT; ch++) {
     if (pinSettings_[ch].type != PinType::DIGITAL_INPUT) continue;
@@ -131,21 +137,43 @@ void Is06PinManager::handleDigitalInput() {
 
     bool currentInput = digitalRead(IS06_PIN_MAP[ch]) == HIGH;
 
-    // 状態変化検知
-    if (currentInput != pinStates_[ch].lastInputState) {
-      pinStates_[ch].lastInputState = currentInput;
-      pinStates_[ch].inputState = currentInput;
-      pinStates_[ch].debounceEnd = now + (unsigned long)getEffectiveDebounce(ch + 1);
+    if (currentInput) {
+      // HIGH入力中
+      if (pinStates_[ch].inputHighStart == 0) {
+        // HIGH開始時刻を記録
+        pinStates_[ch].inputHighStart = now;
+      } else if (now - pinStates_[ch].inputHighStart >= INPUT_STABLE_MS) {
+        // 安定時間経過 → 有効な入力として処理
+        if (!pinStates_[ch].lastInputState) {
+          // LOW→HIGH遷移確定
+          pinStates_[ch].lastInputState = true;
+          pinStates_[ch].inputState = true;
+          pinStates_[ch].debounceEnd = now + (unsigned long)getEffectiveDebounce(ch + 1);
 
-      Serial.printf("Is06PinManager: CH%d input changed to %d\n", ch + 1, currentInput ? 1 : 0);
+          Serial.printf("Is06PinManager: CH%d input HIGH (stable %lums)\n", ch + 1, INPUT_STABLE_MS);
 
-      if (inputCallback_) {
-        inputCallback_(ch + 1, currentInput);
+          if (inputCallback_) {
+            inputCallback_(ch + 1, true);
+          }
+
+          triggerAllocations(ch);
+        }
       }
+    } else {
+      // LOW入力
+      pinStates_[ch].inputHighStart = 0;  // HIGHカウントリセット
 
-      // 立ち上がりエッジで連動トリガー
-      if (currentInput) {
-        triggerAllocations(ch);
+      if (pinStates_[ch].lastInputState) {
+        // HIGH→LOW遷移
+        pinStates_[ch].lastInputState = false;
+        pinStates_[ch].inputState = false;
+        pinStates_[ch].debounceEnd = now + (unsigned long)getEffectiveDebounce(ch + 1);
+
+        Serial.printf("Is06PinManager: CH%d input LOW\n", ch + 1);
+
+        if (inputCallback_) {
+          inputCallback_(ch + 1, false);
+        }
       }
     }
   }
@@ -385,9 +413,12 @@ void Is06PinManager::setPinType(int channel, ::PinType type) {
   if (type == ::PinType::DIGITAL_INPUT) {
     pinMode(IS06_PIN_MAP[idx], INPUT_PULLDOWN);
   } else if (type == ::PinType::DIGITAL_OUTPUT || type == ::PinType::PWM_OUTPUT) {
-    pinMode(IS06_PIN_MAP[idx], OUTPUT);
-    if (type == ::PinType::PWM_OUTPUT && isValidDpChannel(channel)) {
+    // CH1-4はLEDCを使用（Digital Output時も ledcWrite(0/255) で制御するため）
+    // pinMode(OUTPUT)はLEDC設定を解除するため、ledcAttachで上書き
+    if (isValidDpChannel(channel)) {
       ledcAttach(IS06_PIN_MAP[idx], ASD::PWM_FREQUENCY, ASD::PWM_RESOLUTION);
+    } else {
+      pinMode(IS06_PIN_MAP[idx], OUTPUT);
     }
   }
 
@@ -1086,12 +1117,13 @@ void Is06PinManager::applyDigitalOutput(int channel, int state) {
   if (!isValidChannel(channel)) return;
   int idx = channel - 1;
 
-  if (pinSettings_[idx].type == PinType::PWM_OUTPUT) {
-    // PWMモードの場合はledcWrite
+  // CH1-4はLEDCにアタッチ済みなのでledcWriteを使用
+  // （digitalWrite()はledcAttach()後は動作しない）
+  if (isValidDpChannel(channel)) {
     int pwmValue = state ? 255 : 0;
     ledcWrite(IS06_PIN_MAP[idx], pwmValue);
   } else {
-    // Digitalモード
+    // CH5-6: LEDCアタッチなしのためdigitalWrite使用
     digitalWrite(IS06_PIN_MAP[idx], state ? HIGH : LOW);
   }
 }
@@ -1103,6 +1135,9 @@ void Is06PinManager::applyPwmOutput(int channel, int value) {
   // 0-100% → 0-255
   int pwm8bit = map(value, 0, 100, 0, 255);
   ledcWrite(IS06_PIN_MAP[idx], pwm8bit);
+
+  Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d duty=%d (8bit)\n",
+                channel, IS06_PIN_MAP[idx], pwm8bit);
 }
 
 String Is06PinManager::getNvsKey(int channel, const char* suffix) {
