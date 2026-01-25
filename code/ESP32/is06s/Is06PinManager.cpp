@@ -64,7 +64,10 @@ void Is06PinManager::initLedc() {
     // 2. LEDCチャンネル管理をクリア
     ledcChannel_[i] = -1;
 
-    // 3. IO_MUXでGPIO functionを選択
+    // 3. 【review12対応】周辺機能の強制停止
+    gpio_reset_pin((gpio_num_t)pin);
+
+    // 4. IO_MUXでGPIO functionを選択
     gpio_pad_select_gpio(pin);
 
     // 4. GPIO Matrixで出力をシンプルGPIOに設定
@@ -115,6 +118,9 @@ void Is06PinManager::applyLoadedPinTypes() {
       } else {
         ledcChannel_[idx] = -1;
         // フォールバック: GPIO出力 (full config)
+        // 【review12対応】周辺機能の強制停止
+        gpio_reset_pin((gpio_num_t)pin);
+
         gpio_pad_select_gpio(pin);
         gpio_matrix_out(pin, 256, false, false);
         gpio_config_t io_conf = {};
@@ -132,6 +138,9 @@ void Is06PinManager::applyLoadedPinTypes() {
       // Digital出力モード - IO_MUXとGPIO Matrixを完全に設定
       ledcDetach(pin);
       if (idx < IS06_DP_CHANNELS) ledcChannel_[idx] = -1;
+
+      // 【review12対応】周辺機能の強制停止
+      gpio_reset_pin((gpio_num_t)pin);
 
       gpio_pad_select_gpio(pin);
       gpio_matrix_out(pin, 256, false, false);
@@ -151,6 +160,9 @@ void Is06PinManager::applyLoadedPinTypes() {
       // Digital入力モード - IO_MUXを正しく設定
       ledcDetach(pin);
       if (idx < IS06_DP_CHANNELS) ledcChannel_[idx] = -1;
+
+      // 【review12対応】周辺機能の強制停止
+      gpio_reset_pin((gpio_num_t)pin);
 
       gpio_pad_select_gpio(pin);
 
@@ -1268,6 +1280,9 @@ void Is06PinManager::applyDigitalOutput(int channel, int state) {
     ledcChannel_[idx] = -1;
     Serial.printf("Is06PinManager: CH%d GPIO%d LEDC detached for digital output\n", channel, pin);
   }
+
+  // 【review12対応】周辺機能の強制停止（毎回実行）
+  gpio_reset_pin((gpio_num_t)pin);
 
   // 【根本原因修正】IO_MUXとGPIO Matrixを明示的に設定
   // Step 1: IO_MUXでGPIO functionを選択
