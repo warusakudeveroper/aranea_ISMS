@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IS06S PIN Control</title>
+<style>
+:root {
+  --primary: #4c4948;
+  --primary-light: #6b6a69;
+  --accent: #3182ce;
+  --accent-hover: #2b6cb0;
+  --bg: #f7fafc;
+  --card: #fff;
+  --border: #e2e8f0;
+  --border-light: #edf2f7;
+  --text: #2d3748;
+  --text-muted: #718096;
+  --text-light: #a0aec0;
+  --success: #38a169;
+  --danger: #e53e3e;
+  --warning: #d69e2e;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --radius: 8px;
+  --radius-sm: 6px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+/* ===== Loading Overlay ===== */
+.loading-overlay {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 9999;
+  transition: opacity 0.3s;
+}
+.loading-overlay.hidden { opacity: 0; pointer-events: none; }
+.spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ===== Header ===== */
+.header {
+  background: var(--primary); color: #fff;
+  padding: 10px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
+}
+.header-left { display: flex; align-items: center; gap: 10px; }
+.header-logo { height: 28px; width: auto; }
+.header h1 { font-size: 14px; font-weight: 600; }
+.header .subtitle { font-size: 11px; font-weight: 400; opacity: 0.7; margin-left: 8px; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.header .meta { font-size: 11px; color: rgba(255,255,255,0.7); }
+.header .refresh-btn {
+  background: rgba(255,255,255,0.15); color: #fff;
+  border: 1px solid rgba(255,255,255,0.3);
+  padding: 4px 12px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 11px;
+}
+.header .refresh-btn:hover { background: rgba(255,255,255,0.25); }
+.header .refresh-btn.loading { opacity: 0.5; pointer-events: none; }
+
+/* ===== Summary ===== */
+.summary-bar {
+  display: flex; gap: 12px; padding: 8px 16px;
+  font-size: 11px; color: var(--text-muted);
+  background: #fff; border-bottom: 1px solid var(--border);
+}
+.summary-bar .stat { display: flex; align-items: center; gap: 4px; }
+.summary-bar .dot { width: 6px; height: 6px; border-radius: 50%; }
+.summary-bar .dot.green { background: var(--success); }
+.summary-bar .dot.red { background: var(--danger); }
+
+/* ===== Tab Navigation ===== */
+.tab-nav {
+  display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  background: #fff; border-bottom: 2px solid var(--border);
+  padding: 0 8px; scrollbar-width: none;
+}
+.tab-nav::-webkit-scrollbar { display: none; }
+.tab-btn {
+  flex-shrink: 0; padding: 10px 16px; border: none; background: transparent;
+  color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  white-space: nowrap; transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-btn .tab-count {
+  font-size: 10px; background: var(--border-light); color: var(--text-muted);
+  padding: 1px 6px; border-radius: 8px; margin-left: 4px;
+}
+.tab-btn.active .tab-count { background: #ebf4ff; color: var(--accent); }
+
+/* ===== Container / Tab Content ===== */
+.container { max-width: 960px; margin: 0 auto; padding: 12px; overflow: hidden; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Tab slide animations */
+@keyframes slideInFromRight {
+  from { transform: translateX(30%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes slideInFromLeft {
+  from { transform: translateX(-30%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.tab-content.slide-next { animation: slideInFromRight 0.2s ease-out; }
+.tab-content.slide-prev { animation: slideInFromLeft 0.2s ease-out; }
+
+/* ===== Device Card ===== */
+.device-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 12px;
+  box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.device-header { padding: 10px 14px; border-bottom: 1px solid var(--border-light); }
+.device-top { display: flex; align-items: center; justify-content: space-between; }
+.device-name {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  display: flex; align-items: center; gap: 6px;
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.online { background: var(--success); }
+.status-dot.offline { background: var(--danger); }
+.device-ip { font-size: 11px; color: var(--text-light); font-weight: 400; margin-left: 4px; }
+.device-meta {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;
+  font-size: 10px; color: var(--text-muted);
+}
+.device-meta span { background: var(--bg); padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.device-actions { display: flex; gap: 6px; }
+.setting-btn, .reboot-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-muted);
+  padding: 3px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 11px; text-decoration: none; line-height: 1.5;
+}
+.setting-btn:hover { color: var(--accent); border-color: var(--accent); }
+.reboot-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+/* ===== PIN Grid ===== */
+.pin-grid { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pin-item {
+  background: var(--bg); border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.pin-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.pin-ch { font-size: 12px; font-weight: 600; color: var(--accent); }
+.pin-name { font-size: 11px; color: var(--text-muted); margin-left: 6px; font-weight: 400; }
+.type-badge {
+  font-size: 9px; padding: 2px 6px; border-radius: 3px;
+  font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;
+}
+.type-badge.pwm { background: #e9d5ff; color: #6b21a8; }
+.type-badge.input { background: #ccfbf1; color: #0f766e; }
+.type-badge.digital { background: #dbeafe; color: #1e40af; }
+
+/* ===== PIN Controls ===== */
+.pin-control { display: flex; align-items: center; gap: 8px; }
+
+/* Toggle Button */
+.btn-toggle {
+  padding: 6px 20px; border: none; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px; font-weight: 600;
+  min-width: 80px; text-align: center; transition: background 0.15s, opacity 0.15s;
+}
+.btn-toggle.on { background: var(--success); color: #fff; }
+.btn-toggle.off { background: #e2e8f0; color: #64748b; }
+.btn-toggle:hover { opacity: 0.85; }
+.btn-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Button pulse animation */
+@keyframes pulse-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.btn-toggle.pulsing {
+  animation: pulse-blink 0.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Input state badge */
+.state-badge { padding: 4px 14px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; }
+.state-badge.high { background: #ccfbf1; color: #0f766e; }
+.state-badge.low { background: #e2e8f0; color: #64748b; }
+
+/* ===== PWM ===== */
+.pwm-wrapper { position: relative; width: 100%; }
+.pwm-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.pwm-slider { flex: 1; accent-color: var(--accent); height: 6px; }
+.pwm-value {
+  font-size: 13px; font-weight: 600; min-width: 40px;
+  text-align: right; color: var(--accent);
+  transition: transform 0.15s;
+}
+/* Tooltip above thumb while dragging */
+.pwm-tooltip {
+  position: absolute; top: -32px;
+  background: var(--primary); color: #fff;
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 12px; font-weight: 600;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.pwm-tooltip.visible { opacity: 1; }
+/* Transitioning indicator */
+.pwm-slider.transitioning { opacity: 0.6; pointer-events: none; }
+.pwm-transition-label {
+  font-size: 10px; color: var(--accent); margin-left: 4px;
+  animation: pulse-blink 1s ease-in-out infinite;
+}
+
+/* ===== Tab Panel Heading ===== */
+.tab-heading {
+  font-size: 13px; font-weight: 600; color: var(--text-muted);
+  padding: 6px 4px 8px; border-bottom: 1px solid var(--border-light);
+  margin-bottom: 10px; letter-spacing: 0.3px;
+}
+
+/* ===== Offline / Stale ===== */
+.device-card.offline { opacity: 0.5; }
+.device-card.offline .pin-grid { display: none; }
+.device-card.stale { opacity: 0.7; }
+.stale-badge { font-size: 9px; color: var(--warning); margin-left: 6px; }
+
+/* ===== Toast ===== */
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--primary); color: #fff;
+  padding: 8px 20px; border-radius: 20px; font-size: 12px;
+  display: none; z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15); white-space: nowrap;
+}
+.toast.error { background: var(--danger); }
+
+/* ===== Responsive ===== */
+@media (min-width: 600px) {
+  .pin-grid { flex-direction: row; flex-wrap: wrap; }
+  .pin-item { flex: 1; min-width: 200px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text">機器状況を読み込み中...</div>
+</div>
+
+<div class="header">
+  <div class="header-left">
+    <svg class="header-logo" viewBox="0 0 211.02 279.21" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M187.43,209.6c-9.57-12.63-22.63-21.14-37.43-26.9-.48-.19-.83-.68-1.25-1.03.18-.1.34-.24.53-.3,4.99-1.36,10.33-2,14.92-4.2,8.82-4.24,17.97-8.39,25.62-14.33,13.42-10.42,18.72-25.75,21.18-42.04.22-1.47-1.51-4.13-2.93-4.69-1.46-.57-4.68.21-5.34,1.39-1.64,2.93-2.31,6.41-3.27,9.7-2.52,8.58-6.23,16.58-12.64,22.92-9.65,9.53-22.03,13.38-34.93,15.91-.71.14-1.43.2-2.14.3.4-.56.72-1.21,1.22-1.66,10.74-9.61,19.39-20.71,25.21-34.02,3.39-7.74,6.01-15.8,4.83-24.06-1.43-10.01-4.28-19.85-7.01-29.62-.44-1.59-3.39-3.38-5.24-3.46-3.09-.14-4.89,2.36-4.14,5.46,1.21,5.07,3.12,9.96,4.33,15.03,2.1,8.85,2.15,17.77-1.36,26.28-4.66,11.3-12.37,20.46-21.34,28.61-.18.16-.39.29-.6.41-.07.04-.14.09-.21.13-.01-.04-.03-.08-.05-.13-.03-.08-.07-.17-.11-.26-.09-.21-.18-.43-.17-.63.7-16.98-4.61-31.8-16.06-44.34-5.64-6.17-12.28-11.01-20.72-12.31-.3-.05-.58-.04-.88-.07V0h-3.88v91.63c-6.1.46-11.46,3.54-16.2,7.54-14.48,12.21-21.36,28.05-21.42,46.93,0,1.1-.13,2.2-.2,3.29-.82-.67-1.64-1.32-2.44-2.02-.62-.54-1.22-1.11-1.8-1.69-8.13-8.05-15.3-16.89-18.81-27.91-4.08-12.79-1.03-25.16,3.39-37.39.62-1.73-.56-5.65-1.86-6.16-1.75-.69-5.94.35-6.43,1.66-2.87,7.52-5.66,15.21-7.15,23.1-2.65,14.01,1.13,27.04,8.01,39.32,5.79,10.34,13.35,19.2,22.24,26.98.27.23.34.69.5,1.04-.2.04-.43.16-.6.1-8.81-2.92-18.05-4.97-26.34-8.98-14.94-7.23-20.95-21.2-24.38-36.5-.82-3.66-2.65-6.13-6.65-5.1-3.15.81-3.9,3.44-3.17,6.5.86,3.62,1.17,7.48,2.64,10.82,3.33,7.55,6.17,15.71,11.21,22.01,5.05,6.3,11.95,11.75,19.11,15.57,8.64,4.61,18.41,7.11,27.69,10.51.48.18.99.29,1.48.43-.44.36-.86.77-1.34,1.06-9.09,5.45-18.61,10.29-27.16,16.48-8.89,6.44-15.63,15.05-18.7,25.97-2.97,10.55-2.84,21.32-1.37,32.02.24,1.73,3.05,4.21,4.85,4.37,3.25.29,4.38-2.62,4.39-5.65,0-3.93-.18-7.87-.07-11.79.26-9.53,2.11-18.64,8.68-25.99,8.54-9.56,19.02-16.44,30.82-21.37.64-.27,1.27-.55,1.93-.75.07-.02.14-.03.21-.02.11,0,.22.03.34.05.08.02.15.04.23.05.04,0,.08,0,.11.02-.13.19-.26.38-.38.57-.13.19-.26.38-.4.56-5.8,7.69-12.1,15.05-17.26,23.14-5.94,9.32-5.42,19.94-2.72,30.15,2.19,8.27,5.6,16.22,8.51,24.3,1.06,2.94,3.06,5.41,6.23,3.91,1.6-.75,3.42-4.11,2.96-5.64-2.32-7.78-6.07-15.18-7.89-23.04-1.3-5.6-1.93-12.29-.06-17.49,4.47-12.45,13.46-22.02,23.8-30.2.1-.08.21-.15.32-.22.34-.2.71-.36,1.06-.55.04.28.07.56.11.84s.08.56.16.83c.99,3.58,1.92,7.19,3.06,10.73.44,1.35,2.28,2.94,1.93,3.74-2.68,6.12-1.17,15.61,3.72,19.66.94.78,2.57.71,3.89,1.03.31-1.37.84-2.73.87-4.11.03-1.83-1.04-4-.37-5.42,1-2.1,2.94-4.97,4.8-5.22,5.27-.71,10.7-.27,16.07-.26.46,0,1.05-.05,1.36.2,3.42,2.78,4.13,6.26,2.98,10.46-.35,1.27.23,2.91.77,4.21.13.3,2.12.28,2.84-.2,5.11-3.46,7.51-11.9,5.34-17.73-.44-1.19-.94-3.09-.36-3.81,3.44-4.21,4.96-8.92,4.75-14.28,0-.23.18-.47.28-.7.22.1.5.14.66.3,5.79,5.89,11.96,11.45,17.23,17.77,5.67,6.78,10.49,14.65,8.36,23.91-2.27,9.84-6.16,19.31-8.83,29.07-.47,1.72,1.07,4.71,2.61,5.97.8.65,4.89-.74,5.37-2.01,3.76-9.9,7.59-19.84,10.23-30.06,2.42-9.39,1.48-19.11-3.95-27.39-5.14-7.83-11.4-14.94-17.16-22.36-.12-.15-.19-.34-.27-.53-.03-.06-.05-.12-.08-.18h.12c.3-.03.63-.12.84,0,7.16,3.94,14.78,7.26,21.3,12.07,5.66,4.16,10.89,9.45,14.84,15.24,5.01,7.34,5.49,16.31,5.12,25.11v7.14c0,3.24.99,6.03,4.67,6.13,3.71.1,4.9-2.86,4.89-5.9-.04-8.59.75-17.42-.95-25.71-1.48-7.23-4.78-14.7-9.24-20.58v.02Z"/></svg>
+    <h1>aranea devices<span class="subtitle">IS06S PIN Control</span></h1>
+  </div>
+  <div class="header-right">
+    <div class="meta" id="last-update">-</div>
+    <button class="refresh-btn" id="refresh-btn" onclick="loadAll()">Refresh</button>
+  </div>
+</div>
+
+<div class="summary-bar" id="summary-bar"></div>
+<div class="tab-nav" id="tab-nav"></div>
+<div class="container" id="tab-panels"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+var devices = [];
+var activeTab = null;
+var pollTimer = null;
+var POLL_INTERVAL = 5000;
+var firstLoaded = false;
+var pwmAnimations = {}; // key: "ip:ch", value: animationFrameId
+
+// ============================================================
+// コマンド送信中の値を保持（ポーリングによる上書き防止）
+// key: "ip:ch", value: { value, ts }
+// ============================================================
+var pendingValues = {};
+var PENDING_TTL = 10000; // 10秒後に強制クリア
+
+function setPending(ip, ch, val) {
+  pendingValues[ip + ':' + ch] = { value: val, ts: Date.now() };
+}
+function clearPending(ip, ch) {
+  delete pendingValues[ip + ':' + ch];
+}
+function getPending(ip, ch) {
+  var key = ip + ':' + ch;
+  var p = pendingValues[key];
+  if (!p) return null;
+  if (Date.now() - p.ts > PENDING_TTL) { delete pendingValues[key]; return null; }
+  return p.value;
+}
+
+// ============================================================
+// Tab order cache (ridの順番を記憶して安定化)
+// ============================================================
+var ridOrderCache = [];
+
+// ============================================================
+// データ取得
+// ============================================================
+async function loadAll() {
+  var btn = document.getElementById('refresh-btn');
+  btn.classList.add('loading');
+  btn.textContent = '...';
+  try {
+    var res = await fetch('/api/devices');
+    var data = await res.json();
+    if (data.ok) {
+      devices = data.devices;
+      updateUI();
+      document.getElementById('last-update').textContent =
+        new Date(data.timestamp).toLocaleTimeString('ja-JP');
+      if (!firstLoaded) {
+        firstLoaded = true;
+        var ov = document.getElementById('loading-overlay');
+        ov.classList.add('hidden');
+        setTimeout(function() { ov.style.display = 'none'; }, 300);
+      }
+    }
+  } catch (e) {
+    showToast('通信エラー: ' + e.message, true);
+  }
+  btn.classList.remove('loading');
+  btn.textContent = 'Refresh';
+}
+
+// ============================================================
+// UI更新
+// ============================================================
+function updateUI() {
+  var online = devices.filter(function(d) { return d.online; });
+  var offline = devices.filter(function(d) { return !d.online; });
+
+  document.getElementById('summary-bar').innerHTML =
+    '<div class="stat"><span class="dot green"></span>Online ' + online.length + '</div>' +
+    '<div class="stat"><span class="dot red"></span>Offline ' + offline.length + '</div>' +
+    '<div class="stat">Total ' + devices.length + '</div>';
+
+  var groups = {};
+  var ridOrder = [];
+  devices.forEach(function(d) {
+    var rid;
+    if (!d.online) rid = '__offline__';
+    else if (!d.rid || d.rid === '') rid = '__no_rid__';
+    else rid = d.rid;
+    if (!groups[rid]) { groups[rid] = []; ridOrder.push(rid); }
+    groups[rid].push(d);
+  });
+  ridOrder.sort(function(a, b) {
+    if (a === '__offline__') return 1;
+    if (b === '__offline__') return -1;
+    if (a === '__no_rid__') return 1;
+    if (b === '__no_rid__') return -1;
+    return a.localeCompare(b);
+  });
+  ridOrder.forEach(function(rid) {
+    groups[rid].sort(function(a, b) {
+      var na = (a.deviceName || a.hostname || a.ip).toLowerCase();
+      var nb = (b.deviceName || b.hostname || b.ip).toLowerCase();
+      if (na !== nb) return na.localeCompare(nb);
+      return a.ip.localeCompare(b.ip);
+    });
+  });
+
+  ridOrderCache = ridOrder;
+  if (!activeTab || !groups[activeTab]) {
+    activeTab = ridOrder.length > 0 ? ridOrder[0] : null;
+  }
+
+  // Tab buttons
+  var tabHtml = '';
+  ridOrder.forEach(function(rid) {
+    var label = rid === '__offline__' ? 'Offline' : (rid === '__no_rid__' ? 'ridなし' : rid);
+    var count = groups[rid].length;
+    var cls = (rid === activeTab) ? ' active' : '';
+    tabHtml += '<button class="tab-btn' + cls + '" data-rid="' + escAttr(rid) + '" onclick="switchTab(\'' + escAttr(rid) + '\')">';
+    tabHtml += escHtml(label) + '<span class="tab-count">' + count + '</span></button>';
+  });
+  document.getElementById('tab-nav').innerHTML = tabHtml;
+
+  // Tab panels
+  var panelHtml = '';
+  ridOrder.forEach(function(rid) {
+    var cls = (rid === activeTab) ? ' active' : '';
+    panelHtml += '<div class="tab-content' + cls + '" id="tab-' + escAttr(rid) + '">';
+    panelHtml += '<div class="tab-heading">' + escHtml(ridLabel(rid)) + '</div>';
+    if (rid === activeTab) {
+      groups[rid].forEach(function(d) { panelHtml += renderDevice(d); });
+    }
+    panelHtml += '</div>';
+  });
+  document.getElementById('tab-panels').innerHTML = panelHtml;
+
+  // Post-render: PWM transition animations
+  setupPwmAnimations();
+}
+
+function switchTab(rid, direction) {
+  var oldTab = activeTab;
+  activeTab = rid;
+
+  // Determine direction if not provided (tab button click)
+  if (!direction && oldTab && oldTab !== rid) {
+    var oldIdx = ridOrderCache.indexOf(oldTab);
+    var newIdx = ridOrderCache.indexOf(rid);
+    direction = (newIdx > oldIdx) ? 'next' : 'prev';
+  }
+
+  var btns = document.querySelectorAll('.tab-btn');
+  btns.forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-rid') === rid);
+  });
+  var panels = document.querySelectorAll('.tab-content');
+  panels.forEach(function(p) {
+    var isActive = p.id === 'tab-' + rid;
+    p.classList.remove('active', 'slide-next', 'slide-prev');
+    if (isActive) {
+      p.classList.add('active');
+      // Apply slide animation when switching between different tabs
+      if (direction && oldTab !== rid) {
+        var animClass = (direction === 'next') ? 'slide-next' : 'slide-prev';
+        p.classList.add(animClass);
+        p.addEventListener('animationend', function handler() {
+          p.classList.remove(animClass);
+          p.removeEventListener('animationend', handler);
+        });
+      }
+      if (!p.querySelector('.device-card')) {
+        var groups = getGroups();
+        if (groups[rid]) {
+          var html = '';
+          groups[rid].forEach(function(d) { html += renderDevice(d); });
+          p.innerHTML = '<div class="tab-heading">' + escHtml(ridLabel(rid)) + '</div>' + html;
+          setupPwmAnimations();
+        }
+      }
+    }
+  });
+}
+
+function getGroups() {
+  var groups = {};
+  devices.forEach(function(d) {
+    var rid;
+    if (!d.online) rid = '__offline__';
+    else if (!d.rid || d.rid === '') rid = '__no_rid__';
+    else rid = d.rid;
+    if (!groups[rid]) groups[rid] = [];
+    groups[rid].push(d);
+  });
+  Object.keys(groups).forEach(function(rid) {
+    groups[rid].sort(function(a, b) {
+      var na = (a.deviceName || a.hostname || a.ip).toLowerCase();
+      var nb = (b.deviceName || b.hostname || b.ip).toLowerCase();
+      if (na !== nb) return na.localeCompare(nb);
+      return a.ip.localeCompare(b.ip);
+    });
+  });
+  return groups;
+}
+
+// ============================================================
+// デバイスカード
+// ============================================================
+function renderDevice(d) {
+  if (!d.online) {
+    return '<div class="device-card offline"><div class="device-header"><div class="device-top"><div class="device-name">' +
+      '<span class="status-dot offline"></span>' + escHtml(d.ip) +
+      '</div></div><div class="device-meta"><span>' + escHtml(d.error || 'Offline') + '</span></div></div></div>';
+  }
+  var displayName = d.deviceName || d.hostname || d.ip;
+  var stale = d.stale ? ' stale' : '';
+  var h = '<div class="device-card' + stale + '" data-ip="' + d.ip + '">';
+  h += '<div class="device-header"><div class="device-top">';
+  h += '<div class="device-name"><span class="status-dot online"></span>' + escHtml(displayName);
+  h += '<span class="device-ip">' + d.ip + '</span>';
+  if (d.busy) h += '<span class="stale-badge" style="color:var(--accent)">操作中</span>';
+  else if (d.stale) h += '<span class="stale-badge">応答待ち</span>';
+  h += '</div>';
+  h += '<div class="device-actions">';
+  h += '<a class="setting-btn" href="http://' + d.ip + '/" target="_blank">Setting</a>';
+  h += '<button class="reboot-btn" onclick="rebootDevice(\'' + d.ip + '\')">Reboot</button>';
+  h += '</div></div>';
+  h += '<div class="device-meta">';
+  h += '<span>Heap ' + (d.heap / 1024).toFixed(0) + 'KB</span>';
+  h += '<span>RSSI ' + d.rssi + 'dBm</span>';
+  h += '<span>Temp ' + (typeof d.chipTemp === 'number' ? d.chipTemp.toFixed(0) : d.chipTemp) + 'C</span>';
+  h += '<span>Up ' + escHtml(d.uptime) + '</span>';
+  h += '<span>FW ' + escHtml(d.firmware) + '</span>';
+  h += '</div></div>';
+  h += '<div class="pin-grid">';
+  (d.pins || []).forEach(function(pin) {
+    if (pin.type === 'disabled') return;
+    h += renderPin(d.ip, pin);
+  });
+  h += '</div></div>';
+  return h;
+}
+
+function renderPin(ip, pin) {
+  var ch = pin.channel;
+  var name = pin.name || ('CH' + ch);
+  var typeBadge = '';
+  var control = '';
+  var extraAttr = '';
+
+  if (pin.type === 'pwmOutput') {
+    typeBadge = '<span class="type-badge pwm">PWM</span>';
+    var serverVal = pin.pwm || 0;
+    var pendVal = getPending(ip, ch);
+    var val = (pendVal !== null) ? pendVal : serverVal;
+    var isPending = (pendVal !== null);
+    // pending中はESP32のtransitioning状態より操作値を優先
+    var isTransitioning = isPending ? false : pin.pwmTransitioning;
+    var target = isPending ? val : (pin.pwmTarget || 0);
+    var trCls = isTransitioning ? ' transitioning' : '';
+    var pendLabel = isPending ? '<span class="pwm-transition-label">送信中</span>' : '';
+    var trLabel = isTransitioning ? '<span class="pwm-transition-label">' + target + '%へ遷移中</span>' : pendLabel;
+    extraAttr = ' data-pwm-current="' + val + '" data-pwm-target="' + target + '" data-transitioning="' + (isTransitioning ? '1' : '0') + '"';
+
+    control = '<div class="pwm-wrapper">' +
+      '<div class="pwm-tooltip" id="tip-' + ip.replace(/\./g, '_') + '-' + ch + '"></div>' +
+      '<div class="pwm-row">' +
+      '<input type="range" class="pwm-slider' + trCls + '" min="0" max="100" value="' + val + '" ' +
+      'oninput="onPwmInput(this,\'' + ip + '\',' + ch + ')" ' +
+      'onchange="setPwm(\'' + ip + '\',' + ch + ',this.value)" ' +
+      'ontouchend="hidePwmTip(\'' + ip + '\',' + ch + ')" ' +
+      'onmouseup="hidePwmTip(\'' + ip + '\',' + ch + ')" ' +
+      (pin.enabled && !isTransitioning ? '' : 'disabled') + '>' +
+      '<span class="pwm-value">' + val + '%</span>' + trLabel +
+      '</div></div>';
+  } else if (pin.type === 'digitalOutput') {
+    typeBadge = '<span class="type-badge digital">DO</span>';
+    var stLabel = getStateLabel(pin);
+    var togglePending = (getPending(ip, ch) === '__toggle__');
+    var pulseClass = togglePending ? ' pulsing' : '';
+    control = '<button class="btn-toggle ' + (pin.state ? 'on' : 'off') + pulseClass + '" ' +
+      'id="btn-' + ip.replace(/\./g, '_') + '-' + ch + '" ' +
+      'onclick="togglePin(\'' + ip + '\',' + ch + ',this)" ' +
+      (pin.enabled && !togglePending ? '' : 'disabled') + '>' + escHtml(stLabel) + '</button>';
+  } else if (pin.type === 'digitalInput') {
+    typeBadge = '<span class="type-badge input">IN</span>';
+    var inputState = pin.state ? 'HIGH' : 'LOW';
+    control = '<span class="state-badge ' + (pin.state ? 'high' : 'low') + '">' + inputState + '</span>';
+  }
+
+  return '<div class="pin-item" data-ip="' + ip + '" data-ch="' + ch + '"' + extraAttr + '>' +
+    '<div class="pin-top"><div><span class="pin-ch">CH' + ch + '</span><span class="pin-name">' + escHtml(name) + '</span></div>' + typeBadge + '</div>' +
+    '<div class="pin-control">' + control + '</div></div>';
+}
+
+function getStateLabel(pin) {
+  var stn = pin.stateName || [];
+  var st = pin.state;
+  for (var i = 0; i < stn.length; i++) {
+    var parts = stn[i].split(':');
+    if (parts.length === 2) {
+      if ((parts[0] === 'on' && st) || (parts[0] === 'off' && !st)) return parts[1];
+    }
+  }
+  return st ? 'ON' : 'OFF';
+}
+
+// ============================================================
+// PWM tooltip + transition animation
+// ============================================================
+function onPwmInput(slider, ip, ch) {
+  var val = slider.value;
+  // Update value display
+  var valueEl = slider.nextElementSibling;
+  if (valueEl) valueEl.textContent = val + '%';
+  // Show tooltip
+  var tipId = 'tip-' + ip.replace(/\./g, '_') + '-' + ch;
+  var tip = document.getElementById(tipId);
+  if (tip) {
+    tip.textContent = val + '%';
+    tip.classList.add('visible');
+    // Position tooltip above thumb
+    var pct = val / 100;
+    var sliderWidth = slider.offsetWidth;
+    var thumbOffset = 8; // half thumb width approx
+    var left = thumbOffset + pct * (sliderWidth - thumbOffset * 2);
+    tip.style.left = left + 'px';
+  }
+}
+
+function hidePwmTip(ip, ch) {
+  var tipId = 'tip-' + ip.replace(/\./g, '_') + '-' + ch;
+  var tip = document.getElementById(tipId);
+  if (tip) tip.classList.remove('visible');
+}
+
+function setupPwmAnimations() {
+  // Cancel old animations
+  Object.keys(pwmAnimations).forEach(function(key) {
+    cancelAnimationFrame(pwmAnimations[key]);
+  });
+  pwmAnimations = {};
+
+  // Find transitioning PWM sliders
+  document.querySelectorAll('.pin-item[data-transitioning="1"]').forEach(function(el) {
+    var slider = el.querySelector('.pwm-slider');
+    var valueEl = el.querySelector('.pwm-value');
+    if (!slider || !valueEl) return;
+
+    var current = parseInt(el.getAttribute('data-pwm-current')) || 0;
+    var target = parseInt(el.getAttribute('data-pwm-target')) || 0;
+    if (current === target) return;
+
+    var ip = el.getAttribute('data-ip');
+    var ch = el.getAttribute('data-ch');
+    var key = ip + ':' + ch;
+
+    // Animate from current toward target over ~4 seconds
+    var startTime = Date.now();
+    var duration = 4000;
+    var startVal = current;
+
+    function animate() {
+      var elapsed = Date.now() - startTime;
+      var progress = Math.min(elapsed / duration, 1);
+      // Ease-out
+      var eased = 1 - Math.pow(1 - progress, 2);
+      var val = Math.round(startVal + (target - startVal) * eased);
+      slider.value = val;
+      valueEl.textContent = val + '%';
+      if (progress < 1) {
+        pwmAnimations[key] = requestAnimationFrame(animate);
+      }
+    }
+    pwmAnimations[key] = requestAnimationFrame(animate);
+  });
+}
+
+// ============================================================
+// PIN操作
+// ============================================================
+async function togglePin(ip, ch, btnEl) {
+  // Pulse feedback
+  if (btnEl) btnEl.classList.add('pulsing');
+  setPending(ip, ch, '__toggle__');
+  try {
+    var res = await fetch('/api/device/' + ip + '/pin/' + ch + '/toggle', { method: 'POST' });
+    var data = await res.json();
+    if (res.status === 409) {
+      clearPending(ip, ch);
+      if (btnEl) btnEl.classList.remove('pulsing');
+      showToast(data.message || '操作中', true);
+      return;
+    }
+    if (data.ok) {
+      showToast('CH' + ch + ' toggled');
+      setTimeout(function() { clearPending(ip, ch); loadAll(); }, 500);
+    } else {
+      clearPending(ip, ch);
+      if (btnEl) btnEl.classList.remove('pulsing');
+      showToast('Toggle失敗: ' + (data.message || 'error'), true);
+    }
+  } catch (e) {
+    clearPending(ip, ch);
+    if (btnEl) btnEl.classList.remove('pulsing');
+    showToast('Error: ' + e.message, true);
+  }
+}
+
+async function setPwm(ip, ch, value) {
+  hidePwmTip(ip, ch);
+  var intVal = parseInt(value);
+  setPending(ip, ch, intVal);
+  try {
+    var res = await fetch('/api/device/' + ip + '/pin/' + ch + '/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: intVal })
+    });
+    var data = await res.json();
+    if (res.status === 409) {
+      showToast(data.message || '操作中', true);
+      return;
+    }
+    if (data.ok) {
+      showToast('CH' + ch + ' PWM=' + value + '%');
+      // コマンド成功 → 次のポーリングでESP32確定値が来たらpendingクリア
+      // 少し待ってからクリア（次のポーリング反映を待つ）
+      setTimeout(function() { clearPending(ip, ch); }, POLL_INTERVAL + 1000);
+    } else {
+      clearPending(ip, ch);
+      showToast('PWM設定失敗', true);
+    }
+  } catch (e) {
+    clearPending(ip, ch);
+    showToast('Error: ' + e.message, true);
+  }
+}
+
+async function rebootDevice(ip) {
+  if (!confirm(ip + ' を再起動しますか？')) return;
+  try {
+    await fetch('/api/device/' + ip + '/reboot', { method: 'POST' });
+    showToast(ip + ' 再起動中...');
+    setTimeout(loadAll, 15000);
+  } catch (e) {
+    showToast('再起動失敗: ' + e.message, true);
+  }
+}
+
+// ============================================================
+// スワイプでタブ切り替え
+// ============================================================
+(function() {
+  var container = document.getElementById('tab-panels');
+  var touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+  var EDGE_MARGIN = 30;  // 画面端は無視 (OS戻るジェスチャー回避)
+  var SWIPE_MIN = 50;    // 最小スワイプ距離
+
+  container.addEventListener('touchstart', function(e) {
+    var t = e.touches[0];
+    // 画面端からの操作はOSに譲る
+    if (t.clientX < EDGE_MARGIN || t.clientX > window.innerWidth - EDGE_MARGIN) return;
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+    touchStartTime = Date.now();
+  }, { passive: true });
+
+  container.addEventListener('touchend', function(e) {
+    if (!touchStartX) return;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - touchStartX;
+    var dy = t.clientY - touchStartY;
+    var elapsed = Date.now() - touchStartTime;
+    touchStartX = 0;
+
+    // 水平方向が十分で、垂直方向より大きく、速すぎない
+    if (Math.abs(dx) > SWIPE_MIN && Math.abs(dx) > Math.abs(dy) * 1.5 && elapsed < 500) {
+      var idx = ridOrderCache.indexOf(activeTab);
+      if (idx < 0) return;
+      if (dx < 0 && idx < ridOrderCache.length - 1) {
+        switchTab(ridOrderCache[idx + 1], 'next'); // 左スワイプ → 次のタブ
+      } else if (dx > 0 && idx > 0) {
+        switchTab(ridOrderCache[idx - 1], 'prev'); // 右スワイプ → 前のタブ
+      }
+    }
+  }, { passive: true });
+})();
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+function ridLabel(rid) {
+  if (rid === '__offline__') return 'Offline';
+  if (rid === '__no_rid__') return 'ridなし';
+  return rid;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return escHtml(s).replace(/'/g,'&#39;'); }
+
+function showToast(msg, isError) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (isError ? ' error' : '');
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function() { t.style.display = 'none'; }, 3000);
+}
+
+// ============================================================
+// 起動
+// ============================================================
+loadAll();
+pollTimer = setInterval(loadAll, POLL_INTERVAL);
+</script>
+</body>
+</html>

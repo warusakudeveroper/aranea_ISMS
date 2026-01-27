@@ -1,0 +1,13 @@
+{
+  "name": "is06s-dashboard",
+  "version": "0.6.0",
+  "description": "IS06S 統合PIN Control Dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0"
+  }
+}
