@@ -982,7 +982,15 @@ export function ScanModal({
       f: [],
     }
     for (const device of categorizedDevices) {
-      grouped[device.category].push(device)
+      // カテゴリが有効な値かチェック（undefinedや無効な値を防ぐ）
+      const category = device.category
+      if (category && grouped[category]) {
+        grouped[category].push(device)
+      } else {
+        // 無効なカテゴリは 'e' (非カメラ) にフォールバック
+        console.warn(`[ScanModal] Invalid category "${category}" for device ${device.ip}, falling back to 'e'`)
+        grouped['e'].push({ ...device, category: 'e' })
+      }
     }
     return grouped
   }, [categorizedDevices])
@@ -1072,16 +1080,20 @@ export function ScanModal({
   }, [selectedSubnets])
 
   // Poll for scan progress
+  // Fix: 依存配列をjob_idとstatusに限定して無限ループを防止
+  const scanJobId = scanJob?.job_id
+  const scanJobStatus = scanJob?.status
+
   useEffect(() => {
-    console.log("[ScanModal] useEffect triggered, scanJob:", scanJob?.job_id, "status:", scanJob?.status)
-    if (!scanJob || scanJob.status === "success" || scanJob.status === "failed") {
+    console.log("[ScanModal] useEffect triggered, scanJob:", scanJobId, "status:", scanJobStatus)
+    if (!scanJobId || scanJobStatus === "success" || scanJobStatus === "failed") {
       console.log("[ScanModal] Skipping poll setup (no job or already complete)")
       return
     }
 
-    console.log("[ScanModal] Setting up poll interval for job:", scanJob.job_id)
+    console.log("[ScanModal] Setting up poll interval for job:", scanJobId)
     const pollInterval = setInterval(async () => {
-      const pollUrl = `${API_BASE_URL}/api/ipcamscan/jobs/${scanJob.job_id}`
+      const pollUrl = `${API_BASE_URL}/api/ipcamscan/jobs/${scanJobId}`
       console.log("[ScanModal] Polling:", pollUrl)
       try {
         const response = await fetch(pollUrl)
@@ -1098,8 +1110,8 @@ export function ScanModal({
         console.log("[ScanModal] Poll job status:", job.status, "phase:", job.current_phase, "progress:", job.progress_percent)
 
         // ステータス変化を検出
-        if (job.status !== scanJob.status) {
-          console.log("[ScanModal] STATUS CHANGED:", scanJob.status, "->", job.status)
+        if (job.status !== scanJobStatus) {
+          console.log("[ScanModal] STATUS CHANGED:", scanJobStatus, "->", job.status)
         }
 
         setScanJob(job)
@@ -1160,7 +1172,10 @@ export function ScanModal({
       console.log("[ScanModal] Clearing poll interval")
       clearInterval(pollInterval)
     }
-  }, [scanJob])
+  // NOTE: selectedSubnetsを依存配列から削除。saveScanResultToCacheでは最新の値を参照する必要があるが、
+  // useEffectの再実行トリガーにする必要はない（スキャン開始時点のサブネットで十分）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanJobId, scanJobStatus])
 
   // NOTE: 自動スキャン開始を削除。ユーザーが「スキャン開始」ボタンを押すまで待機。
 
@@ -1238,13 +1253,18 @@ export function ScanModal({
       throw new Error("Failed to save subnet settings")
     }
 
-    // ローカル状態を更新
+    // ローカル状態を更新（undefinedプロパティを除外してマージ）
+    // Note: スプレッド演算子ではundefinedプロパティも上書きされるため、除外が必要
     setSubnets((prev) =>
-      prev.map((s) =>
-        s.subnet_id === subnetId
-          ? { ...s, ...updates }
-          : s
-      )
+      prev.map((s) => {
+        if (s.subnet_id === subnetId) {
+          const filteredUpdates = Object.fromEntries(
+            Object.entries(updates).filter(([_, v]) => v !== undefined)
+          ) as Partial<Subnet>
+          return { ...s, ...filteredUpdates }
+        }
+        return s
+      })
     )
   }
 

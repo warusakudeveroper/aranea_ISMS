@@ -281,9 +281,22 @@ String StateReporterIs06s::buildCloudPayload() {
     globalState["rssi"] = WiFi.RSSI();
     globalState["heapFree"] = ESP.getFreeHeap();
 
-    // メモリ最適化: reserve量を削減
+    // userObject - name, rid (グループ/部屋識別)
+    JsonObject userObj = state.createNestedObject("userObject");
+    if (settings_) {
+        String deviceName = settings_->getString("device_name", "");
+        String rid = settings_->getString("rid", "");
+        if (deviceName.length() > 0) {
+            userObj["name"] = deviceName;
+        }
+        if (rid.length() > 0) {
+            userObj["rid"] = rid;
+        }
+    }
+
+    // メモリ最適化: reserve量を増加（userObject追加分）
     String json;
-    json.reserve(512);
+    json.reserve(640);
     serializeJson(doc, json);
     return json;
 }

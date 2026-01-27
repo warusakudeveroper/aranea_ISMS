@@ -179,6 +179,37 @@ public:
   const PinSetting& getPinSetting(int channel);
 
   /**
+   * LEDCチャンネル番号を取得（デバッグ用）
+   * @param channel チャンネル番号 (1-4)
+   * @return LEDCチャンネル番号（-1=未割当）
+   */
+  int getLedcChannel(int channel) {
+    if (channel < 1 || channel > IS06_DP_CHANNELS) return -1;
+    return ledcChannel_[channel - 1];
+  }
+
+  /**
+   * PWM遷移中かどうかを取得
+   * @param channel チャンネル番号 (1-4)
+   * @return 遷移中ならtrue
+   */
+  bool isPwmTransitioning(int channel);
+
+  /**
+   * PWM目標値を取得
+   * @param channel チャンネル番号 (1-4)
+   * @return 目標PWM値 (0-100%)
+   */
+  int getPwmTargetValue(int channel);
+
+  /**
+   * パルス終了時刻を取得（Momentaryカウントダウン用）
+   * @param channel チャンネル番号 (1-6)
+   * @return パルス終了時刻 (millis())
+   */
+  unsigned long getPulseEndTime(int channel);
+
+  /**
    * PIN設定を更新
    * @param channel チャンネル番号 (1-6)
    * @param setting 新しい設定

@@ -149,8 +149,104 @@ void AraneaWebUI::handleRoot() {
     return;
   }
 
-  // 認証成功でHTML UI表示
-  server_->send(200, "text/html", generateHTML());
+  // 認証成功でHTML UI表示（チャンク転送でヒープ断片化を防止）
+  sendHTMLChunked();
+}
+
+// ========================================
+// HTMLチャンク転送（ヒープ断片化防止）
+// ========================================
+void AraneaWebUI::sendHTMLChunked() {
+  // Chunked Transfer Encodingを使用して大きなHTMLを分割送信
+  server_->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server_->send(200, "text/html", "");
+
+  // HTML Head部分
+  server_->sendContent(F("<!DOCTYPE html>\n<html><head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Aranea Device Manager</title>\n"));
+  yield();
+
+  // CSS
+  server_->sendContent(generateCSS());
+  yield();
+
+  // Body開始 + Header
+  String bodyStart = F("</head><body>\n<div class=\"header\">\n<div class=\"logo\">");
+  bodyStart += generateLogoSVG();
+  bodyStart += F("</div>\n<h1>Aranea Device Manager</h1>\n<span class=\"version\">");
+  bodyStart += deviceInfo_.deviceType + " v" + deviceInfo_.firmwareVersion;
+  bodyStart += F("</span>\n</div>\n");
+  server_->sendContent(bodyStart);
+  yield();
+
+  // Device Banner
+  String banner = F("<div class=\"device-banner\">\n<div class=\"device-banner-inner\">\n<div class=\"device-model\">");
+  banner += deviceInfo_.deviceType + " " + deviceInfo_.modelName;
+  banner += F("</div>\n<div class=\"device-name\" id=\"device-name-display\">");
+  String deviceName = settings_->getString("device_name", "");
+  if (deviceName.length() > 0) {
+    banner += deviceName;
+  } else {
+    banner += F("<span class=\"unnamed\">(未設定)</span>");
+  }
+  banner += F("</div>\n<div class=\"device-context\">");
+  banner += deviceInfo_.contextDesc;
+  banner += F("</div>\n</div>\n</div>\n");
+  server_->sendContent(banner);
+  yield();
+
+  // Container + Tabs
+  server_->sendContent(F("<div class=\"container\">\n<div class=\"tabs\">\n<div class=\"tab active\" data-tab=\"status\" onclick=\"showTab('status')\">Status</div>\n<div class=\"tab\" data-tab=\"network\" onclick=\"showTab('network')\">Network</div>\n<div class=\"tab\" data-tab=\"cloud\" onclick=\"showTab('cloud')\">Cloud</div>\n<div class=\"tab\" data-tab=\"tenant\" onclick=\"showTab('tenant')\">Tenant</div>\n<div class=\"tab\" data-tab=\"system\" onclick=\"showTab('system')\">System</div>\n"));
+  yield();
+
+  // デバイス固有タブ
+  server_->sendContent(generateTypeSpecificTabs());
+  server_->sendContent(F("</div>\n"));
+  yield();
+
+  // Status Tab
+  server_->sendContent(F("<!-- Status Tab -->\n<div id=\"tab-status\" class=\"tab-content active\">\n<div class=\"card\">\n<div class=\"card-title\">Device Information</div>\n<div class=\"status-grid\">\n<div class=\"status-item\"><div class=\"label\">Type</div><div class=\"value\" id=\"d-type\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">LacisID</div><div class=\"value\" id=\"d-lacis\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">CIC</div><div class=\"value\" id=\"d-cic\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">MAC</div><div class=\"value\" id=\"d-mac\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">Hostname</div><div class=\"value\" id=\"d-host\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">Version</div><div class=\"value\" id=\"d-ver\">-</div></div>\n</div>\n</div>\n"));
+  yield();
+
+  server_->sendContent(F("<div class=\"card\">\n<div class=\"card-title\">Live Status</div>\n<div class=\"status-grid\">\n<div class=\"status-item\"><div class=\"label\">IP Address</div><div class=\"value\" id=\"s-ip\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">SSID</div><div class=\"value\" id=\"s-ssid\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">RSSI</div><div class=\"value\" id=\"s-rssi\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">NTP Time</div><div class=\"value\" id=\"s-ntp\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">Uptime</div><div class=\"value\" id=\"s-uptime\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">Free Heap</div><div class=\"value\" id=\"s-heap\">-</div></div>\n<div class=\"status-item\"><div class=\"label\">Chip Temp</div><div class=\"value\" id=\"s-temp\">-</div></div>\n</div>\n</div>\n</div>\n"));
+  yield();
+
+  // Network Tab
+  server_->sendContent(F("<!-- Network Tab -->\n<div id=\"tab-network\" class=\"tab-content\">\n<div class=\"card\">\n<div class=\"card-title\" style=\"display:flex;justify-content:space-between;align-items:center\">WiFi Settings (STA Mode)<button class=\"btn btn-sm\" onclick=\"scanWifi()\" id=\"scan-btn\">Scan</button></div>\n<div id=\"wifi-list\"></div>\n<div class=\"form-row\" style=\"margin-top:12px\">\n<div class=\"form-group\"><label>Hostname</label><input type=\"text\" id=\"n-hostname\"></div>\n<div class=\"form-group\"><label>NTP Server</label><input type=\"text\" id=\"n-ntp\"></div>\n</div>\n<button class=\"btn btn-primary\" onclick=\"saveNetwork()\">Save Network</button>\n</div>\n"));
+  yield();
+
+  // WiFi Scan Modal + AP Settings
+  server_->sendContent(F("<!-- WiFi Scan Modal -->\n<div id=\"scan-modal\" class=\"modal\" style=\"display:none\">\n<div class=\"modal-content\">\n<div class=\"modal-header\"><span>Available Networks</span><button onclick=\"closeScanModal()\">&times;</button></div>\n<div id=\"scan-results\" style=\"max-height:300px;overflow-y:auto\"></div>\n</div>\n</div>\n<div class=\"card\">\n<div class=\"card-title\">AP Mode Settings</div>\n<div class=\"form-row\">\n<div class=\"form-group\"><label>AP SSID</label><input type=\"text\" id=\"ap-ssid\"></div>\n<div class=\"form-group\"><label>AP Password</label><input type=\"password\" id=\"ap-pass\" placeholder=\"(open if empty)\"></div>\n<div class=\"form-group\"><label>Timeout (sec)</label><input type=\"number\" id=\"ap-timeout\" min=\"0\"></div>\n</div>\n<button class=\"btn btn-primary\" onclick=\"saveAP()\">Save AP</button>\n</div>\n</div>\n"));
+  yield();
+
+  // Cloud Tab
+  server_->sendContent(F("<!-- Cloud Tab -->\n<div id=\"tab-cloud\" class=\"tab-content\">\n<div class=\"card\">\n<div class=\"card-title\">AraneaDeviceGate</div>\n<div class=\"form-group\"><label>Gate URL</label><input type=\"text\" id=\"c-gate\" placeholder=\"https://...araneaDeviceGate\"></div>\n<div class=\"form-group\"><label>State Report URL</label><input type=\"text\" id=\"c-state\" placeholder=\"https://...deviceStateReport\"></div>\n</div>\n<div class=\"card\">\n<div class=\"card-title\">Relay Endpoints (Zero3)</div>\n<div class=\"form-row\">\n<div class=\"form-group\"><label>Primary</label><input type=\"text\" id=\"c-relay1\"></div>\n<div class=\"form-group\"><label>Secondary</label><input type=\"text\" id=\"c-relay2\"></div>\n</div>\n<button class=\"btn btn-primary\" onclick=\"saveCloud()\">Save Cloud</button>\n</div>\n</div>\n"));
+  yield();
+
+  // Tenant Tab
+  server_->sendContent(F("<!-- Tenant Tab -->\n<div id=\"tab-tenant\" class=\"tab-content\">\n<div class=\"card\">\n<div class=\"card-title\">Tenant Authentication</div>\n<div class=\"form-row\">\n<div class=\"form-group\"><label>Tenant ID (TID)</label><input type=\"text\" id=\"t-tid\"></div>\n<div class=\"form-group\"><label>Facility ID (FID)</label><input type=\"text\" id=\"t-fid\"></div>\n</div>\n<div class=\"form-row\">\n<div class=\"form-group\"><label>Primary LacisID</label><input type=\"text\" id=\"t-lacis\"></div>\n<div class=\"form-group\"><label>CIC</label><input type=\"text\" id=\"t-cic\"></div>\n</div>\n<div class=\"form-group\"><label>Email</label><input type=\"email\" id=\"t-email\"></div>\n<button class=\"btn btn-primary\" onclick=\"saveTenant()\">Save Tenant</button>\n</div>\n</div>\n"));
+  yield();
+
+  // System Tab
+  server_->sendContent(F("<!-- System Tab -->\n<div id=\"tab-system\" class=\"tab-content\">\n<div class=\"card\">\n<div class=\"card-title\">Device Identity (LacisOath)</div>\n<div class=\"form-group\"><label>Device Name</label><input type=\"text\" id=\"s-device-name\" placeholder=\"例: 本社1F-ルーター監視\"></div>\n<p style=\"font-size:12px;color:var(--text-muted);margin-top:4px\">この名前はMQTT/クラウドで userobject.name として使用されます</p>\n</div>\n<div class=\"card\">\n<div class=\"card-title\">Security</div>\n<div class=\"form-group\"><label>UI Password (Basic Auth)</label><input type=\"password\" id=\"s-pass\" placeholder=\"(no auth if empty)\"></div>\n</div>\n<div class=\"card\">\n<div class=\"card-title\">Scheduled Reboot</div>\n<div class=\"form-row\">\n<div class=\"form-group\"><label><input type=\"checkbox\" id=\"s-reboot-en\"> Enable daily reboot</label></div>\n<div class=\"form-group\"><label>Time</label><input type=\"time\" id=\"s-reboot-time\" value=\"03:00\"></div>\n</div>\n<button class=\"btn btn-primary\" onclick=\"saveSystem()\">Save System</button>\n</div>\n<div class=\"card\">\n<div class=\"card-title\">Actions</div>\n<div class=\"btn-group\">\n<button class=\"btn btn-primary\" onclick=\"reboot()\">Reboot Now</button>\n<button class=\"btn btn-danger\" onclick=\"factoryReset()\">Factory Reset</button>\n</div>\n</div>\n</div>\n"));
+  yield();
+
+  // デバイス固有タブコンテンツ
+  server_->sendContent(generateTypeSpecificTabContents());
+  yield();
+
+  // Container終了 + Toast
+  server_->sendContent(F("</div>\n<div id=\"toast\" class=\"toast\"></div>\n"));
+  yield();
+
+  // JavaScript
+  server_->sendContent(generateJS());
+  yield();
+
+  // HTML終了
+  server_->sendContent(F("</body></html>"));
+
+  // チャンク転送終了
+  server_->sendContent("");
 }
 
 // ========================================

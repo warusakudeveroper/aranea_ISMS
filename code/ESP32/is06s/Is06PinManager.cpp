@@ -7,8 +7,11 @@
 #include "Is06PinManager.h"
 #include <time.h>
 #include <driver/gpio.h>  // ESP-IDF GPIO API
+#include <driver/ledc.h>  // ESP-IDF LEDC API for direct PWM control
 #include <rom/gpio.h>     // gpio_matrix_out, gpio_pad_select_gpio
 #include <soc/io_mux_reg.h>  // IO_MUX registers
+#include <soc/gpio_sig_map.h>  // LEDC_HS_SIG_OUT0 etc.
+#include <soc/gpio_struct.h>  // GPIO peripheral struct for register access
 
 // ============================================================
 // 初期化
@@ -113,8 +116,21 @@ void Is06PinManager::applyLoadedPinTypes() {
       int ledcCh = ledcAttach(pin, PWM_FREQUENCY, PWM_RESOLUTION);
       if (ledcCh >= 0) {
         ledcChannel_[idx] = ledcCh;
-        ledcWriteChannel(ledcCh, 0);
-        Serial.printf("  CH%d GPIO%d: LEDC attached (ch=%d)\n", ch, pin, ledcCh);
+        // 【review15修正】ESP-IDF LEDC APIで初期デューティを設定
+        // GPIO Matrixから実際のハードウェアチャンネルを取得
+        int currentPwm = pinStates_[idx].pwmValue;
+        int duty = map(currentPwm, 0, 100, 0, 255);
+        uint32_t sigOutId = GPIO.func_out_sel_cfg[pin].func_sel;
+        if (sigOutId >= 71 && sigOutId <= 78) {
+          int ledcHwCh = sigOutId - 71;
+          ledc_set_duty(LEDC_HIGH_SPEED_MODE, (ledc_channel_t)ledcHwCh, duty);
+          ledc_update_duty(LEDC_HIGH_SPEED_MODE, (ledc_channel_t)ledcHwCh);
+        } else if (sigOutId >= 79 && sigOutId <= 86) {
+          int ledcHwCh = sigOutId - 79;
+          ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)ledcHwCh, duty);
+          ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)ledcHwCh);
+        }
+        Serial.printf("  CH%d GPIO%d: LEDC attached (ch=%d) sigOut=%lu duty=%d(%d%%)\n", ch, pin, ledcCh, sigOutId, duty, currentPwm);
       } else {
         ledcChannel_[idx] = -1;
         // フォールバック: GPIO出力 (full config)
@@ -456,6 +472,28 @@ int Is06PinManager::getPwmValue(int channel) {
   return pinStates_[channel - 1].pwmValue;
 }
 
+bool Is06PinManager::isPwmTransitioning(int channel) {
+  if (!isValidDpChannel(channel)) return false;
+  int idx = channel - 1;
+
+  // Slowモードかつ遷移開始時刻が設定されている場合
+  if (pinSettings_[idx].actionMode != ActionMode::SLOW) return false;
+  if (pwmTransitionStart_[idx] == 0) return false;
+
+  // 現在値と目標値が異なる場合は遷移中
+  return pinStates_[idx].pwmValue != pwmTargetValue_[idx];
+}
+
+int Is06PinManager::getPwmTargetValue(int channel) {
+  if (!isValidDpChannel(channel)) return -1;
+  return pwmTargetValue_[channel - 1];
+}
+
+unsigned long Is06PinManager::getPulseEndTime(int channel) {
+  if (!isValidChannel(channel)) return 0;
+  return pinStates_[channel - 1].pulseEndTime;
+}
+
 // ============================================================
 // PIN有効/無効制御 (P1-1a)
 // ============================================================
@@ -562,10 +600,22 @@ void Is06PinManager::setPinType(int channel, ::PinType type) {
     if (ch >= 0) {
       // ch >= 0 は成功（ch=0も正常値）
       ledcChannel_[idx] = ch;
-      // Arduino-ESP32 3.x: ledcWriteChannel(ch, duty) を使用（ledcWrite(pin,duty)は非推奨）
-      ledcWriteChannel(ch, 0);
-      Serial.printf("Is06PinManager: CH%d GPIO%d LEDC attached ch=%d (freq=%d, res=%d)\n",
-                    channel, pin, ch, AraneaSettingsDefaults::PWM_FREQUENCY, AraneaSettingsDefaults::PWM_RESOLUTION);
+      // 【review15修正】ESP-IDF LEDC APIで初期デューティを設定
+      // GPIO Matrixから実際のハードウェアチャンネルを取得
+      int currentPwm = pinStates_[idx].pwmValue;
+      int duty = map(currentPwm, 0, 100, 0, 255);
+      uint32_t sigOutId = GPIO.func_out_sel_cfg[pin].func_sel;
+      if (sigOutId >= 71 && sigOutId <= 78) {
+        int ledcHwCh = sigOutId - 71;
+        ledc_set_duty(LEDC_HIGH_SPEED_MODE, (ledc_channel_t)ledcHwCh, duty);
+        ledc_update_duty(LEDC_HIGH_SPEED_MODE, (ledc_channel_t)ledcHwCh);
+      } else if (sigOutId >= 79 && sigOutId <= 86) {
+        int ledcHwCh = sigOutId - 79;
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)ledcHwCh, duty);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)ledcHwCh);
+      }
+      Serial.printf("Is06PinManager: CH%d GPIO%d LEDC attached ch=%d sigOut=%lu duty=%d(%d%%)\n",
+                    channel, pin, ch, sigOutId, duty, currentPwm);
     } else {
       // ch < 0 は失敗
       ledcChannel_[idx] = -1;
@@ -1318,38 +1368,76 @@ void Is06PinManager::applyPwmOutput(int channel, int value) {
   if (!isValidDpChannel(channel)) return;
   int idx = channel - 1;
   int pin = IS06_PIN_MAP[idx];
-  int ch = ledcChannel_[idx];
 
-  // 0-100% → 0-255
+  // 0-100% → 0-255 (8bit resolution)
   int pwm8bit = map(value, 0, 100, 0, 255);
 
-  if (ch >= 0) {
-    // LEDCチャンネルが有効な場合はledcWriteChannel()を使用
-    // Arduino-ESP32 3.x: ledcWrite(pin,duty)は非推奨、ledcWriteChannel(ch,duty)を使う
-    ledcWriteChannel(ch, pwm8bit);
-    Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d ch=%d value=%d duty=%d\n",
-                  channel, pin, ch, value, pwm8bit);
-  } else {
-    // LEDCチャンネルが無効 - 自動的にLEDCをアタッチして再試行
-    Serial.printf("Is06PinManager: WARNING CH%d GPIO%d LEDC not attached, attempting attach...\n",
-                  channel, pin);
+  // 【review15修正】gpiotestアプローチ - ESP-IDF LEDC APIを完全に手動で使用
+  // Arduino APIのチャンネル番号不一致問題を根本的に回避
 
-    ledcDetach(pin);
-    int newCh = ledcAttach(pin, PWM_FREQUENCY, PWM_RESOLUTION);
-    if (newCh >= 0) {
-      ledcChannel_[idx] = newCh;
-      ledcWriteChannel(newCh, pwm8bit);
-      Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d LEDC attached ch=%d value=%d duty=%d\n",
-                    channel, pin, newCh, value, pwm8bit);
-    } else {
-      // LEDC失敗時はGPIO直接制御（ON/OFFのみ）
-      // value > 0 ならHIGH（フルオン相当）、0ならLOW
-      int state = (value > 0) ? 1 : 0;
-      gpio_set_level((gpio_num_t)pin, state);
-      Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d LEDC failed, GPIO=%d\n",
-                    channel, pin, state);
-    }
+  // LEDCチャンネルはPINインデックスを使用 (CH1→LEDC_CH0, CH2→LEDC_CH1, etc.)
+  int ledcCh = idx;  // 0-3
+
+  // 現在のsigOutIdを確認
+  uint32_t sigOutId = GPIO.func_out_sel_cfg[pin].func_sel;
+
+  // LEDCがすでにアタッチされていれば、単純にデューティを更新
+  if (sigOutId >= 71 && sigOutId <= 78) {
+    // High Speed LEDC - sigOutIdからチャンネルを計算
+    int hwCh = sigOutId - 71;
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, (ledc_channel_t)hwCh, pwm8bit);
+    ledc_update_duty(LEDC_HIGH_SPEED_MODE, (ledc_channel_t)hwCh);
+    Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d LEDC_HS[%d] duty=%d (%d%%)\n",
+                  channel, pin, hwCh, pwm8bit, value);
+    return;
   }
+
+  // LEDCがアタッチされていない - gpiotestアプローチで完全にセットアップ
+  Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d - full LEDC setup (sigOut=%lu)\n",
+                channel, pin, sigOutId);
+
+  // Step 1: GPIOをリセット
+  gpio_reset_pin((gpio_num_t)pin);
+  gpio_pad_select_gpio(pin);
+
+  // Step 2: LEDCタイマー設定 (ESP-IDF API)
+  ledc_timer_config_t timer_conf = {};
+  timer_conf.speed_mode = LEDC_HIGH_SPEED_MODE;
+  timer_conf.duty_resolution = LEDC_TIMER_8_BIT;  // 8bit = 0-255
+  timer_conf.timer_num = (ledc_timer_t)ledcCh;    // タイマーもチャンネルと同じ番号を使用
+  timer_conf.freq_hz = PWM_FREQUENCY;             // 5000Hz
+  timer_conf.clk_cfg = LEDC_AUTO_CLK;
+  esp_err_t err = ledc_timer_config(&timer_conf);
+  if (err != ESP_OK) {
+    Serial.printf("Is06PinManager: ERROR ledc_timer_config failed: %d\n", err);
+  }
+
+  // Step 3: LEDCチャンネル設定 (ESP-IDF API)
+  ledc_channel_config_t ch_conf = {};
+  ch_conf.gpio_num = pin;
+  ch_conf.speed_mode = LEDC_HIGH_SPEED_MODE;
+  ch_conf.channel = (ledc_channel_t)ledcCh;
+  ch_conf.intr_type = LEDC_INTR_DISABLE;
+  ch_conf.timer_sel = (ledc_timer_t)ledcCh;
+  ch_conf.duty = pwm8bit;
+  ch_conf.hpoint = 0;
+  err = ledc_channel_config(&ch_conf);
+  if (err != ESP_OK) {
+    Serial.printf("Is06PinManager: ERROR ledc_channel_config failed: %d\n", err);
+  }
+
+  // Step 4: GPIO MatrixにLEDC信号をルーティング (gpiotestと同じ)
+  // LEDC_HS_SIG_OUT0 = 71, LEDC_HS_SIG_OUT1 = 72, etc.
+  int ledcSigOut = 71 + ledcCh;
+  gpio_matrix_out(pin, ledcSigOut, false, false);
+
+  // 内部状態を更新
+  ledcChannel_[idx] = ledcCh;
+
+  // 確認
+  sigOutId = GPIO.func_out_sel_cfg[pin].func_sel;
+  Serial.printf("Is06PinManager: applyPwmOutput CH%d GPIO%d LEDC setup complete - sigOut=%lu duty=%d\n",
+                channel, pin, sigOutId, pwm8bit);
 }
 
 String Is06PinManager::getNvsKey(int channel, const char* suffix) {

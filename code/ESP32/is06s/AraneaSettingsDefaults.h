@@ -27,8 +27,8 @@ constexpr int DIGITAL_VALIDITY_MS = 3000;
 constexpr const char* DIGITAL_VALIDITY = "3000";
 
 // デバウンス時間 (ms)
-constexpr int DIGITAL_DEBOUNCE_MS = 3000;
-constexpr const char* DIGITAL_DEBOUNCE = "3000";
+constexpr int DIGITAL_DEBOUNCE_MS = 500;
+constexpr const char* DIGITAL_DEBOUNCE = "500";
 
 // アクションモード: "Mom" (Momentary) or "Alt" (Alternate)
 constexpr const char* DIGITAL_ACTION_MODE = "Mom";
@@ -37,8 +37,8 @@ constexpr const char* DIGITAL_ACTION_MODE = "Mom";
 // PWM Output デフォルト値
 // ============================================================
 // 変化率: 0-100%変化にかかる時間 (ms)
-constexpr int PWM_RATE_OF_CHANGE_MS = 4000;
-constexpr const char* PWM_RATE_OF_CHANGE = "4000";
+constexpr int PWM_RATE_OF_CHANGE_MS = 10000;
+constexpr const char* PWM_RATE_OF_CHANGE = "10000";
 
 // アクションモード: "Slow" or "Rapid"
 constexpr const char* PWM_ACTION_MODE = "Slow";

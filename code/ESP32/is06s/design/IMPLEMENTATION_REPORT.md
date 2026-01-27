@@ -184,7 +184,8 @@ GAP_ANALYSIS.mdで指摘された乖離項目（38%）を全て解消し、実�
 | Schema (Production) | ✅ Promote完了 |
 | TYPE_MISMATCH警告 | ✅ 解決済み (2026-01-24) |
 | State Report | ✅ `ok: true` 確認済み |
-| MQTT疎通 | ✅ コマンド送受信確認済み |
+| MQTT接続 | ✅ 接続確認済み（2026-01-25 状態報告修正） |
+| MQTT状態報告 | ✅ **修正済み** (getCloudStatus()オーバーライド追加) |
 
 ---
 
@@ -286,6 +287,39 @@ review5.md, review6.mdによる指摘を受けて以下の修正を実施。
 
 ---
 
+## 12.3 MQTT接続状態報告の修正（2026-01-25）
+
+**問題**: `/api/status`の`cloud.mqttConnected`が常に`false`を返していた
+
+**原因**: `HttpManagerIs06s`が`getCloudStatus()`をオーバーライドしていなかったため、
+基底クラス`AraneaWebUI`のデフォルト値`mqttConnected = false`がそのまま返されていた。
+MQTTは実際には接続されていたが、APIが誤った値を報告していた。
+
+**修正内容**:
+1. `HttpManagerIs06s.h`にMQTT状態取得コールバック追加
+2. `HttpManagerIs06s.cpp`で`getCloudStatus()`をオーバーライド
+3. `is06s.ino`でコールバックを設定
+
+**修正後の確認**:
+```json
+{
+  "cloud": {
+    "registered": true,
+    "mqttConnected": true
+  }
+}
+```
+
+---
+
+## 12.4 未実装項目
+
+| 項目 | 状況 |
+|------|------|
+| rid (roomID) | ❌ 未実装 - API/UI/StateReporter対応が必要 |
+
+---
+
 ## 13. 結論
 
 IS06SはDesignerInstructions.mdに基づく全機能の実装が完了しました。
@@ -302,12 +336,16 @@ IS06SはDesignerInstructions.mdに基づく全機能の実装が完了しまし�
 - ✅ Web UI (PIN Control / PIN Settings) - 全設定一括保存対応
 - ✅ HTTP API (全設定対応) - /api/pin/all で状態＋設定を返却
 - ✅ MQTT双方向通信
+- ✅ MQTT接続状態報告（2026-01-25修正）
 - ✅ State Report送信
 - ✅ OTAアップデート
 - ✅ スキーマ登録
 - ✅ PinType×ActionMode整合性バリデーション
 
-**本番環境での運用開始が可能な状態です。**
+**未実装項目**:
+- ❌ rid (roomID) - userObjectスキーマフィールド、API/UI/StateReporter対応が必要
+
+**本番環境での運用開始が可能な状態です（rid実装は後続対応）。**
 
 ---
 
@@ -320,3 +358,5 @@ IS06SはDesignerInstructions.mdに基づく全機能の実装が完了しまし�
 - [review5.md](./review/review5.md) - 外部レビュー（静的コードレビュー）
 - [review6.md](./review/review6.md) - 外部レビュー（報告書整合レビュー）
 - [review_response.md](./review/review_response.md) - レビュー対応報告
+- [TEST_PLAN_v1.md](./TEST_PLAN_v1.md) - テスト計画
+- [TEST_RESULTS_v1.md](./TEST_RESULTS_v1.md) - テスト結果報告

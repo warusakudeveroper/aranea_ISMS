@@ -110,6 +110,15 @@ String HttpManagerIs06s::generateTypeSpecificTabContents() {
   html += ".pin-setting-card h4{margin:0 0 12px 0;color:#333;}";
   html += ".form-row{display:flex;gap:12px;flex-wrap:wrap;}";
   html += ".form-row .form-group{flex:1;min-width:120px;}";
+  // T6: Allocation チェックボックス用CSS
+  html += ".allocation-checkboxes{display:flex;gap:12px;flex-wrap:wrap;}";
+  html += ".alloc-cb{display:flex;align-items:center;gap:4px;font-size:13px;}";
+  html += ".alloc-cb input{margin:0;}";
+  // PWM遷移表示用スタイル
+  html += ".pwm-transition{color:#ff9800;font-size:11px;margin-left:4px;}";
+  html += ".pin-control input[type=range].transitioning{opacity:0.6;pointer-events:none;}";
+  // Momカウントダウン表示
+  html += ".countdown{color:#ff5722;font-size:11px;font-weight:bold;}";
   html += "@media(max-width:600px){.pin-row{flex-wrap:wrap;}.pin-info,.pin-meta{min-width:80px;}.pin-control{width:100%;order:3;margin-top:8px;}}";
   html += "</style>";
 
@@ -150,8 +159,6 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
   String js = R"JS(
     // DR1-04: ポーリング用変数
     var pinPollInterval = null;
-    // スライダー操作中のチャンネル（操作中はポーリング更新をスキップ）
-    var activeSliderCh = null;
     // 最後にキャッシュしたPINデータ
     var cachedPins = null;
 
@@ -171,7 +178,7 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         });
     }
 
-    // DR1-04: ポーリング開始/停止
+    // ポーリング制御（3秒固定）
     function startPinPolling() {
       if (!pinPollInterval) {
         pinPollInterval = setInterval(loadPinStates, 3000);
@@ -200,10 +207,11 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
       return stateVal ? defaultOn : defaultOff;
     }
 
-    // DR1-08: 改善されたPIN Control レイアウト
-    // DR1-05: enabled/disabled のみ透明化
-    // DR1-06: disabled時は操作不可
-    // DR1-07: digitalInputはトグル非表示、状態ラベルのみ
+    // PIN Control レイアウト（整理版）
+    // - disabled: 非表示
+    // - digitalOutput/Input: 状態表示のみ（物理ボタン操作）
+    // - pwmOutput: スライダー操作可
+    // - Mom: カウントダウン表示
     function renderPinControls(pins) {
       var grid = document.getElementById('pin-control-grid');
       if (!grid) return;
@@ -219,74 +227,72 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         var stn = p.stateName || [];
         var mode = p.actionMode || 'Alt';
         var validity = p.validity || 0;
+        var pulseRemaining = p.pulseRemaining || 0;
+
+        // Disabled PIN は非表示
+        if (tp === 'disabled') continue;
 
         // タイプ表示文字列
         var typeLabel = tp === 'pwmOutput' ? 'PWM' : tp === 'digitalInput' ? 'INPUT' : 'DIGITAL';
         // モード表示文字列
         var modeLabel = mode;
-        if (mode === 'Mom' && validity > 0) modeLabel = 'Mom ' + validity + 'ms';
+        if (mode === 'Mom' && validity > 0) modeLabel = 'Mom';
         if (mode === 'Slow' || mode === 'Rapid') modeLabel = mode;
 
         // 制御部分の構築
         var ctrl = '';
-        if (tp === 'disabled') {
-          ctrl = '<span class="input-state disabled-state">DISABLED</span>';
-        } else if (tp === 'pwmOutput') {
-          // スライダー操作中はサーバー値で上書きしない
+        var roc = p.rateOfChange || 0;  // Slow遷移時間(ms)
+        if (tp === 'pwmOutput') {
+          // PWM: スライダー操作 + CSS遷移アニメーション
           var sliderVal = pw;
-          var existingSlider = document.querySelector('[data-ch="' + ch + '"] input[type=range]');
-          if (activeSliderCh === ch && existingSlider) {
-            sliderVal = parseInt(existingSlider.value);
+          // 遷移中のスライダーは現在値を維持
+          var existingRow = document.querySelector('[data-ch=\"' + ch + '\"]');
+          var isAnimating = existingRow && existingRow.dataset.animating === 'true';
+          if (isAnimating) {
+            var existingSlider = existingRow.querySelector('input[type=range]');
+            if (existingSlider) sliderVal = parseInt(existingSlider.value);
           }
-          var pwmLabel = sliderVal + '%';
-          for (var j = 0; j < stn.length; j++) {
-            var parts = stn[j].split(':');
-            if (parts.length === 2 && parseInt(parts[0]) === sliderVal) {
-              pwmLabel = parts[1]; break;
-            }
-          }
-          // oninput: ドラッグ中に呼ばれる（activeSliderCh設定）
-          // onchange: リリース時に呼ばれる（値送信+activeSliderChクリア）
-          ctrl = '<input type="range" min="0" max="100" value="' + sliderVal + '" ';
-          ctrl += 'oninput="onSliderInput(' + ch + ', this.value)" ';
-          ctrl += 'onchange="onSliderChange(' + ch + ', this.value)"';
-          ctrl += (en ? '' : ' disabled') + '>';
-          ctrl += '<span id="pwm-val-' + ch + '" class="pwm-label">' + pwmLabel + '</span>';
+          ctrl = '<input type=\"range\" min=\"0\" max=\"100\" value=\"' + sliderVal + '\" ';
+          ctrl += 'data-roc=\"' + roc + '\" ';
+          ctrl += 'onchange=\"onPwmSliderChange(' + ch + ', this)\"';
+          ctrl += (en && !isAnimating ? '' : ' disabled') + '>';
+          ctrl += '<span class=\"pwm-label\">' + sliderVal + '%</span>';
         } else if (tp === 'digitalOutput') {
+          // Digital Output: ボタン操作可能
           var btnLabel = getStateLabel(stn, st, 'ON', 'OFF');
-          ctrl = '<button onclick="togglePin(' + ch + ', \'' + mode + '\', ' + validity + ')" class="btn-toggle ' + (st ? 'on' : 'off') + '"' + (en ? '' : ' disabled') + '>' + btnLabel + '</button>';
+          ctrl = '<button data-ch=\"' + ch + '\" data-mode=\"' + mode + '\" data-validity=\"' + validity + '\" onclick=\"doToggle(this)\" class=\"btn-toggle ' + (st ? 'on' : 'off') + '\"' + (en ? '' : ' disabled') + '>' + btnLabel;
+          // Momモード＆ON状態時はカウントダウン表示
+          if (mode === 'Mom' && st && pulseRemaining > 0) {
+            var secRemain = (pulseRemaining / 1000).toFixed(1);
+            ctrl += ' <span class=\"countdown\">(' + secRemain + 's)</span>';
+          }
+          ctrl += '</button>';
         } else if (tp === 'digitalInput') {
-          // DR1-07: digitalInputはトグル非表示、状態ラベルのみ
+          // 入力状態表示のみ
           var inputLabel = getStateLabel(stn, st, 'HIGH', 'LOW');
-          ctrl = '<span class="input-state ' + (st ? 'high' : 'low') + '">' + inputLabel + '</span>';
+          ctrl = '<span class=\"input-state ' + (st ? 'high' : 'low') + '\">' + inputLabel + '</span>';
         }
 
-        // DR1-08: 整理されたレイアウト（1行に収まる）
-        html += '<div class="pin-row' + (en ? '' : ' disabled') + '" data-ch="' + ch + '">';
-        html += '<div class="pin-info"><span class="pin-ch">CH' + ch + '</span>';
-        if (nm) html += '<span class="pin-name">' + escapeHtml(nm) + '</span>';
+        html += '<div class=\"pin-row' + (en ? '' : ' disabled') + '\" data-ch=\"' + ch + '\">';
+        html += '<div class=\"pin-info\"><span class=\"pin-ch\">CH' + ch + '</span>';
+        if (nm) html += '<span class=\"pin-name\">' + escapeHtml(nm) + '</span>';
         html += '</div>';
-        html += '<div class="pin-meta"><span class="pin-type">' + typeLabel + '</span>';
-        if (tp !== 'disabled' && tp !== 'digitalInput') html += '<span class="pin-mode">' + modeLabel + '</span>';
+        html += '<div class=\"pin-meta\"><span class=\"pin-type\">' + typeLabel + '</span>';
+        if (tp === 'pwmOutput' || tp === 'digitalOutput') html += '<span class=\"pin-mode\">' + modeLabel + '</span>';
         html += '</div>';
-        html += '<div class="pin-control">' + ctrl + '</div>';
-        // DR1-06: disabled時はenableトグルのみ操作可能
-        html += '<div class="pin-enable"><label class="switch"><input type="checkbox"' + (en ? ' checked' : '') + ' onchange="setPinEnabled(' + ch + ', this.checked)"><span class="slider"></span></label></div>';
+        html += '<div class=\"pin-control\">' + ctrl + '</div>';
+        html += '<div class=\"pin-enable\"><label class=\"switch\"><input type=\"checkbox\"' + (en ? ' checked' : '') + ' onchange=\"setPinEnabled(' + ch + ', this.checked)\"><span class=\"slider\"></span></label></div>';
         html += '</div>';
       }
       grid.innerHTML = html;
     }
 
-    // スライダードラッグ中（値送信しない、表示のみ更新）
-    function onSliderInput(ch, value) {
-      activeSliderCh = ch;
-      document.getElementById('pwm-val-' + ch).textContent = value + '%';
-    }
-
-    // スライダーリリース時（値送信+activeSliderChクリア）
-    function onSliderChange(ch, value) {
-      activeSliderCh = null;
-      setPwm(ch, value);
+    // ボタンクリックハンドラ（data属性から値を取得）
+    function doToggle(btn) {
+      var ch = parseInt(btn.dataset.ch);
+      var mode = btn.dataset.mode;
+      var validity = parseInt(btn.dataset.validity) || 0;
+      togglePin(ch, mode, validity);
     }
 
     // DR1-03: モーメンタリ自動復帰
@@ -311,8 +317,30 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({state: parseInt(value)})
-      }).then(function(r) { return r.json(); })
-        .then(function(data) { document.getElementById('pwm-val-' + ch).textContent = value + '%'; });
+      });
+    }
+
+    // PWMスライダー変更時：CSS遷移アニメーション + 操作禁止
+    function onPwmSliderChange(ch, slider) {
+      var targetVal = parseInt(slider.value);
+      var roc = parseInt(slider.dataset.roc) || 0;  // rateOfChange(ms)
+      var row = slider.closest('.pin-row');
+      var label = row.querySelector('.pwm-label');
+
+      // サーバーに送信
+      setPwm(ch, targetVal);
+      label.textContent = targetVal + '%';
+
+      // Slowモード(roc>0)の場合はアニメーション
+      if (roc > 0) {
+        row.dataset.animating = 'true';
+        slider.disabled = true;
+        // roc後に操作可能に戻す
+        setTimeout(function() {
+          row.dataset.animating = 'false';
+          slider.disabled = false;
+        }, roc);
+      }
     }
 
     function setPinEnabled(ch, enabled) {
@@ -330,6 +358,35 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         .then(function(data) { renderPinSettings(data.pins); });
     }
 
+    // T1: Type別Modeオプション生成関数
+    function getModeOptionsForType(type, currentMode) {
+      var opts = '';
+      if (type === 'digitalOutput') {
+        opts += '<option value="Mom"' + (currentMode === 'Mom' ? ' selected' : '') + '>Momentary</option>';
+        opts += '<option value="Alt"' + (currentMode === 'Alt' ? ' selected' : '') + '>Alternate</option>';
+      } else if (type === 'pwmOutput') {
+        opts += '<option value="Slow"' + (currentMode === 'Slow' ? ' selected' : '') + '>Slow</option>';
+        opts += '<option value="Rapid"' + (currentMode === 'Rapid' ? ' selected' : '') + '>Rapid</option>';
+      } else if (type === 'digitalInput') {
+        opts += '<option value="Mom"' + (currentMode === 'Mom' ? ' selected' : '') + '>Momentary</option>';
+        opts += '<option value="Alt"' + (currentMode === 'Alt' ? ' selected' : '') + '>Alternate</option>';
+        opts += '<option value="rotate"' + (currentMode === 'rotate' ? ' selected' : '') + '>Rotate</option>';
+      }
+      // disabled: no mode options
+      return opts;
+    }
+
+    // T4: Allocation チェックボックス生成関数
+    function getAllocationCheckboxes(ch, alloc) {
+      var html = '<div class="allocation-checkboxes" id="allocation-' + ch + '">';
+      for (var j = 1; j <= 4; j++) {
+        var chk = (alloc.indexOf('CH' + j) >= 0) ? ' checked' : '';
+        html += '<label class="alloc-cb"><input type="checkbox" value="CH' + j + '"' + chk + '> CH' + j + '</label>';
+      }
+      html += '</div>';
+      return html;
+    }
+
     // DR1-09: 条件付き入力制御つきPIN Settings
     function renderPinSettings(pins) {
       var list = document.getElementById('pin-settings-list');
@@ -339,6 +396,7 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         var p = pins[i];
         var ch = p.channel;
         var stn = p.stateName || [];
+        var alloc = p.allocation || [];
         html += '<div class="pin-setting-card" data-ch="' + ch + '"><h4>CH' + ch + (p.name ? ' - ' + escapeHtml(p.name) : '') + '</h4>';
         html += '<div class="form-row">';
         html += '<div class="form-group"><label>Type</label><select id="type-' + ch + '" onchange="updateFieldVisibility(' + ch + ')">';
@@ -347,12 +405,9 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         html += '<option value="digitalInput"' + (p.type === 'digitalInput' ? ' selected' : '') + '>Digital Input</option>';
         html += '<option value="disabled"' + (p.type === 'disabled' ? ' selected' : '') + '>Disabled</option>';
         html += '</select></div>';
-        html += '<div class="form-group"><label>Mode</label><select id="mode-' + ch + '" onchange="updateFieldVisibility(' + ch + ')">';
-        html += '<option value="Mom"' + (p.actionMode === 'Mom' ? ' selected' : '') + '>Momentary</option>';
-        html += '<option value="Alt"' + (p.actionMode === 'Alt' ? ' selected' : '') + '>Alternate</option>';
-        html += '<option value="Slow"' + (p.actionMode === 'Slow' ? ' selected' : '') + '>Slow (PWM)</option>';
-        html += '<option value="Rapid"' + (p.actionMode === 'Rapid' ? ' selected' : '') + '>Rapid (PWM)</option>';
-        html += '<option value="rotate"' + (p.actionMode === 'rotate' ? ' selected' : '') + '>Rotate (Input)</option>';
+        // T2: Mode ドロップダウン動的生成
+        html += '<div class="form-group" id="fg-mode-' + ch + '"><label>Mode</label><select id="mode-' + ch + '" onchange="updateFieldVisibility(' + ch + ')">';
+        html += getModeOptionsForType(p.type, p.actionMode);
         html += '</select></div>';
         html += '</div>';
         html += '<div class="form-group"><label>Name</label><input type="text" id="name-' + ch + '" value="' + escapeHtml(p.name || '') + '" placeholder="CH' + ch + '"></div>';
@@ -362,8 +417,8 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         html += '<div class="form-group" id="fg-rateOfChange-' + ch + '"><label>Rate of Change (ms)</label><input type="number" id="rateOfChange-' + ch + '" value="' + (p.rateOfChange || 0) + '" min="0" step="100"></div>';
         html += '</div>';
         html += '<div class="form-group" id="fg-stateName-' + ch + '"><label>State Names</label><input type="text" id="stateName-' + ch + '" value="' + escapeHtml(stn.join(',')) + '" placeholder="on:ON,off:OFF"></div>';
-        var alloc = p.allocation || [];
-        html += '<div class="form-group" id="fg-allocation-' + ch + '"><label>Allocation (I/O)</label><input type="text" id="allocation-' + ch + '" value="' + escapeHtml(alloc.join(',')) + '" placeholder="CH1,CH2"></div>';
+        // T4: Allocation チェックボックス化
+        html += '<div class="form-group" id="fg-allocation-' + ch + '"><label>Allocation (Input→Output)</label>' + getAllocationCheckboxes(ch, alloc) + '</div>';
         html += '<div class="form-row">';
         html += '<div class="form-group" id="fg-expiryDate-' + ch + '"><label>Expiry Date</label><input type="text" id="expiryDate-' + ch + '" value="' + (p.expiryDate || '') + '" placeholder="YYYYMMDDHHMM"></div>';
         html += '<div class="form-group" id="fg-expiryEnabled-' + ch + '"><label>Expiry Enabled</label><input type="checkbox" id="expiryEnabled-' + ch + '"' + (p.expiryEnabled ? ' checked' : '') + '></div>';
@@ -378,9 +433,24 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
     }
 
     // DR1-09: タイプ/モードに応じたフィールド可視性制御
+    // T3: Type変更時にModeオプションを再生成
     function updateFieldVisibility(ch) {
       var type = document.getElementById('type-' + ch).value;
-      var mode = document.getElementById('mode-' + ch).value;
+      var modeSelect = document.getElementById('mode-' + ch);
+      var currentMode = modeSelect.value;
+
+      // T3: Modeドロップダウンを再生成
+      var newOpts = getModeOptionsForType(type, currentMode);
+      modeSelect.innerHTML = newOpts;
+      // 現在のモードが新しいオプションにない場合、最初のオプションを選択
+      if (modeSelect.value !== currentMode) {
+        modeSelect.selectedIndex = 0;
+      }
+      var mode = modeSelect.value;
+
+      // Mode フィールド: disabled では無効
+      var modeEnabled = (type !== 'disabled');
+      setFieldEnabled('mode-' + ch, 'fg-mode-' + ch, modeEnabled);
 
       // Validity: digitalOutput/Input の Mom モードのみ
       var validityEnabled = (type === 'digitalOutput' || type === 'digitalInput') && mode === 'Mom';
@@ -394,9 +464,15 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
       var rocEnabled = (type === 'pwmOutput');
       setFieldEnabled('rateOfChange-' + ch, 'fg-rateOfChange-' + ch, rocEnabled);
 
-      // Allocation: digitalInput のみ
+      // Allocation: digitalInput のみ (チェックボックス無効化)
       var allocEnabled = (type === 'digitalInput');
-      setFieldEnabled('allocation-' + ch, 'fg-allocation-' + ch, allocEnabled);
+      var allocDiv = document.getElementById('allocation-' + ch);
+      if (allocDiv) {
+        var cbs = allocDiv.querySelectorAll('input[type=checkbox]');
+        cbs.forEach(function(cb) { cb.disabled = !allocEnabled; });
+      }
+      var allocGroup = document.getElementById('fg-allocation-' + ch);
+      if (allocGroup) allocGroup.style.opacity = allocEnabled ? '1' : '0.4';
 
       // stateName: digitalOutput/pwmOutput のみ
       var stnEnabled = (type === 'digitalOutput' || type === 'pwmOutput');
@@ -423,8 +499,10 @@ String HttpManagerIs06s::generateTypeSpecificJS() {
         var ch = card.getAttribute('data-ch');
         var stnStr = document.getElementById('stateName-' + ch).value;
         var stnArr = stnStr ? stnStr.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
-        var allocStr = document.getElementById('allocation-' + ch).value;
-        var allocArr = allocStr ? allocStr.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }) : [];
+        // T5: Allocation をチェックボックスから収集
+        var allocArr = [];
+        var allocCbs = document.querySelectorAll('#allocation-' + ch + ' input[type=checkbox]:checked');
+        allocCbs.forEach(function(cb) { allocArr.push(cb.value); });
         var setting = {
           type: document.getElementById('type-' + ch).value,
           name: document.getElementById('name-' + ch).value,
@@ -973,6 +1051,20 @@ void HttpManagerIs06s::buildAllPinsJson(JsonArray& arr) {
           allocArr.add(setting.allocation[i]);
         }
       }
+      // PWM遷移状態（Slowモード対応）CH1-4のみ
+      if (ch <= 4) {
+        p["pwmTransitioning"] = pinManager_->isPwmTransitioning(ch);
+        p["pwmTarget"] = pinManager_->getPwmTargetValue(ch);
+      }
+      // Momentaryカウントダウン用：残り時間（ms）
+      // state=1 かつ Mom モードの場合のみ pulseRemaining を返す
+      if (setting.actionMode == ActionMode::MOMENTARY && pinManager_->getPinState(ch) == 1) {
+        unsigned long now = millis();
+        unsigned long pulseEnd = pinManager_->getPulseEndTime(ch);
+        if (pulseEnd > now) {
+          p["pulseRemaining"] = (int)(pulseEnd - now);
+        }
+      }
     }
   }
 }
@@ -1187,6 +1279,9 @@ void HttpManagerIs06s::handleDebugGpio() {
     if (pinManager_) {
       int swState = pinManager_->getPinState(i + 1);
       g["softwareState"] = swState;
+      // LEDCチャンネル番号（PWMデバッグ用）
+      g["ledcChannel"] = pinManager_->getLedcChannel(i + 1);
+      g["pwmValue"] = pinManager_->getPwmValue(i + 1);
     }
 
     // === Method A: High-frequency sampling with delay ===

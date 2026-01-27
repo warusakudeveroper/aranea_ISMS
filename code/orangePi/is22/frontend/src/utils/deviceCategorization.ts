@@ -13,8 +13,13 @@ export function categorizeDevice(
 ): DeviceCategory {
   // バックエンドからcategoryが設定されている場合はそれを使用（SSoT）
   // devices-with-categories エンドポイントはlacisIDベースで分類済み
+  // Note: バックエンドは大文字("A", "B"等)を返す場合があるため小文字に正規化
   if (device.category) {
-    return device.category
+    const normalized = device.category.toLowerCase() as DeviceCategory
+    // 有効なカテゴリかチェック
+    if (['a', 'b', 'c', 'd', 'e', 'f'].includes(normalized)) {
+      return normalized
+    }
   }
 
   // フォールバック: category_detailからカテゴリを推定（旧エンドポイント互換）

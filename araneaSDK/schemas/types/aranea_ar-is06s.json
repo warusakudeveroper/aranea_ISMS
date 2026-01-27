@@ -1,9 +1,26 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://aranea.sdk/schemas/types/aranea_ar-is06s.json",
+  "name": "aranea_ar-is06s",
+  "displayName": "Relay & Switch Controller",
   "title": "aranea_ar-is06s Relay & Switch Controller",
   "description": "4ch D/P出力 + 2ch I/O コントローラー（PWM対応）",
   "type": "object",
+  "productType": "006",
+  "productCodes": ["0200"],
+  "capabilities": ["output", "input", "pwm", "pulse", "trigger"],
+  "semanticTags": ["接点出力", "PWM", "リレー", "物理入力", "調光"],
+  "features": [
+    "4ch D/P出力 (Digital/PWM切替)",
+    "2ch I/O (Input/Output切替)",
+    "PWM調光制御",
+    "モーメンタリ/オルタネート切替",
+    "有効期限制御",
+    "物理スイッチ連動",
+    "PIN Enable/Disable制御",
+    "Web UI",
+    "OTA対応"
+  ],
 
   "metadata": {
     "productType": "006",

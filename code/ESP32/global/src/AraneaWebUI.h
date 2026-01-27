@@ -217,6 +217,7 @@ protected:
   // HTML/CSS/JS 生成
   // ========================================
   String generateHTML();
+  void sendHTMLChunked();  // チャンク転送でヒープ断片化防止
   String generateCSS();
   String generateJS();
   String generateLogoSVG();

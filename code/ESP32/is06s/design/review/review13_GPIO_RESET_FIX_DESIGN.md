@@ -270,8 +270,16 @@ setPinType()
 - [x] SSoT: 本設計書通りに実装
 - [x] テスト実行済み（ソフトウェアレベル）
 - [x] 回帰テストパス（Web UI, /api/status正常）
-- [ ] コミット・プッシュ完了
+- [x] コミット・プッシュ完了 (1cbb283)
+- [x] SPI干渉確認済み（sigOutId=256, SPI未使用）
 - [ ] 物理電圧測定（要ユーザー確認）
+
+### 追加調査結果 (review14にて実施)
+
+GPIO診断API全CH ON時:
+- 全CH: sigOutId=256 (Simple GPIO, SPI干渉なし)
+- 全CH: gpioOutBit=1, gpioInBit=1, transitions=0
+- **結論**: ソフトウェア側は完全正常、物理電圧問題はハードウェア起因
 
 ---
 
