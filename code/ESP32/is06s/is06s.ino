@@ -46,7 +46,7 @@ static const char* PRODUCT_TYPE = "006";
 static const char* PRODUCT_CODE = "0200";
 static const char* ARANEA_DEVICE_TYPE = "aranea_ar-is06s";
 static const char* DEVICE_SHORT_NAME = "ar-is06s";
-static const char* FIRMWARE_VERSION = "1.0.0";
+static const char* FIRMWARE_VERSION = "0.7.0";
 
 // ========================================
 // ピン定義

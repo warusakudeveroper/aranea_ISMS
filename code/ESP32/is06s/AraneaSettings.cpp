@@ -24,6 +24,12 @@ void AraneaSettings::initDefaults(SettingManager& settings) {
         settings.setString("wifi_pass2", ARANEA_DEFAULT_WIFI_PASS_2);
         settings.setString("wifi_ssid3", ARANEA_DEFAULT_WIFI_SSID_3);
         settings.setString("wifi_pass3", ARANEA_DEFAULT_WIFI_PASS_3);
+        settings.setString("wifi_ssid4", ARANEA_DEFAULT_WIFI_SSID_4);
+        settings.setString("wifi_pass4", ARANEA_DEFAULT_WIFI_PASS_4);
+        settings.setString("wifi_ssid5", ARANEA_DEFAULT_WIFI_SSID_5);
+        settings.setString("wifi_pass5", ARANEA_DEFAULT_WIFI_PASS_5);
+        settings.setString("wifi_ssid6", ARANEA_DEFAULT_WIFI_SSID_6);
+        settings.setString("wifi_pass6", ARANEA_DEFAULT_WIFI_PASS_6);
         Serial.printf("[AraneaSettings] WiFi defaults applied: %s\n", ARANEA_DEFAULT_WIFI_SSID_1);
     } else {
         Serial.printf("[AraneaSettings] WiFi already configured: %s\n",
