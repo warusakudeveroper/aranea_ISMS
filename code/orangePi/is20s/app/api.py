@@ -336,6 +336,40 @@ def create_router(
         )
         return {"ok": True, "primary_only": primary_only, "exclude_tracker": exclude_tracker, **stats}
 
+    @router.get("/api/capture/entries")
+    async def get_capture_entries(
+        request: Request,
+        since: Optional[str] = None,
+        limit: int = 1000,
+        primary_only: bool = False,
+    ):
+        """
+        NDJSONログから個別トラフィックエントリを読み出す
+        OSノイズフィルタ適用・カーソルベースページネーション対応
+
+        Args:
+            since: カーソル（エントリID or ISO8601タイムスタンプ）。なしなら最古から。
+            limit: 返すエントリ数上限（デフォルト1000, 最大5000）
+            primary_only: Trueの場合、auxiliary通信を除外
+        """
+        client_ip = request.client.host if request.client else ""
+        if not _ip_allowed(client_ip, cfg.access.allowed_sources):
+            raise HTTPException(status_code=403, detail="forbidden")
+        if not capture_manager:
+            return {"ok": False, "error": "capture not configured"}
+        if not capture_manager.file_logger:
+            return {"ok": False, "error": "file logging not enabled"}
+
+        limit = min(max(limit, 1), 5000)
+
+        result = capture_manager.file_logger.read_entries(
+            since=since,
+            limit=limit,
+            primary_only=primary_only,
+            get_service_func=get_service_by_domain_full,
+        )
+        return {"ok": True, **result}
+
     # ========== 脅威インテリジェンスAPI ==========
 
     @router.get("/api/threat/status")

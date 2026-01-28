@@ -212,6 +212,118 @@ def generate_event_id(room_no: str, tz: ZoneInfo) -> str:
     return f"{room_no}{ts}-{rand4}"
 
 
+# OSノイズポート（NTP, DHCP, mDNS, LLMNR, SSDP, NetBIOS）
+_OS_NOISE_PORTS = frozenset({123, 67, 68, 5353, 5355, 1900, 137, 138, 139})
+
+# OSノイズプロトコル番号（ARP=非IP, IGMP=2）
+_OS_NOISE_PROTOS = frozenset({"arp", "2"})
+
+# OS自動更新ドメインサフィックス
+_OS_UPDATE_SUFFIXES = (
+    "windowsupdate.com", "update.microsoft.com",
+    "swscan.apple.com", "swdist.apple.com",
+    "mesu.apple.com", "gdmf.apple.com",
+    "xp.apple.com",
+)
+
+# OCSP/CRLプレフィックス
+_OCSP_CRL_PREFIXES = ("ocsp.", "crl.")
+
+
+def is_os_noise(event: Dict[str, Any]) -> bool:
+    """
+    OSノイズ判定: NTP/DHCP/mDNS/LLMNR/SSDP/NetBIOS/ARP/IGMP/OS更新/OCSP/CRL
+    ファイルログには全て記録済みなので、APIレスポンスから除外する用途。
+
+    Returns:
+        True: OSノイズとして除外すべき
+    """
+    # F1-F7,F11: ポートベース
+    dst_port = event.get("dst_port", "")
+    if dst_port:
+        try:
+            if int(dst_port) in _OS_NOISE_PORTS:
+                return True
+        except (ValueError, TypeError):
+            pass
+
+    # F3,F10: プロトコルベース
+    protocol = (event.get("protocol") or "").lower()
+    if protocol in _OS_NOISE_PROTOS:
+        return True
+
+    # ドメイン取得
+    domain = (
+        event.get("http_host")
+        or event.get("tls_sni")
+        or event.get("resolved_domain")
+        or event.get("dns_qry")
+        or ""
+    ).lower()
+
+    if domain:
+        # F8: OS自動更新
+        for suffix in _OS_UPDATE_SUFFIXES:
+            if domain.endswith(suffix) or domain.endswith("." + suffix):
+                return True
+
+        # F9: OCSP/CRL
+        for prefix in _OCSP_CRL_PREFIXES:
+            if domain.startswith(prefix):
+                return True
+
+    return False
+
+
+def map_event_to_entry(event: Dict[str, Any], get_service_func=None) -> Dict[str, Any]:
+    """
+    内部イベント形式 → APIレスポンス用エントリに変換
+
+    Args:
+        event: NDJSONから読んだイベント辞書
+        get_service_func: ドメインからservice/category/roleを取得する関数
+    """
+    # ドメイン解決（優先順: http_host > tls_sni > resolved_domain > dns_qry）
+    domain = (
+        event.get("http_host")
+        or event.get("tls_sni")
+        or event.get("resolved_domain")
+        or event.get("dns_qry")
+        or ""
+    )
+
+    # service/category動的解決
+    category = event.get("domain_category", "")
+    service = event.get("domain_service", "")
+    if get_service_func and domain:
+        svc, cat, _ = get_service_func(domain)
+        if svc:
+            service = svc
+            category = cat or ""
+
+    # dst_port int変換
+    raw_port = event.get("dst_port", "")
+    try:
+        dst_port = int(raw_port) if raw_port else None
+    except (ValueError, TypeError):
+        dst_port = None
+
+    return {
+        "id": event.get("id"),
+        "timestamp": event.get("time"),
+        "room": event.get("room_no"),
+        "category": category or None,
+        "service": service or None,
+        "count": 1,
+        "src_ip": event.get("src_ip"),
+        "dst_ip": event.get("dst_ip"),
+        "dst_domain": domain or None,
+        "protocol": event.get("protocol"),
+        "dst_port": dst_port,
+        "bytes": None,
+    }
+
+
 def expand_segment_ips(rooms: Dict[str, str]) -> Dict[str, str]:
     """
     CIDR記法およびIP末尾0を/24セグメント全体（1-254）に展開
@@ -735,6 +847,128 @@ class CaptureFileLogger:
             "min_timestamp": min_ts.isoformat() if min_ts else None,
             "max_timestamp": max_ts.isoformat() if max_ts else None,
             "file_count": len(files),
+        }
+
+    def read_entries(
+        self,
+        since: Optional[str] = None,
+        limit: int = 1000,
+        primary_only: bool = False,
+        get_service_func=None,
+    ) -> Dict[str, Any]:
+        """
+        NDJSONログからエントリを読み出す（カーソルベースページネーション）
+
+        Args:
+            since: カーソル（エントリID or ISO8601タイムスタンプ）。Noneなら最古から。
+            limit: 返すエントリ数上限（デフォルト1000）
+            primary_only: Trueの場合、auxiliary通信を除外
+            get_service_func: ドメインからservice/category/roleを取得する関数
+
+        Returns:
+            {entries, has_more, next_cursor, total_returned, filter_applied}
+        """
+        files = self._get_log_files()  # 古い順
+
+        # since がISO8601タイムスタンプかIDかを判定
+        since_epoch: Optional[float] = None
+        since_id: Optional[str] = None
+        if since:
+            # ISO8601の場合: "2025-" や "2026-" で始まる
+            if since[:4].isdigit() and len(since) > 10 and ("T" in since or "-" in since[4:5]):
+                try:
+                    dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                    since_epoch = dt.timestamp()
+                except (ValueError, TypeError):
+                    since_id = since
+            else:
+                since_id = since
+
+        entries: List[Dict[str, Any]] = []
+        found_cursor = since is None  # sinceがNoneなら最初から収集
+        target_count = limit + 1  # has_more判定用に1件多く読む
+
+        for fpath in files:
+            if len(entries) >= target_count:
+                break
+            try:
+                with fpath.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        # カーソル探索フェーズ
+                        if not found_cursor:
+                            if since_id:
+                                if event.get("id") == since_id:
+                                    found_cursor = True
+                                continue
+                            elif since_epoch is not None:
+                                event_epoch = event.get("epoch", 0)
+                                try:
+                                    if float(event_epoch) > since_epoch:
+                                        found_cursor = True
+                                        # このイベントから収集開始（fall through）
+                                    else:
+                                        continue
+                                except (ValueError, TypeError):
+                                    continue
+
+                        # フィルタ1: OSノイズ除外
+                        if is_os_noise(event):
+                            continue
+
+                        # フィルタ2: primary_only（auxiliary除外）
+                        if primary_only:
+                            role = event.get("domain_role", "primary")
+                            if role == "auxiliary":
+                                # 辞書から動的に再判定
+                                if get_service_func:
+                                    domain = (
+                                        event.get("http_host")
+                                        or event.get("tls_sni")
+                                        or event.get("resolved_domain")
+                                        or event.get("dns_qry")
+                                        or ""
+                                    )
+                                    if domain:
+                                        _, _, r = get_service_func(domain)
+                                        role = r or "primary"
+                                if role == "auxiliary":
+                                    continue
+
+                        # マッピング
+                        entry = map_event_to_entry(event, get_service_func)
+                        entries.append(entry)
+
+                        if len(entries) >= target_count:
+                            break
+
+            except Exception as e:
+                logger.warning("Failed to read log file %s: %s", fpath.name, e)
+                continue
+
+        # has_more判定
+        has_more = len(entries) > limit
+        if has_more:
+            entries = entries[:limit]
+
+        next_cursor = entries[-1]["id"] if entries and has_more else None
+
+        return {
+            "entries": entries,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+            "total_returned": len(entries),
+            "filter_applied": {
+                "primary_only": primary_only,
+                "os_noise_excluded": True,
+            },
         }
 
 
@@ -1343,4 +1577,6 @@ __all__ = [
     "load_watch_config",
     "save_watch_config",
     "DEFAULT_WATCH_CONFIG",
+    "is_os_noise",
+    "map_event_to_entry",
 ]
